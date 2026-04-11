@@ -1,0 +1,64 @@
+# ── Progetto specifico ────────────────────────────────────────────────────────
+
+# Credenziali — NON caricare mai
+.env
+
+# Sessione Telegram (token di autenticazione)
+*.session
+*.session-journal
+
+# Impostazioni locali utente (gruppo selezionato, esempi segnali)
+settings.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+MANIFEST
+build/
+dist/
+.eggs/
+.installed.cfg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Ambienti virtuali ─────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.pixi/
+__pypackages__/
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+.pytest_cache/
+
+# ── Type checker / linter ─────────────────────────────────────────────────────
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+.spyderproject
+.spyproject
+.ropeproject
+cython_debug/
