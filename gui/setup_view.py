@@ -413,6 +413,10 @@ class _CredentialsDialog(tk.Toplevel):
         self.destroy()
 
 
+class _AuthCancelled(Exception):
+    """Sollevata quando l'utente chiude il dialog prima di completare l'auth."""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Dialog: Autenticazione Telegram
 # ─────────────────────────────────────────────────────────────────────────────
@@ -453,6 +457,8 @@ class _TelegramAuthDialog(tk.Toplevel):
             info = loop.run_until_complete(self._async_auth())
             if not self._closed:
                 self.after(0, lambda i=info: self._finish(i))
+        except _AuthCancelled:
+            pass   # utente ha chiuso il dialog
         except Exception as exc:
             if not self._closed:
                 self.after(0, lambda e=exc: self._show_error(str(e)))
@@ -460,36 +466,35 @@ class _TelegramAuthDialog(tk.Toplevel):
             loop.close()
 
     async def _async_auth(self) -> str:
+        """
+        Usa client.start() con callback async: Telethon gestisce internamente
+        la sequenza connect → phone → OTP → 2FA evitando problemi di serializzazione.
+        """
         import config  # noqa: PLC0415
         from telethon import TelegramClient
-        from telethon.errors import SessionPasswordNeededError
+
+        async def _phone_cb() -> str:
+            self.after(0, self._show_phone_step)
+            return await self._get_input()
+
+        async def _code_cb() -> str:
+            self.after(0, self._show_code_step)
+            return await self._get_input()
+
+        async def _pwd_cb() -> str:
+            self.after(0, self._show_2fa_step)
+            return await self._get_input()
 
         client = TelegramClient(
             config.TELEGRAM_SESSION,
             config.TELEGRAM_API_ID,
             config.TELEGRAM_API_HASH,
         )
-        await client.connect()
-
-        if not await client.is_user_authorized():
-            # fase 1 — numero di telefono
-            self.after(0, self._show_phone_step)
-            phone = await self._get_input()
-
-            result   = await client.send_code_request(phone)
-            ph_hash  = result.phone_code_hash
-
-            # fase 2 — codice OTP
-            self.after(0, self._show_code_step)
-            code = await self._get_input()
-
-            try:
-                await client.sign_in(phone, code, phone_code_hash=ph_hash)
-            except SessionPasswordNeededError:
-                # fase 3 — password 2FA
-                self.after(0, self._show_2fa_step)
-                pwd = await self._get_input()
-                await client.sign_in(password=pwd)
+        await client.start(
+            phone=_phone_cb,
+            code_callback=_code_cb,
+            password=_pwd_cb,
+        )
 
         me = await client.get_me()
         await client.disconnect()
@@ -498,7 +503,10 @@ class _TelegramAuthDialog(tk.Toplevel):
     async def _get_input(self) -> str:
         """Attende input dalla GUI senza bloccare l'event loop."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._wait_sync)
+        result = await loop.run_in_executor(None, self._wait_sync)
+        if self._closed:
+            raise _AuthCancelled()
+        return result
 
     def _wait_sync(self) -> str:
         self._input_event.clear()
@@ -591,6 +599,8 @@ class _TelegramAuthDialog(tk.Toplevel):
 
     def _retry(self):
         self._closed = False
+        self._input_value = ''
+        self._input_event.clear()
         self._show_loading('Connessione a Telegram…')
         threading.Thread(target=self._run_auth, daemon=True, name='TgAuth').start()
 
