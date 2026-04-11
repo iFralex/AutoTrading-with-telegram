@@ -10,15 +10,22 @@ import { MT5Step } from "./steps/MT5Step"
 import { CompleteStep } from "./steps/CompleteStep"
 
 export interface SetupData {
+  // Step 1 — Telegram API
   apiId: string
   apiHash: string
+  // Step 2 — autenticazione Telegram
   phone: string
   code: string
+  loginKey: string   // da request_code
+  userId: string     // da verify_code
+  // Step 3 — gruppo
   groupId: string
   groupName: string
+  // Step 4 — MetaTrader 5
   mt5Login: string
   mt5Password: string
   mt5Server: string
+  mt5AccountName: string  // da verify_mt5 (per il riepilogo finale)
 }
 
 export interface StepProps {
@@ -26,8 +33,6 @@ export interface StepProps {
   onDataChange: (partial: Partial<SetupData>) => void
   onNext: () => void
   onBack: () => void
-  isLoading: boolean
-  error: string | null
 }
 
 const INDICATOR_STEPS = [
@@ -39,45 +44,33 @@ const INDICATOR_STEPS = [
 
 export function SetupWizard() {
   const [step, setStep] = useState(0)
-  const [isLoading] = useState(false)
-  const [error] = useState<string | null>(null)
   const [data, setData] = useState<SetupData>({
     apiId: "",
     apiHash: "",
     phone: "",
     code: "",
+    loginKey: "",
+    userId: "",
     groupId: "",
     groupName: "",
     mt5Login: "",
     mt5Password: "",
     mt5Server: "",
+    mt5AccountName: "",
   })
 
-  const updateData = (partial: Partial<SetupData>) => {
+  const updateData = (partial: Partial<SetupData>) =>
     setData(prev => ({ ...prev, ...partial }))
-  }
 
   const goNext = () => setStep(s => Math.min(s + 1, 5))
   const goBack = () => setStep(s => Math.max(s - 1, 0))
 
-  const props: StepProps = {
-    data,
-    onDataChange: updateData,
-    onNext: goNext,
-    onBack: goBack,
-    isLoading,
-    error,
-  }
-
-  const showIndicator = step >= 1 && step <= 4
+  const props: StepProps = { data, onDataChange: updateData, onNext: goNext, onBack: goBack }
 
   return (
     <div className="w-full">
-      {showIndicator && (
-        <StepIndicator
-          steps={INDICATOR_STEPS}
-          currentStep={step - 1}
-        />
+      {step >= 1 && step <= 4 && (
+        <StepIndicator steps={INDICATOR_STEPS} currentStep={step - 1} />
       )}
       <div key={step} className="step-enter">
         {step === 0 && <WelcomeStep {...props} />}

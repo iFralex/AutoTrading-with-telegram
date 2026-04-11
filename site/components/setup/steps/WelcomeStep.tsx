@@ -62,7 +62,7 @@ export function WelcomeStep({ onNext }: StepProps) {
         </Button>
 
         <p className="text-xs text-muted-foreground -mt-2">
-          Ci vorranno circa 3 minuti
+          Circa 3 minuti
         </p>
       </CardContent>
     </Card>

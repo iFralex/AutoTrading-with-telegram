@@ -1,18 +1,19 @@
 """
 Route /api/setup/*
 
-Corrispondono passo-passo al wizard Next.js:
-
-  POST /api/setup/telegram/request-code   → step 3a: invia OTP
-  POST /api/setup/telegram/verify-code    → step 3b: verifica OTP
-  POST /api/setup/telegram/verify-password → step 3b 2FA
-  GET  /api/setup/telegram/groups         → step 4:  lista gruppi
-  POST /api/setup/complete                → step 5:  salva tutto e avvia listener
+  POST /api/setup/telegram/request-code     → step 2: invia OTP
+  POST /api/setup/telegram/verify-code      → step 2: verifica OTP
+  POST /api/setup/telegram/verify-password  → step 2: 2FA opzionale
+  GET  /api/setup/telegram/groups           → step 3: lista gruppi reali
+  POST /api/setup/mt5/verify                → step 4: verifica credenziali MT5
+  POST /api/setup/complete                  → step 5: salva tutto e avvia listener
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,6 +23,9 @@ from vps.services.user_store import UserStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/setup", tags=["setup"])
+
+# Thread pool dedicato alle chiamate bloccanti MT5
+_mt5_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mt5-verify")
 
 
 # ── Dependency helpers ───────────────────────────────────────────────────────
@@ -34,7 +38,7 @@ def get_store(request: Request) -> UserStore:
     return request.app.state.user_store
 
 
-# ── Modelli request/response ─────────────────────────────────────────────────
+# ── Modelli ──────────────────────────────────────────────────────────────────
 
 class RequestCodeBody(BaseModel):
     api_id: int = Field(..., gt=0)
@@ -52,6 +56,12 @@ class VerifyPasswordBody(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+class MT5VerifyBody(BaseModel):
+    login: int = Field(..., gt=0)
+    password: str = Field(..., min_length=1)
+    server: str = Field(..., min_length=1)
+
+
 class CompleteSetupBody(BaseModel):
     login_key: str
     user_id: str
@@ -65,23 +75,19 @@ class CompleteSetupBody(BaseModel):
     mt5_server: str | None = None
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
+# ── Telegram endpoints ───────────────────────────────────────────────────────
 
 @router.post("/telegram/request-code")
 async def request_code(
     body: RequestCodeBody,
     tm: TelegramManager = Depends(get_telegram),
 ):
-    """
-    Invia il codice OTP al numero di telefono fornito.
-    Ritorna un login_key da usare nei passi successivi.
-    """
+    """Invia il codice OTP al numero di telefono. Ritorna login_key."""
     try:
-        result = tm.request_code(body.api_id, body.api_hash, body.phone)
-        return result
+        return tm.request_code(body.api_id, body.api_hash, body.phone)
     except Exception as exc:
-        logger.error("request_code fallito: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("request_code: %s", exc)
+        raise HTTPException(400, detail=str(exc))
 
 
 @router.post("/telegram/verify-code")
@@ -91,20 +97,19 @@ async def verify_code(
 ):
     """
     Verifica il codice OTP.
-
-    In caso di 2FA ritorna {"error": "2fa_required", "login_key": "..."}
-    con status 202 (il client deve chiamare /verify-password).
+    Se l'account ha 2FA attivo risponde {"error": "2fa_required", "login_key": "..."}
+    e il frontend dovrà chiamare /verify-password.
     """
     try:
-        result = tm.verify_code(body.login_key, body.code)
-        return result
+        return tm.verify_code(body.login_key, body.code)
     except PasswordRequiredError as exc:
+        # Non è un errore: il frontend deve solo chiedere la password 2FA
         return {"error": "2fa_required", "login_key": exc.login_key}
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(422, detail=str(exc))
     except Exception as exc:
-        logger.error("verify_code fallito: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("verify_code: %s", exc)
+        raise HTTPException(400, detail=str(exc))
 
 
 @router.post("/telegram/verify-password")
@@ -114,13 +119,12 @@ async def verify_password(
 ):
     """Completa il login 2FA con la password cloud di Telegram."""
     try:
-        result = tm.verify_password(body.login_key, body.password)
-        return result
+        return tm.verify_password(body.login_key, body.password)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(422, detail=str(exc))
     except Exception as exc:
-        logger.error("verify_password fallito: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("verify_password: %s", exc)
+        raise HTTPException(400, detail=str(exc))
 
 
 @router.get("/telegram/groups")
@@ -128,19 +132,91 @@ async def get_groups(
     login_key: str,
     tm: TelegramManager = Depends(get_telegram),
 ):
-    """
-    Ritorna i gruppi e canali dell'utente autenticato.
-    Richiede che verify_code abbia avuto successo con questo login_key.
-    """
+    """Ritorna i gruppi e canali di cui è membro l'utente autenticato."""
     try:
         groups = tm.get_groups(login_key)
         return {"groups": groups}
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(422, detail=str(exc))
     except Exception as exc:
-        logger.error("get_groups fallito: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("get_groups: %s", exc)
+        raise HTTPException(400, detail=str(exc))
 
+
+# ── MT5 endpoint ─────────────────────────────────────────────────────────────
+
+@router.post("/mt5/verify")
+async def verify_mt5(body: MT5VerifyBody):
+    """
+    Tenta il login a MetaTrader 5 con le credenziali fornite.
+
+    La chiamata è bloccante (libreria MT5 sincrona) quindi viene
+    eseguita in un thread pool separato.
+
+    Returns:
+        {"valid": true, "account": {"name", "server", "balance", "currency"}}
+
+    Errors:
+        503 — libreria MT5 non disponibile (non si è su Windows)
+        400 — credenziali errate o MT5 non in esecuzione
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            _mt5_executor,
+            _mt5_login_sync,
+            body.login,
+            body.password,
+            body.server,
+        )
+        return result
+    except RuntimeError as exc:
+        msg = str(exc)
+        status = 503 if "non disponibile" in msg else 400
+        raise HTTPException(status, detail=msg)
+    except Exception as exc:
+        logger.error("verify_mt5: %s", exc)
+        raise HTTPException(400, detail=str(exc))
+
+
+def _mt5_login_sync(login: int, password: str, server: str) -> dict:
+    """Eseguita in ThreadPoolExecutor — può bloccare senza problemi."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        raise RuntimeError(
+            "Libreria MetaTrader5 non disponibile su questo server "
+            "(richiede Windows con MT5 installato)"
+        )
+
+    try:
+        if not mt5.initialize():
+            code, msg = mt5.last_error()
+            raise RuntimeError(f"MT5 non avviabile: {msg} (codice {code})")
+
+        ok = mt5.login(login, password=password, server=server)
+        if not ok:
+            code, msg = mt5.last_error()
+            raise RuntimeError(f"Login fallito: {msg} (codice {code})")
+
+        info = mt5.account_info()
+        if info is None:
+            raise RuntimeError("Login riuscito ma account_info() ha restituito None")
+
+        return {
+            "valid": True,
+            "account": {
+                "name":     info.name,
+                "server":   info.server,
+                "balance":  round(info.balance, 2),
+                "currency": info.currency,
+            },
+        }
+    finally:
+        mt5.shutdown()
+
+
+# ── Complete endpoint ─────────────────────────────────────────────────────────
 
 @router.post("/complete")
 async def complete_setup(
@@ -150,26 +226,22 @@ async def complete_setup(
 ):
     """
     Finalizza il setup:
-    1. Salva l'utente nel database
-    2. Avvia il listener Telegram sul gruppo selezionato
+    1. Salva l'utente nel database (password MT5 cifrata)
+    2. Promuove la sessione Telegram a definitiva e avvia il listener
     """
     try:
-        # Salva nel DB
-        await store.upsert(
-            {
-                "user_id":      body.user_id,
-                "api_id":       body.api_id,
-                "api_hash":     body.api_hash,
-                "phone":        body.phone,
-                "group_id":     int(body.group_id),
-                "group_name":   body.group_name,
-                "mt5_login":    body.mt5_login,
-                "mt5_password": body.mt5_password,
-                "mt5_server":   body.mt5_server,
-            }
-        )
+        await store.upsert({
+            "user_id":      body.user_id,
+            "api_id":       body.api_id,
+            "api_hash":     body.api_hash,
+            "phone":        body.phone,
+            "group_id":     int(body.group_id),
+            "group_name":   body.group_name,
+            "mt5_login":    body.mt5_login,
+            "mt5_password": body.mt5_password,
+            "mt5_server":   body.mt5_server,
+        })
 
-        # Avvia il listener
         tm.add_user(
             user_id=body.user_id,
             api_id=body.api_id,
@@ -178,9 +250,9 @@ async def complete_setup(
             login_key=body.login_key,
         )
 
-        logger.info("Setup completato per utente %s", body.user_id)
+        logger.info("Setup completato — utente %s attivo", body.user_id)
         return {"status": "active", "user_id": body.user_id}
 
     except Exception as exc:
-        logger.error("complete_setup fallito per %s: %s", body.user_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("complete_setup (%s): %s", body.user_id, exc)
+        raise HTTPException(500, detail=str(exc))
