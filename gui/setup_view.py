@@ -484,8 +484,15 @@ class _TelegramAuthDialog(tk.Toplevel):
         )
 
     def _submit_phone(self):
-        phone = self._entry_var.get().strip()
+        import re
+        raw = self._entry_var.get().strip()
+        if not raw:
+            return
+        # Rimuove caratteri Unicode invisibili e qualsiasi cosa non sia cifra o '+'
+        # (es. U+202A / U+202C che entrano col copia-incolla da alcune app)
+        phone = re.sub(r'[^\d+]', '', raw)
         if not phone:
+            self._show_error('Numero non valido. Usa il formato +39XXXXXXXXXX')
             return
         self._phone = phone
         self._show_loading('Invio codice OTP…')
