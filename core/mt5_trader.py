@@ -15,9 +15,6 @@ try:
 except ImportError:
     MT5_AVAILABLE = False
 
-import config
-
-
 class MT5Trader:
     def __init__(self):
         self.connected = False
@@ -31,6 +28,7 @@ class MT5Trader:
         if not mt5.initialize():
             return False, f'initialize() fallito: {mt5.last_error()}'
 
+        import config  # noqa: PLC0415
         if config.MT5_LOGIN:
             ok = mt5.login(config.MT5_LOGIN, password=config.MT5_PASSWORD, server=config.MT5_SERVER)
             if not ok:
