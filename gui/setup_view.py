@@ -20,7 +20,6 @@ import tkinter as tk
 import webbrowser
 
 from core.group_selector import GroupSelectorDialog
-from core.signal_selector import SignalSelectorDialog
 from gui.widgets import FlatButton
 import core.settings_store as settings_store
 
@@ -70,7 +69,7 @@ def _session_exists() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SetupView(tk.Frame):
-    """Wizard a 4 step; si ricostruisce ad ogni cambio di stato."""
+    """Wizard a 3 step; si ricostruisce ad ogni cambio di stato."""
 
     def __init__(self, parent, on_complete, **kwargs):
         super().__init__(parent, bg=BG, **kwargs)
@@ -80,7 +79,6 @@ class SetupView(tk.Frame):
         gid, gname          = settings_store.get_group()
         self._group_id      = gid
         self._group_name    = gname or ''
-        self._signal_count  = len(settings_store.get_signal_examples())
         self._tg_auth       = _session_exists()   # True se la sessione esiste già
 
         self._render()
@@ -99,7 +97,7 @@ class SetupView(tk.Frame):
         tk.Label(wrap, text='Prima di iniziare, completa la configurazione',
                  bg=BG, fg=FG2, font=F_SUB).pack(anchor='w', pady=(0, 28))
 
-        for n in (1, 2, 3, 4):
+        for n in (1, 2, 3):
             self._build_step_card(wrap, n)
 
         # footer
@@ -149,8 +147,7 @@ class SetupView(tk.Frame):
         mid.pack(side=tk.LEFT, fill=tk.X, expand=True)
         TITLES = ('Credenziali API Telegram',
                   'Autenticazione Telegram',
-                  'Gruppo da monitorare',
-                  'Esempi di segnale')
+                  'Gruppo da monitorare')
         tk.Label(mid, text=TITLES[n - 1],
                  bg=CARD, fg=FG, font=F_B).pack(anchor='w')
         tk.Label(mid, text=self._step_subtitle(n),
@@ -189,73 +186,48 @@ class SetupView(tk.Frame):
                          bg=CARD, fg=FG3, font=F_XS).pack()
             return
 
-        if n == 3:
-            lbl    = 'Cambia  →' if done else 'Seleziona gruppo  →'
-            btn_bg = CARD if done else (ACCENT if active else SURF)
-            btn_fg = FG2  if done else ('white' if active else FG3)
-            kw = dict(highlightbackground=BORDER, highlightthickness=1) if done else {}
-            state = 'normal' if (done or active) else 'disabled'
-            FlatButton(parent, text=lbl, command=self._open_group_selector,
-                       bg=btn_bg, fg=btn_fg,
-                       font=F_SM, padx=14, pady=8,
-                       state=state, **kw).pack()
-            return
-
-        # n == 4
-        if done:
-            FlatButton(parent, text='Modifica  →',
-                       command=self._open_signal_selector,
-                       bg=CARD, fg=FG2, font=F_SM, padx=14, pady=8,
-                       highlightbackground=BORDER, highlightthickness=1).pack()
-        elif self._group_id and self._tg_auth:
-            FlatButton(parent, text='Configura segnali  →',
-                       command=self._open_signal_selector,
-                       bg=ACCENT, fg='white', hover_bg='#6d28d9',
-                       font=F_SM, padx=14, pady=8).pack()
-        else:
-            tk.Label(parent, text='Prima seleziona un gruppo',
-                     bg=CARD, fg=FG3, font=F_XS).pack()
+        # n == 3
+        lbl    = 'Cambia  →' if done else 'Seleziona gruppo  →'
+        btn_bg = CARD if done else (ACCENT if active else SURF)
+        btn_fg = FG2  if done else ('white' if active else FG3)
+        kw = dict(highlightbackground=BORDER, highlightthickness=1) if done else {}
+        state = 'normal' if (done or active) else 'disabled'
+        FlatButton(parent, text=lbl, command=self._open_group_selector,
+                   bg=btn_bg, fg=btn_fg,
+                   font=F_SM, padx=14, pady=8,
+                   state=state, **kw).pack()
 
     # ── state helpers ─────────────────────────────────────────────────────────
 
     def _step_done(self, n: int) -> bool:
         if n == 1: return _config_exists()
         if n == 2: return self._tg_auth
-        if n == 3: return bool(self._group_id)
-        return self._signal_count > 0
+        return bool(self._group_id)
 
     def _step_active(self, n: int) -> bool:
         if n == 1: return not _config_exists()
         if n == 2: return _config_exists() and not self._tg_auth
-        if n == 3: return self._tg_auth and not self._group_id
-        return bool(self._group_id) and self._signal_count == 0
+        return self._tg_auth and not self._group_id
 
     def _step_subtitle(self, n: int) -> str:
         if n == 1:
-            if _config_exists():
-                return 'api_id e api_hash configurati'
-            return 'Necessarie per accedere a Telegram'
+            return 'api_id e api_hash configurati' if _config_exists() else 'Necessarie per accedere a Telegram'
         if n == 2:
             return 'Sessione Telegram attiva' if self._tg_auth else 'Accesso con numero di telefono + codice OTP'
-        if n == 3:
-            return self._group_name if self._group_id else 'Nessun gruppo selezionato'
-        if self._signal_count:
-            return f'{self._signal_count} messaggi di esempio salvati'
-        return 'Indica quali messaggi sono segnali di trading'
+        return self._group_name if self._group_id else 'Nessun gruppo selezionato'
 
     def _step_sub_fg(self, n: int) -> str:
         if n == 1: return FG2 if _config_exists() else FG3
         if n == 2: return GREEN if self._tg_auth else FG3
-        if n == 3: return FG2 if self._group_id else FG3
-        return FG2 if self._signal_count else FG3
+        return FG2 if self._group_id else FG3
 
     def _is_ready(self) -> bool:
-        return _config_exists() and self._tg_auth and bool(self._group_id) and self._signal_count > 0
+        return _config_exists() and self._tg_auth and bool(self._group_id)
 
     def _missing_hint(self) -> str:
-        if not _config_exists():    return 'inserisci le credenziali API'
-        if not self._tg_auth:       return 'autentica Telegram'
-        if not self._group_id:      return 'seleziona un gruppo'
+        if not _config_exists(): return 'inserisci le credenziali API'
+        if not self._tg_auth:    return 'autentica Telegram'
+        if not self._group_id:   return 'seleziona un gruppo'
         return ''
 
     # ── dialog handlers ───────────────────────────────────────────────────────
@@ -278,15 +250,6 @@ class SetupView(tk.Frame):
             self._group_id, self._group_name = gid, name
             self._render()
         GroupSelectorDialog(self._win, on_select=on_select)
-
-    def _open_signal_selector(self):
-        if not self._group_id:
-            return
-        def on_save(examples: list):
-            self._signal_count = len(examples)
-            self._render()
-        SignalSelectorDialog(self._win, group_id=self._group_id,
-                             group_name=self._group_name, on_save=on_save)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -67,8 +67,7 @@ class App(tk.Tk):
     # ── setup → main ──────────────────────────────────────────────────────────
 
     def _needs_setup(self) -> bool:
-        return (not _config_exists() or not _session_exists()
-                or not self._group_id or not self._signal_count)
+        return not _config_exists() or not _session_exists() or not self._group_id
 
     def _show_setup(self):
         self.title('Telegram → MT5  ·  Configurazione')
