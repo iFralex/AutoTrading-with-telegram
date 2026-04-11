@@ -426,8 +426,8 @@ class _TelegramAuthDialog(tk.Toplevel):
     Guida l'utente nell'autenticazione Telegram in 3 fasi:
       1. Numero di telefono  →  2. Codice OTP  →  3. Password 2FA (opzionale)
 
-    L'intera sequenza Telethon gira in un thread background;
-    threading.Event sincronizza i passi con la GUI.
+    Sincronizzazione: asyncio.Event + loop.call_soon_threadsafe
+    (evita il blocco di executor thread tipico di threading.Event + run_in_executor).
     """
 
     def __init__(self, parent, on_success):
@@ -440,10 +440,11 @@ class _TelegramAuthDialog(tk.Toplevel):
         self.grab_set()
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
-        self._on_success    = on_success
-        self._input_event   = threading.Event()
-        self._input_value   = ''
-        self._closed        = False
+        self._on_success  = on_success
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._async_event: asyncio.Event | None = None
+        self._input_value = ''
+        self._closed      = False
 
         self._show_loading('Connessione a Telegram…')
         threading.Thread(target=self._run_auth, daemon=True, name='TgAuth').start()
@@ -453,25 +454,23 @@ class _TelegramAuthDialog(tk.Toplevel):
     def _run_auth(self):
         import traceback
         loop = asyncio.SelectorEventLoop(selectors.SelectSelector())
+        self._loop = loop
         asyncio.set_event_loop(loop)
         try:
             info = loop.run_until_complete(self._async_auth())
             if not self._closed:
                 self.after(0, lambda i=info: self._finish(i))
         except _AuthCancelled:
-            pass   # utente ha chiuso il dialog
+            pass
         except Exception as exc:
-            traceback.print_exc()   # visibile nella console per debug
+            traceback.print_exc()
             if not self._closed:
                 self.after(0, lambda e=exc: self._show_error(str(e)))
         finally:
+            self._loop = None
             loop.close()
 
     async def _async_auth(self) -> str:
-        """
-        Usa client.start() con callback async: Telethon gestisce internamente
-        la sequenza connect → phone → OTP → 2FA evitando problemi di serializzazione.
-        """
         import config  # noqa: PLC0415
         from telethon import TelegramClient
 
@@ -497,22 +496,19 @@ class _TelegramAuthDialog(tk.Toplevel):
             code_callback=_code_cb,
             password=_pwd_cb,
         )
-
         me = await client.get_me()
         await client.disconnect()
         return f'{me.first_name} ({me.phone})'
 
     async def _get_input(self) -> str:
-        """Attende input dalla GUI senza bloccare l'event loop."""
-        loop = asyncio.get_running_loop()   # più affidabile di get_event_loop() in Python 3.10+
-        result = await loop.run_in_executor(None, self._wait_sync)
+        """
+        Crea un asyncio.Event, poi attende che il main thread lo setti
+        tramite call_soon_threadsafe — nessun executor thread bloccato.
+        """
+        self._async_event = asyncio.Event()
+        await self._async_event.wait()
         if self._closed:
             raise _AuthCancelled()
-        return result
-
-    def _wait_sync(self) -> str:
-        self._input_event.clear()
-        self._input_event.wait()
         return self._input_value
 
     def _submit(self):
@@ -520,8 +516,9 @@ class _TelegramAuthDialog(tk.Toplevel):
         if not val:
             return
         self._input_value = val
-        self._input_event.set()
-        # Deferred: evita di distruggere il widget mentre il click è ancora in elaborazione
+        # Notifica il loop asyncio dal main thread in modo thread-safe
+        if self._loop is not None and self._async_event is not None:
+            self._loop.call_soon_threadsafe(self._async_event.set)
         self.after(10, lambda: self._show_loading('Verifica in corso…'))
 
     # ── fasi UI ───────────────────────────────────────────────────────────────
@@ -601,16 +598,18 @@ class _TelegramAuthDialog(tk.Toplevel):
         self.destroy()
 
     def _retry(self):
-        self._closed = False
+        self._closed      = False
         self._input_value = ''
-        self._input_event.clear()
+        self._async_event = None
+        self._loop        = None
         self._show_loading('Connessione a Telegram…')
         threading.Thread(target=self._run_auth, daemon=True, name='TgAuth').start()
 
     def _on_close(self):
         self._closed = True
-        self._input_value = ''
-        self._input_event.set()   # sblocca eventuale wait_sync pendente
+        # sblocca eventuale _get_input pendente
+        if self._loop is not None and self._async_event is not None:
+            self._loop.call_soon_threadsafe(self._async_event.set)
         self.destroy()
 
 
