@@ -413,27 +413,23 @@ class _CredentialsDialog(tk.Toplevel):
         self.destroy()
 
 
-class _AuthCancelled(Exception):
-    """Sollevata quando l'utente chiude il dialog prima di completare l'auth."""
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  Dialog: Autenticazione Telegram
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _TelegramAuthDialog(tk.Toplevel):
     """
-    Guida l'utente nell'autenticazione Telegram in 3 fasi:
-      1. Numero di telefono  →  2. Codice OTP  →  3. Password 2FA (opzionale)
+    Autenticazione Telegram in 3 fasi: telefono → OTP → 2FA (opzionale).
 
-    Sincronizzazione: asyncio.Event + loop.call_soon_threadsafe
-    (evita il blocco di executor thread tipico di threading.Event + run_in_executor).
+    Architettura: loop asyncio persistente (run_forever) in un thread daemon.
+    Ogni click di pulsante sottomette UNA coroutine indipendente via
+    run_coroutine_threadsafe — nessun blocco, nessuna sincronizzazione complessa.
     """
 
     def __init__(self, parent, on_success):
         super().__init__(parent)
         self.title('Autenticazione Telegram')
-        self.geometry('440x260')
+        self.geometry('440x280')
         self.configure(bg=BG)
         self.resizable(False, False)
         self.transient(parent)
@@ -441,113 +437,138 @@ class _TelegramAuthDialog(tk.Toplevel):
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
         self._on_success  = on_success
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._async_event: asyncio.Event | None = None
-        self._input_value = ''
         self._closed      = False
+        self._client      = None
+        self._phone       = None
+        self._phone_hash  = None
 
-        self._show_loading('Connessione a Telegram…')
-        threading.Thread(target=self._run_auth, daemon=True, name='TgAuth').start()
+        # Loop asyncio persistente — riceve coroutine dall'esterno
+        self._loop = asyncio.SelectorEventLoop(selectors.SelectSelector())
+        threading.Thread(target=self._loop.run_forever,
+                         daemon=True, name='TgAuthLoop').start()
 
-    # ── thread background ─────────────────────────────────────────────────────
+        # Il primo step è solo UI — nessuna rete necessaria
+        self._show_phone_step()
 
-    def _run_auth(self):
-        import traceback
-        loop = asyncio.SelectorEventLoop(selectors.SelectSelector())
-        self._loop = loop
-        asyncio.set_event_loop(loop)
-        try:
-            info = loop.run_until_complete(self._async_auth())
-            if not self._closed:
-                self.after(0, lambda i=info: self._finish(i))
-        except _AuthCancelled:
-            pass
-        except Exception as exc:
-            traceback.print_exc()
-            if not self._closed:
-                self.after(0, lambda e=exc: self._show_error(str(e)))
-        finally:
-            self._loop = None
-            loop.close()
+    # ── sottomissione coroutine ───────────────────────────────────────────────
 
-    async def _async_auth(self) -> str:
-        import config  # noqa: PLC0415
-        from telethon import TelegramClient
-
-        async def _phone_cb() -> str:
-            self.after(0, self._show_phone_step)
-            return await self._get_input()
-
-        async def _code_cb() -> str:
-            self.after(0, self._show_code_step)
-            return await self._get_input()
-
-        async def _pwd_cb() -> str:
-            self.after(0, self._show_2fa_step)
-            return await self._get_input()
-
-        client = TelegramClient(
-            config.TELEGRAM_SESSION,
-            config.TELEGRAM_API_ID,
-            config.TELEGRAM_API_HASH,
-        )
-        await client.start(
-            phone=_phone_cb,
-            code_callback=_code_cb,
-            password=_pwd_cb,
-        )
-        me = await client.get_me()
-        await client.disconnect()
-        return f'{me.first_name} ({me.phone})'
-
-    async def _get_input(self) -> str:
+    def _run(self, coro, *, on_done, on_error=None):
         """
-        Crea un asyncio.Event, poi attende che il main thread lo setti
-        tramite call_soon_threadsafe — nessun executor thread bloccato.
+        Sottomette `coro` al loop background.
+        on_done(result) e on_error(exc_str) vengono chiamati nel main thread.
         """
-        self._async_event = asyncio.Event()
-        await self._async_event.wait()
-        if self._closed:
-            raise _AuthCancelled()
-        return self._input_value
+        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
 
-    def _submit(self):
-        val = self._entry_var.get().strip()
-        if not val:
-            return
-        self._input_value = val
-        # Notifica il loop asyncio dal main thread in modo thread-safe
-        if self._loop is not None and self._async_event is not None:
-            self._loop.call_soon_threadsafe(self._async_event.set)
-        self.after(10, lambda: self._show_loading('Verifica in corso…'))
+        def _cb(f):
+            if self._closed:
+                return
+            try:
+                result = f.result()
+                self.after(0, lambda r=result: on_done(r))
+            except Exception as exc:
+                import traceback
+                traceback.print_exc()
+                handler = on_error or self._show_error
+                self.after(0, lambda e=exc: handler(str(e)))
 
-    # ── fasi UI ───────────────────────────────────────────────────────────────
+        fut.add_done_callback(_cb)
+
+    # ── fase 1: telefono ──────────────────────────────────────────────────────
 
     def _show_phone_step(self):
         self._show_input(
             title    = 'Numero di telefono',
-            subtitle = 'Inserisci il numero con prefisso internazionale (es. +39 333 1234567)',
+            subtitle = 'Inserisci il numero con prefisso internazionale\n(es. +39 333 1234567)',
             btn_text = 'Invia codice OTP  →',
-            secret   = False,
+            on_submit = self._submit_phone,
         )
+
+    def _submit_phone(self):
+        phone = self._entry_var.get().strip()
+        if not phone:
+            return
+        self._phone = phone
+        self._show_loading('Invio codice OTP…')
+        self._run(self._coro_send_code(phone),
+                  on_done=lambda _: self._show_code_step())
+
+    async def _coro_send_code(self, phone: str):
+        import config  # noqa: PLC0415
+        from telethon import TelegramClient
+        self._client = TelegramClient(
+            config.TELEGRAM_SESSION,
+            config.TELEGRAM_API_ID,
+            config.TELEGRAM_API_HASH,
+        )
+        await self._client.connect()
+        result = await self._client.send_code_request(phone)
+        self._phone_hash = result.phone_code_hash
+
+    # ── fase 2: codice OTP ────────────────────────────────────────────────────
 
     def _show_code_step(self):
         self._show_input(
             title    = 'Codice OTP',
             subtitle = 'Inserisci il codice ricevuto via SMS o nell\'app Telegram',
             btn_text = 'Verifica  →',
-            secret   = False,
+            on_submit = self._submit_code,
         )
+
+    def _submit_code(self):
+        code = self._entry_var.get().strip()
+        if not code:
+            return
+        self._show_loading('Verifica codice…')
+        self._run(self._coro_sign_in(code),
+                  on_done=self._after_sign_in)
+
+    async def _coro_sign_in(self, code: str):
+        from telethon.errors import SessionPasswordNeededError
+        try:
+            await self._client.sign_in(
+                self._phone, code, phone_code_hash=self._phone_hash)
+            me = await self._client.get_me()
+            await self._client.disconnect()
+            return ('ok', f'{me.first_name} ({me.phone})')
+        except SessionPasswordNeededError:
+            return ('2fa', None)
+
+    def _after_sign_in(self, result):
+        kind, data = result
+        if kind == 'ok':
+            self._finish(data)
+        else:
+            self._show_2fa_step()
+
+    # ── fase 3: 2FA (opzionale) ───────────────────────────────────────────────
 
     def _show_2fa_step(self):
         self._show_input(
             title    = 'Password 2FA',
             subtitle = 'Il tuo account ha la verifica in due passaggi attivata',
             btn_text = 'Accedi  →',
+            on_submit = self._submit_2fa,
             secret   = True,
         )
 
-    def _show_input(self, *, title: str, subtitle: str, btn_text: str, secret: bool):
+    def _submit_2fa(self):
+        pwd = self._entry_var.get().strip()
+        if not pwd:
+            return
+        self._show_loading('Accesso…')
+        self._run(self._coro_sign_in_2fa(pwd),
+                  on_done=lambda info: self._finish(info))
+
+    async def _coro_sign_in_2fa(self, pwd: str):
+        await self._client.sign_in(password=pwd)
+        me = await self._client.get_me()
+        await self._client.disconnect()
+        return f'{me.first_name} ({me.phone})'
+
+    # ── UI helpers ────────────────────────────────────────────────────────────
+
+    def _show_input(self, *, title: str, subtitle: str,
+                    btn_text: str, on_submit, secret: bool = False):
         self._clear()
         pad = tk.Frame(self, bg=BG, padx=32, pady=24)
         pad.pack(fill=tk.BOTH, expand=True)
@@ -565,15 +586,15 @@ class _TelegramAuthDialog(tk.Toplevel):
                        highlightbackground=BORDER, highlightthickness=1)
         ent.pack(fill=tk.X, pady=(0, 14))
         ent.focus()
-        ent.bind('<Return>', lambda _e: self._submit())
+        ent.bind('<Return>', lambda _e: on_submit())
 
-        FlatButton(pad, text=btn_text, command=self._submit,
+        FlatButton(pad, text=btn_text, command=on_submit,
                    bg=ACCENT, fg='white', hover_bg='#6d28d9',
                    font=F_B, padx=16, pady=9).pack(anchor='e')
 
     def _show_loading(self, msg: str):
         self._clear()
-        pad = tk.Frame(self, bg=BG, padx=32, pady=40)
+        pad = tk.Frame(self, bg=BG, padx=32, pady=50)
         pad.pack(fill=tk.BOTH, expand=True)
         tk.Label(pad, text=msg, bg=BG, fg=FG2, font=F_SM).pack()
 
@@ -581,12 +602,11 @@ class _TelegramAuthDialog(tk.Toplevel):
         self._clear()
         pad = tk.Frame(self, bg=BG, padx=32, pady=24)
         pad.pack(fill=tk.BOTH, expand=True)
-        tk.Label(pad, text='Errore di autenticazione',
-                 bg=BG, fg=RED, font=F_B).pack(anchor='w')
+        tk.Label(pad, text='Errore', bg=BG, fg=RED, font=F_B).pack(anchor='w')
         tk.Label(pad, text=msg, bg=BG, fg=FG2, font=F_SM,
                  justify='left', wraplength=360, anchor='w',
                  ).pack(anchor='w', pady=(6, 20))
-        FlatButton(pad, text='Riprova', command=self._retry,
+        FlatButton(pad, text='Riprova dall\'inizio', command=self._retry,
                    bg=ACCENT, fg='white', font=F_SM, padx=14, pady=8).pack(anchor='w')
 
     def _clear(self):
@@ -595,21 +615,18 @@ class _TelegramAuthDialog(tk.Toplevel):
 
     def _finish(self, info: str):
         self._on_success(info)
-        self.destroy()
+        self._on_close()
 
     def _retry(self):
-        self._closed      = False
-        self._input_value = ''
-        self._async_event = None
-        self._loop        = None
-        self._show_loading('Connessione a Telegram…')
-        threading.Thread(target=self._run_auth, daemon=True, name='TgAuth').start()
+        self._closed     = False
+        self._client     = None
+        self._phone      = None
+        self._phone_hash = None
+        self._show_phone_step()
 
     def _on_close(self):
         self._closed = True
-        # sblocca eventuale _get_input pendente
-        if self._loop is not None and self._async_event is not None:
-            self._loop.call_soon_threadsafe(self._async_event.set)
+        self._loop.call_soon_threadsafe(self._loop.stop)
         self.destroy()
 
 
