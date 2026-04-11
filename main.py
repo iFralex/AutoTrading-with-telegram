@@ -1,21 +1,44 @@
 """
 Entry point.
 
-1. Autentica Telegram nel main thread (stdin disponibile, nessun conflitto Tcl).
-   Se la sessione esiste già il blocco è istantaneo.
-2. Avvia la GUI (tkinter mainloop nel main thread).
+Flusso:
+  1. Se config.py non esiste → schermata guidata per creare le credenziali.
+  2. Autentica Telegram nel main thread (stdin disponibile, nessun conflitto Tcl).
+     Se la sessione esiste già il blocco è istantaneo.
+  3. Avvia la GUI (tkinter mainloop nel main thread).
 """
 
 import asyncio
+import os
 import sys
 
-import config
-from telethon import TelegramClient
+
+# ── Primo avvio: config.py mancante ──────────────────────────────────────────
+
+_config_path = os.path.join(os.path.dirname(__file__), 'config.py')
+
+if not os.path.exists(_config_path):
+    from gui.config_setup import run_config_setup
+    run_config_setup()
+    # Se l'utente ha annullato senza salvare, usciamo
+    if not os.path.exists(_config_path):
+        print("Configurazione annullata.")
+        sys.exit(0)
+
+
+# ── Importa config solo dopo che il file esiste ───────────────────────────────
+
+import config  # noqa: E402  (importazione posticipata intenzionale)
+from telethon import TelegramClient  # noqa: E402
 
 
 async def _ensure_auth():
     """Apre e chiude il client per completare l'autenticazione interattiva."""
-    client = TelegramClient(config.TELEGRAM_SESSION, config.TELEGRAM_API_ID, config.TELEGRAM_API_HASH)
+    client = TelegramClient(
+        config.TELEGRAM_SESSION,
+        config.TELEGRAM_API_ID,
+        config.TELEGRAM_API_HASH,
+    )
     await client.start()          # chiede telefono/codice/2FA solo se serve
     me = await client.get_me()
     print(f"Autenticato come: {me.first_name} ({me.phone})")
