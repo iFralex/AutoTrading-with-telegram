@@ -451,6 +451,7 @@ class _TelegramAuthDialog(tk.Toplevel):
     # ── thread background ─────────────────────────────────────────────────────
 
     def _run_auth(self):
+        import traceback
         loop = asyncio.SelectorEventLoop(selectors.SelectSelector())
         asyncio.set_event_loop(loop)
         try:
@@ -460,6 +461,7 @@ class _TelegramAuthDialog(tk.Toplevel):
         except _AuthCancelled:
             pass   # utente ha chiuso il dialog
         except Exception as exc:
+            traceback.print_exc()   # visibile nella console per debug
             if not self._closed:
                 self.after(0, lambda e=exc: self._show_error(str(e)))
         finally:
@@ -502,7 +504,7 @@ class _TelegramAuthDialog(tk.Toplevel):
 
     async def _get_input(self) -> str:
         """Attende input dalla GUI senza bloccare l'event loop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()   # più affidabile di get_event_loop() in Python 3.10+
         result = await loop.run_in_executor(None, self._wait_sync)
         if self._closed:
             raise _AuthCancelled()
@@ -519,7 +521,8 @@ class _TelegramAuthDialog(tk.Toplevel):
             return
         self._input_value = val
         self._input_event.set()
-        self._show_loading('Verifica in corso…')
+        # Deferred: evita di distruggere il widget mentre il click è ancora in elaborazione
+        self.after(10, lambda: self._show_loading('Verifica in corso…'))
 
     # ── fasi UI ───────────────────────────────────────────────────────────────
 
