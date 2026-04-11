@@ -1,6 +1,7 @@
 # ── Progetto specifico ────────────────────────────────────────────────────────
 
-# Credenziali — NON caricare mai
+# Credenziali — NON caricare mai (usa config.example.py come template)
+config.py
 .env
 
 # Sessione Telegram (token di autenticazione)
