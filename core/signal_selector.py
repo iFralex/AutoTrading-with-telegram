@@ -13,7 +13,6 @@ import selectors
 import threading
 import tkinter as tk
 
-import config
 import core.settings_store as settings_store
 from gui.widgets import FlatButton
 
@@ -160,6 +159,7 @@ class SignalSelectorDialog(tk.Toplevel):
         threading.Thread(target=run, daemon=True, name='SignalFetcher').start()
 
     async def _async_fetch(self) -> list[dict]:
+        import config
         from telethon import TelegramClient
 
         client = TelegramClient(

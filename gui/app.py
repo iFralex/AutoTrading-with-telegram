@@ -12,11 +12,8 @@ import queue
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
-from core.telegram_listener import TelegramListener
 from core.mt5_trader import MT5Trader
-from core.group_selector import GroupSelectorDialog
-from core.signal_selector import SignalSelectorDialog
-from gui.setup_view import SetupView
+from gui.setup_view import SetupView, _config_exists, _session_exists
 from gui.widgets import FlatButton
 import core.settings_store as settings_store
 
@@ -70,7 +67,8 @@ class App(tk.Tk):
     # ── setup → main ──────────────────────────────────────────────────────────
 
     def _needs_setup(self) -> bool:
-        return not self._group_id or not self._signal_count
+        return (not _config_exists() or not _session_exists()
+                or not self._group_id or not self._signal_count)
 
     def _show_setup(self):
         self.title('Telegram → MT5  ·  Configurazione')
@@ -333,11 +331,10 @@ class App(tk.Tk):
         self._tg_lbl.config(text='Telegram: connessione…', fg=YELLOW)
         self._tg_dot.config(fg=YELLOW)
         self._tg_btn.config(state='disabled', text='…')
-        self._telegram = TelegramListener(
-            self._msg_queue, self._group_id, self._on_tg_status)
-        self._telegram.start()
+        self._start_listener()
 
     def _open_group_selector(self, connect_after: bool = False):
+        from core.group_selector import GroupSelectorDialog
         was_connected = self._tg_connected
 
         def on_select(gid: int, name: str):
@@ -355,6 +352,7 @@ class App(tk.Tk):
         GroupSelectorDialog(self, on_select=on_select)
 
     def _open_signal_selector(self):
+        from core.signal_selector import SignalSelectorDialog
         if not self._group_id:
             messagebox.showwarning('Gruppo mancante',
                                    'Seleziona prima un gruppo Telegram.')
@@ -371,6 +369,7 @@ class App(tk.Tk):
                              group_name=self._group_name, on_save=on_save)
 
     def _start_listener(self):
+        from core.telegram_listener import TelegramListener
         self._telegram = TelegramListener(
             self._msg_queue, self._group_id, self._on_tg_status)
         self._telegram.start()

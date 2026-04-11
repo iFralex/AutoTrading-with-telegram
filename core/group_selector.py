@@ -14,7 +14,6 @@ import selectors
 import threading
 import tkinter as tk
 
-import config
 from gui.widgets import FlatButton
 
 # ── palette (speculare a gui/app.py) ──────────────────────────────────────────
@@ -122,6 +121,7 @@ class GroupSelectorDialog(tk.Toplevel):
         threading.Thread(target=run, daemon=True, name='GroupFetcher').start()
 
     async def _async_fetch(self):
+        import config
         from telethon import TelegramClient
         from telethon.tl.types import Channel, Chat
 

@@ -16,8 +16,6 @@ from datetime import datetime
 
 from telethon import TelegramClient, events
 
-import config
-
 
 class TelegramListener:
     def __init__(self, message_queue: queue.Queue, group_id: int, status_callback=None):
@@ -57,6 +55,7 @@ class TelegramListener:
             self._status_cb(False, f'Errore: {exc}')
 
     async def _listen(self):
+        import config
         self._client = TelegramClient(
             config.TELEGRAM_SESSION,
             config.TELEGRAM_API_ID,
