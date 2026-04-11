@@ -236,8 +236,8 @@ class App(tk.Tk):
             ent.grid(row=i, column=1, sticky='ew', padx=(10, 0), pady=5)
 
         # pulsanti buy / sell
-        btns = tk.Frame(sect, bg=CARD, padx=16, pady=(6, 16))
-        btns.pack(fill=tk.X)
+        btns = tk.Frame(sect, bg=CARD, padx=16)
+        btns.pack(fill=tk.X, pady=(6, 16))
         btns.columnconfigure((0, 1), weight=1)
 
         FlatButton(btns, text='▲  BUY', command=self._send_buy,
@@ -303,8 +303,8 @@ class App(tk.Tk):
 
         _section_header(sect, 'Account')
 
-        metrics_row = tk.Frame(sect, bg=CARD, padx=16, pady=(0, 16))
-        metrics_row.pack(fill=tk.X)
+        metrics_row = tk.Frame(sect, bg=CARD, padx=16)
+        metrics_row.pack(fill=tk.X, pady=(0, 16))
         metrics_row.columnconfigure((0, 1, 2), weight=1)
 
         METRICS = [('Balance', 'balance'), ('Equity', 'equity'), ('Margine libero', 'free')]
