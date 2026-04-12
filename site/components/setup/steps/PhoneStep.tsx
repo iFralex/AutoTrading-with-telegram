@@ -203,7 +203,12 @@ export function PhoneStep({ data, onDataChange, onNext, onBack, onJumpToStep }: 
               type="tel"
               placeholder="39 333 123 4567"
               value={data.phone}
-              onChange={e => { onDataChange({ phone: e.target.value }); setError(null) }}
+              onChange={e => {
+                // Rimuove tutto tranne le cifre (spazi, caratteri invisibili, ecc.)
+                const clean = e.target.value.replace(/\D/g, "")
+                onDataChange({ phone: clean })
+                setError(null)
+              }}
               onKeyDown={e => e.key === "Enter" && !loading && data.phone.trim() && handleContinue()}
               autoFocus
             />
