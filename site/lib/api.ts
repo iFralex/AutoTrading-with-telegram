@@ -130,6 +130,75 @@ async function call<T>(
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+// ── Dashboard types ───────────────────────────────────────────────────────────
+
+export interface DashboardUser {
+  user_id: string
+  api_id: number
+  api_hash: string
+  phone: string
+  group_id: number
+  group_name: string
+  mt5_login: number | null
+  mt5_server: string | null
+  sizing_strategy: string | null
+  active: boolean
+  created_at: string
+}
+
+export interface TradeSignalLog {
+  symbol: string
+  order_type: "BUY" | "SELL"
+  entry_price: number | [number, number] | null
+  stop_loss: number | null
+  take_profit: number | null
+  lot_size: number | null
+  order_mode: "MARKET" | "LIMIT" | "STOP"
+}
+
+export interface TradeResultLog {
+  success: boolean
+  order_id: number | null
+  error: string | null
+  signal: TradeSignalLog | null
+}
+
+export interface AccountInfoLog {
+  balance: number
+  equity: number
+  free_margin: number
+  currency: string
+  leverage: number
+}
+
+export interface SignalLog {
+  id: number
+  user_id: string
+  ts: string
+  sender_name: string | null
+  message_text: string
+  is_signal: boolean
+  flash_raw: string | null
+  has_mt5_creds: boolean
+  sizing_strategy: string | null
+  account_info: AccountInfoLog | null
+  signals_json: TradeSignalLog[] | null
+  results_json: TradeResultLog[] | null
+  error_step: string | null
+  error_msg: string | null
+}
+
+export interface DashboardUserResponse {
+  user: DashboardUser
+  logs: SignalLog[]
+  total_logs: number
+}
+
+export interface DashboardLogsResponse {
+  logs: SignalLog[]
+  total: number
+}
+
 export const api = {
   /**
    * Step 2a — invia il codice OTP al numero di telefono.
@@ -224,6 +293,24 @@ export const api = {
     return call<{ ok: boolean }>(
       "DELETE",
       `/api/setup/session?phone=${encodeURIComponent(phone)}`
+    )
+  },
+
+  // ── Dashboard ─────────────────────────────────────────────────────────────
+
+  /** Recupera profilo utente + ultimi 50 log segnali per numero di telefono. */
+  getDashboardUser(phone: string) {
+    return call<DashboardUserResponse>(
+      "GET",
+      `/api/dashboard/user?phone=${encodeURIComponent(phone)}`
+    )
+  },
+
+  /** Carica ulteriori log segnali (paginazione). */
+  getDashboardLogs(userId: string, limit = 50, offset = 0) {
+    return call<DashboardLogsResponse>(
+      "GET",
+      `/api/dashboard/logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`
     )
   },
 }

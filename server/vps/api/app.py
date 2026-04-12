@@ -30,12 +30,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from vps.api.routes.setup import router as setup_router
+from vps.api.routes.dashboard import router as dashboard_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
 from vps.services.signal_processor import SignalProcessor
 from vps.services.mt5_trader import MT5Trader
 from vps.services.mt5_range_watcher import RangeOrderWatcher, WatchedOrder
+from vps.services.signal_log_store import SignalLogStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +81,11 @@ async def lifespan(app: FastAPI):
     await session_store.init()
     app.state.setup_session_store = session_store
 
+    # Log segnali (stessa users.db)
+    signal_log_store = SignalLogStore(_db_path)
+    await signal_log_store.init()
+    app.state.signal_log_store = signal_log_store
+
     # Gemini signal processor (opzionale: se la chiave non è configurata
     # i messaggi vengono loggati ma non processati)
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
@@ -105,15 +112,56 @@ async def lifespan(app: FastAPI):
 
     # Telegram manager
     async def on_message(user_id: str, message: str, raw_event, sender) -> None:
+        from dataclasses import asdict
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "title", "?")
         logger.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
 
+        # Variabili log — costruite step by step e salvate alla fine
+        log_is_signal     = False
+        log_flash_raw:     str | None  = None
+        log_has_mt5_creds              = False
+        log_sizing_strategy: str | None = None
+        log_account_info:  dict | None = None
+        log_signals:       list | None = None
+        log_results:       list | None = None
+        log_error_step:    str | None  = None
+        log_error_msg:     str | None  = None
+
+        async def _save_log() -> None:
+            await signal_log_store.insert(
+                user_id         = user_id,
+                sender_name     = sender_name,
+                message_text    = message,
+                is_signal       = log_is_signal,
+                flash_raw       = log_flash_raw,
+                has_mt5_creds   = log_has_mt5_creds,
+                sizing_strategy = log_sizing_strategy,
+                account_info    = log_account_info,
+                signals         = log_signals,
+                results         = log_results,
+                error_step      = log_error_step,
+                error_msg       = log_error_msg,
+            )
+
         if signal_processor is None:
+            await _save_log()
             return
 
         # ── Step 1: rilevamento rapido (Flash) — prima di aprire MT5 ─────────
-        if not await signal_processor.detect_signal(message):
+        try:
+            flash_result = await signal_processor._detect(message)
+            log_flash_raw = "YES" if flash_result else "NO"
+            log_is_signal = flash_result
+        except Exception as exc:
+            logger.error("Gemini Flash errore: %s", exc)
+            log_error_step = "flash"
+            log_error_msg  = str(exc)
+            await _save_log()
+            return
+
+        if not log_is_signal:
             logger.debug("Messaggio classificato come non-segnale (Flash)")
+            await _save_log()
             return
 
         logger.info("Segnale rilevato — recupero credenziali utente %s...", user_id)
@@ -122,51 +170,82 @@ async def lifespan(app: FastAPI):
         user = await store.get_user(user_id)
         if user is None:
             logger.error("Utente %s non trovato nel DB — skip", user_id)
+            log_error_step = "db_lookup"
+            log_error_msg  = f"Utente {user_id} non trovato nel DB"
+            await _save_log()
             return
 
         mt5_login    = user.get("mt5_login")
         mt5_password = user.get("mt5_password")   # già decifrata da UserStore
         mt5_server   = user.get("mt5_server")
+        log_sizing_strategy = user.get("sizing_strategy") or None
 
-        if not all([mt5_login, mt5_password, mt5_server]):
+        log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
+        if not log_has_mt5_creds:
             logger.warning(
                 "Utente %s: credenziali MT5 mancanti — skip esecuzione", user_id
             )
+            log_error_step = "mt5_creds"
+            log_error_msg  = "Credenziali MT5 mancanti (login/password/server)"
+            await _save_log()
             return
 
         # ── Step 3: recupera info conto per il calcolo sizing ─────────────────
-        sizing_strategy = user.get("sizing_strategy") or None
-        account_info: dict | None = None
-        if sizing_strategy:
-            account_info = await mt5_trader.get_account_info(
-                user_id      = user_id,
-                mt5_login    = int(mt5_login),
-                mt5_password = mt5_password,
-                mt5_server   = mt5_server,
-            )
-            if account_info is None:
+        if log_sizing_strategy:
+            try:
+                log_account_info = await mt5_trader.get_account_info(
+                    user_id      = user_id,
+                    mt5_login    = int(mt5_login),
+                    mt5_password = mt5_password,
+                    mt5_server   = mt5_server,
+                )
+            except Exception as exc:
+                logger.warning("Utente %s: account_info fallita: %s", user_id, exc)
+                log_account_info = None
+
+            if log_account_info is None:
                 logger.warning(
                     "Utente %s: account_info non disponibile — sizing senza contesto conto",
                     user_id,
                 )
 
         # ── Step 4: extraction strutturata (Pro) con contesto sizing ──────────
-        signals = await signal_processor.extract_signals(
-            message,
-            sizing_strategy=sizing_strategy,
-            account_info=account_info,
-        )
-        if not signals:
+        try:
+            signals = await signal_processor.extract_signals(
+                message,
+                sizing_strategy=log_sizing_strategy,
+                account_info=log_account_info,
+            )
+        except Exception as exc:
+            logger.error("Gemini Pro errore: %s", exc)
+            log_error_step = "extraction"
+            log_error_msg  = str(exc)
+            await _save_log()
             return
 
+        if not signals:
+            log_error_step = "extraction"
+            log_error_msg  = "Gemini Pro non ha estratto segnali validi"
+            await _save_log()
+            return
+
+        log_signals = [asdict(s) for s in signals]
+
         # ── Step 5: esegui gli ordini su MT5 ─────────────────────────────────
-        results = await mt5_trader.execute_signals(
-            user_id      = user_id,
-            signals      = signals,
-            mt5_login    = int(mt5_login),
-            mt5_password = mt5_password,
-            mt5_server   = mt5_server,
-        )
+        try:
+            results = await mt5_trader.execute_signals(
+                user_id      = user_id,
+                signals      = signals,
+                mt5_login    = int(mt5_login),
+                mt5_password = mt5_password,
+                mt5_server   = mt5_server,
+            )
+        except Exception as exc:
+            logger.error("MT5 execute_signals errore: %s", exc)
+            log_error_step = "mt5_execute"
+            log_error_msg  = str(exc)
+            await _save_log()
+            return
 
         ok  = sum(1 for r in results if r.success)
         err = sum(1 for r in results if not r.success)
@@ -174,6 +253,18 @@ async def lifespan(app: FastAPI):
             "Utente %s: %d ordini OK, %d falliti su %d segnali",
             user_id, ok, err, len(signals),
         )
+
+        log_results = [
+            {
+                "success":    r.success,
+                "order_id":   r.order_id,
+                "error":      r.error,
+                "signal":     asdict(r.signal) if r.signal else None,
+            }
+            for r in results
+        ]
+
+        await _save_log()
 
         # ── Step 6: registra ordini range nel watcher ─────────────────────────
         for result in results:
@@ -242,6 +333,7 @@ app.add_middleware(
 )
 
 app.include_router(setup_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")

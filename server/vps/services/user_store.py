@@ -200,6 +200,40 @@ class UserStore:
             )
         return result
 
+    async def get_user_by_phone(self, phone: str) -> dict | None:
+        """Cerca un utente per numero di telefono."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM users WHERE phone = ?", (phone,)
+            )
+            row = await cursor.fetchone()
+
+        if row is None:
+            return None
+
+        mt5_password: str | None = None
+        if row["mt5_password_enc"]:
+            try:
+                mt5_password = _decrypt(row["mt5_password_enc"])
+            except Exception:
+                pass
+
+        return {
+            "user_id":         row["user_id"],
+            "api_id":          row["api_id"],
+            "api_hash":        row["api_hash"],
+            "phone":           row["phone"],
+            "group_id":        row["group_id"],
+            "group_name":      row["group_name"],
+            "mt5_login":       row["mt5_login"],
+            "mt5_password":    mt5_password,
+            "mt5_server":      row["mt5_server"],
+            "sizing_strategy": row["sizing_strategy"],
+            "active":          bool(row["active"]),
+            "created_at":      row["created_at"],
+        }
+
     async def get_user(self, user_id: str) -> dict | None:
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
