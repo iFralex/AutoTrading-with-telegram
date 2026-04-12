@@ -37,6 +37,8 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
       }
 
       onDataChange({ userId: res.user_id })
+      // Salva subito in sessione con il valore fresco (non aspetta il re-render React)
+      await api.saveSession({ phone: data.phone, user_id: res.user_id })
       onNext()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Errore imprevisto")
@@ -53,6 +55,8 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
     try {
       const res = await api.verifyPassword(data.loginKey, twoFaPassword)
       onDataChange({ userId: res.user_id })
+      // Salva subito in sessione con il valore fresco (non aspetta il re-render React)
+      await api.saveSession({ phone: data.phone, user_id: res.user_id })
       onNext()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Errore imprevisto")

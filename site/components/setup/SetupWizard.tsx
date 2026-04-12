@@ -98,19 +98,8 @@ export function SetupWizard() {
     // Salva i dati del passo appena completato nella sessione server
     try {
       switch (step) {
-        case 2:
-          // Credenziali + login_key (OTP già inviato dal TelegramCredentialsStep)
-          await api.saveSession({
-            phone: data.phone,
-            api_id: Number(data.apiId),
-            api_hash: data.apiHash,
-            login_key: data.loginKey,
-          })
-          break
-        case 3:
-          // Autenticazione completata
-          await api.saveSession({ phone: data.phone, user_id: data.userId })
-          break
+        // Passi 2 e 3: il salvataggio avviene direttamente nel componente
+        // con il valore fresco dall'API (evita stale closure React)
         case 4:
           // Gruppo selezionato
           await api.saveSession({

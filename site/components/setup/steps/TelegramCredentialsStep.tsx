@@ -41,6 +41,13 @@ export function TelegramCredentialsStep({
         data.phone,
       )
       onDataChange({ loginKey: res.login_key })
+      // Salva subito in sessione con il valore fresco (non aspetta il re-render React)
+      await api.saveSession({
+        phone: data.phone,
+        api_id: Number(data.apiId),
+        api_hash: data.apiHash,
+        login_key: res.login_key,
+      })
       onNext()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Errore imprevisto")
