@@ -65,6 +65,65 @@ class MT5Trader:
         self._users_dir   = mt5_users_dir
         self._default_lot = default_lot
 
+    async def get_account_info(
+        self,
+        user_id: str,
+        mt5_login: int,
+        mt5_password: str,
+        mt5_server: str,
+    ) -> dict | None:
+        """
+        Ritorna le info del conto MT5 utili per il calcolo del lot size:
+            {"balance", "equity", "free_margin", "currency", "leverage"}
+        Ritorna None se MT5 non è disponibile o il login fallisce.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _executor,
+            self._get_account_info_sync,
+            user_id, mt5_login, mt5_password, mt5_server,
+        )
+
+    def _get_account_info_sync(
+        self,
+        user_id: str,
+        login: int,
+        password: str,
+        server: str,
+    ) -> dict | None:
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            return None
+
+        try:
+            user_dir = self._ensure_user_dir(user_id)
+        except Exception:
+            return None
+
+        terminal_path = str(user_dir / "terminal64.exe")
+
+        if not mt5.initialize(path=terminal_path, portable=True):
+            return None
+
+        try:
+            if not mt5.login(login, password=password, server=server):
+                return None
+
+            info = mt5.account_info()
+            if info is None:
+                return None
+
+            return {
+                "balance":     round(info.balance, 2),
+                "equity":      round(info.equity, 2),
+                "free_margin": round(info.margin_free, 2),
+                "currency":    info.currency,
+                "leverage":    info.leverage,
+            }
+        finally:
+            mt5.shutdown()
+
     async def execute_signals(
         self,
         user_id: str,
@@ -196,7 +255,17 @@ class MT5Trader:
         else:
             # Ordine pendente: LIMIT (prezzo migliore) o STOP (prezzo peggiore)
             action = mt5.TRADE_ACTION_PENDING
-            price  = sig.entry_price
+
+            if isinstance(sig.entry_price, list):
+                # Range: piazza al bordo più favorevole
+                #   BUY  → bordo basso (prezzo minimo del range)
+                #   SELL → bordo alto  (prezzo massimo del range)
+                low   = min(sig.entry_price)
+                high  = max(sig.entry_price)
+                price = low if sig.order_type == "BUY" else high
+            else:
+                price = sig.entry_price
+
             if sig.order_type == "BUY":
                 order_type = (
                     mt5.ORDER_TYPE_BUY_LIMIT if price < tick.ask

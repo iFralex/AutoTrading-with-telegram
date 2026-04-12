@@ -12,6 +12,7 @@ Schema:
     mt5_login        INTEGER,
     mt5_password_enc TEXT,               -- cifrato con Fernet
     mt5_server       TEXT,
+    sizing_strategy  TEXT,               -- strategia di sizing in testo libero
     active           INTEGER DEFAULT 1,
     created_at       TEXT    DEFAULT CURRENT_TIMESTAMP
   )
@@ -36,10 +37,16 @@ CREATE TABLE IF NOT EXISTS users (
     mt5_login        INTEGER,
     mt5_password_enc TEXT,
     mt5_server       TEXT,
+    sizing_strategy  TEXT,
     active           INTEGER NOT NULL DEFAULT 1,
     created_at       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
+
+# Migrations: colonne aggiunte dopo la versione iniziale dello schema
+_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN sizing_strategy TEXT",
+]
 
 
 def _cipher() -> Fernet:
@@ -75,11 +82,18 @@ class UserStore:
         self._db_path = db_path
 
     async def init(self) -> None:
-        """Crea il database e la tabella se non esistono."""
+        """Crea il database e la tabella se non esistono; applica le migration."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
             await db.commit()
+            # Migration incrementali: ignora errori se la colonna esiste già
+            for sql in _MIGRATIONS:
+                try:
+                    await db.execute(sql)
+                    await db.commit()
+                except Exception:
+                    pass
 
     # ── Write ────────────────────────────────────────────────────────────────
 
@@ -104,9 +118,9 @@ class UserStore:
                     (user_id, api_id, api_hash, phone,
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
-                     active)
+                     sizing_strategy, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     api_id           = excluded.api_id,
                     api_hash         = excluded.api_hash,
@@ -116,6 +130,7 @@ class UserStore:
                     mt5_login        = excluded.mt5_login,
                     mt5_password_enc = excluded.mt5_password_enc,
                     mt5_server       = excluded.mt5_server,
+                    sizing_strategy  = excluded.sizing_strategy,
                     active           = 1
                 """,
                 (
@@ -128,6 +143,7 @@ class UserStore:
                     user.get("mt5_login"),
                     mt5_password_enc,
                     user.get("mt5_server"),
+                    user.get("sizing_strategy"),
                 ),
             )
             await db.commit()
@@ -170,15 +186,16 @@ class UserStore:
 
             result.append(
                 {
-                    "user_id":    row["user_id"],
-                    "api_id":     row["api_id"],
-                    "api_hash":   row["api_hash"],
-                    "phone":      row["phone"],
-                    "group_id":   row["group_id"],
-                    "group_name": row["group_name"],
-                    "mt5_login":  row["mt5_login"],
-                    "mt5_password": mt5_password,
-                    "mt5_server": row["mt5_server"],
+                    "user_id":         row["user_id"],
+                    "api_id":          row["api_id"],
+                    "api_hash":        row["api_hash"],
+                    "phone":           row["phone"],
+                    "group_id":        row["group_id"],
+                    "group_name":      row["group_name"],
+                    "mt5_login":       row["mt5_login"],
+                    "mt5_password":    mt5_password,
+                    "mt5_server":      row["mt5_server"],
+                    "sizing_strategy": row["sizing_strategy"],
                 }
             )
         return result
@@ -202,15 +219,16 @@ class UserStore:
                 pass
 
         return {
-            "user_id":    row["user_id"],
-            "api_id":     row["api_id"],
-            "api_hash":   row["api_hash"],
-            "phone":      row["phone"],
-            "group_id":   row["group_id"],
-            "group_name": row["group_name"],
-            "mt5_login":  row["mt5_login"],
-            "mt5_password": mt5_password,
-            "mt5_server": row["mt5_server"],
-            "active":     bool(row["active"]),
-            "created_at": row["created_at"],
+            "user_id":         row["user_id"],
+            "api_id":          row["api_id"],
+            "api_hash":        row["api_hash"],
+            "phone":           row["phone"],
+            "group_id":        row["group_id"],
+            "group_name":      row["group_name"],
+            "mt5_login":       row["mt5_login"],
+            "mt5_password":    mt5_password,
+            "mt5_server":      row["mt5_server"],
+            "sizing_strategy": row["sizing_strategy"],
+            "active":          bool(row["active"]),
+            "created_at":      row["created_at"],
         }

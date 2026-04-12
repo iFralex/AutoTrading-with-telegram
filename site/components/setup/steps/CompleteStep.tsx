@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import {
-  CheckCircle2, Bot, Hash, TrendingUp, ArrowRight, RotateCcw, Loader2,
+  CheckCircle2, Bot, Hash, TrendingUp, BarChart2, ArrowRight, RotateCcw, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -34,6 +34,13 @@ export function CompleteStep({ data, onBack }: StepProps) {
         ? `${data.mt5AccountName} · ${data.mt5Server}`
         : `${data.mt5Login} · ${data.mt5Server}`,
     },
+    {
+      icon: BarChart2,
+      label: "Strategia di sizing",
+      value: data.sizingStrategy.length > 60
+        ? data.sizingStrategy.slice(0, 57) + "…"
+        : data.sizingStrategy,
+    },
   ]
 
   async function handleStart() {
@@ -41,16 +48,17 @@ export function CompleteStep({ data, onBack }: StepProps) {
     setError(null)
     try {
       await api.completeSetup({
-        login_key:    data.loginKey,
-        user_id:      data.userId,
-        api_id:       Number(data.apiId),
-        api_hash:     data.apiHash,
-        phone:        data.phone,
-        group_id:     data.groupId,
-        group_name:   data.groupName,
-        mt5_login:    data.mt5Login ? Number(data.mt5Login) : undefined,
-        mt5_password: data.mt5Password || undefined,
-        mt5_server:   data.mt5Server || undefined,
+        login_key:       data.loginKey,
+        user_id:         data.userId,
+        api_id:          Number(data.apiId),
+        api_hash:        data.apiHash,
+        phone:           data.phone,
+        group_id:        data.groupId,
+        group_name:      data.groupName,
+        mt5_login:       data.mt5Login ? Number(data.mt5Login) : undefined,
+        mt5_password:    data.mt5Password || undefined,
+        mt5_server:      data.mt5Server || undefined,
+        sizing_strategy: data.sizingStrategy || undefined,
       })
       setDone(true)
     } catch (err) {
