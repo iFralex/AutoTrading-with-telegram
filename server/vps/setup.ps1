@@ -122,25 +122,83 @@ if (-not (Test-Path $envDest)) {
     Write-OK ".env gia' presente, non sovrascritto"
 }
 
-# ── 6. MT5 template ──────────────────────────────────────────────────────────
+# ── 6. MT5 template (portable, automatico) ───────────────────────────────────
 
-Write-Step "Verifica installazione MT5 template..."
+Write-Step "Installazione MT5 in modalita' portable..."
 
-$mt5Template = "$InstallDir\mt5_template\terminal64.exe"
+$mt5Template  = "$InstallDir\mt5_template"
+$mt5Exe       = "$mt5Template\terminal64.exe"
+$mt5Installer = "$env:TEMP\mt5setup.exe"
 
-if (-not (Test-Path $mt5Template)) {
-    Write-Warn "MT5 template non trovato."
-    Write-Warn "Azioni manuali richieste:"
-    Write-Warn "  1. Scarica MT5 dal sito del tuo broker"
-    Write-Warn "  2. Installa in modalita' portable in: $InstallDir\mt5_template"
-    Write-Warn "  3. Avvialo una volta, fai login con un conto qualsiasi"
-    Write-Warn "  4. Vai in Strumenti > Opzioni > Expert Advisor"
-    Write-Warn "     Abilita: 'Consenti il trading algoritmico'"
-    Write-Warn "  5. Chiudi MT5 (la configurazione e' salvata)"
-    Write-Warn "  Il setup automatico usera' questa cartella come template"
-    Write-Warn "  per ogni nuovo utente."
+if (Test-Path $mt5Exe) {
+    Write-OK "MT5 template gia' presente, saltato"
 } else {
-    Write-OK "MT5 template trovato"
+    # 6a. Download installer MetaQuotes (versione generica, broker-agnostic)
+    Write-Warn "Download MT5 installer da MetaQuotes..."
+    $mt5Url = "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+    Invoke-WebRequest -Uri $mt5Url -OutFile $mt5Installer -UseBasicParsing
+    Write-OK "Download completato"
+
+    # 6b. Installa in una cartella temporanea, poi copia in mt5_template
+    # /auto = installazione silenziosa; /InstallPath non e' supportato
+    # quindi installiamo nel percorso default e copiamo
+    $mt5DefaultPath = "$env:ProgramFiles\MetaTrader 5"
+    Write-Warn "Installazione silenziosa MT5 (potrebbe richiedere 1-2 minuti)..."
+    Start-Process -FilePath $mt5Installer -ArgumentList "/auto" -Wait
+    Remove-Item $mt5Installer -Force
+
+    # 6c. Cerca terminal64.exe nell'installazione (percorso default o subdirectory)
+    $foundExe = Get-ChildItem -Path $mt5DefaultPath -Filter "terminal64.exe" `
+                              -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+
+    if (-not $foundExe) {
+        # Fallback: cerca in tutto Program Files
+        $foundExe = Get-ChildItem -Path "$env:ProgramFiles" -Filter "terminal64.exe" `
+                                  -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+    }
+
+    if (-not $foundExe) {
+        Write-Warn "terminal64.exe non trovato dopo l'installazione."
+        Write-Warn "Installa MT5 manualmente in $mt5Template e rilancia setup.ps1"
+    } else {
+        # 6d. Copia l'intera cartella di installazione in mt5_template
+        $sourceDir = $foundExe.DirectoryName
+        Write-Warn "Copia MT5 in modalita' portable: $sourceDir -> $mt5Template"
+        Copy-Item -Path "$sourceDir\*" -Destination $mt5Template -Recurse -Force
+        Write-OK "MT5 copiato in $mt5Template"
+    }
+}
+
+# 6e. Crea config portable con trading algoritmico abilitato
+$mt5ConfigDir = "$mt5Template\config"
+New-Item -ItemType Directory -Force -Path $mt5ConfigDir | Out-Null
+$mt5IniPath = "$mt5ConfigDir\terminal.ini"
+
+if (-not (Test-Path $mt5IniPath)) {
+    @"
+[Experts]
+AllowLiveTrading=1
+AllowDllImport=0
+Enabled=1
+Account=0
+Profile=default
+"@ | Set-Content -Path $mt5IniPath -Encoding UTF8
+    Write-OK "Config portable scritto: trading algoritmico abilitato"
+} else {
+    # Assicura che AllowLiveTrading sia a 1 anche se il file esiste gia'
+    $ini = Get-Content $mt5IniPath
+    if ($ini -notmatch "AllowLiveTrading=1") {
+        $ini = $ini -replace "AllowLiveTrading=.*", "AllowLiveTrading=1"
+        if ($ini -notmatch "AllowLiveTrading") {
+            $ini += "`nAllowLiveTrading=1"
+        }
+        $ini | Set-Content $mt5IniPath -Encoding UTF8
+        Write-OK "AllowLiveTrading abilitato nel config esistente"
+    } else {
+        Write-OK "Config MT5 gia' corretto"
+    }
 }
 
 # ── 7. Redis / Memurai ───────────────────────────────────────────────────────
@@ -221,9 +279,10 @@ Write-Host " Bot installato in : $InstallDir" -ForegroundColor White
 Write-Host " Avvio manuale     : python $scriptPath" -ForegroundColor White
 Write-Host " Log               : $InstallDir\logs\" -ForegroundColor White
 Write-Host ""
-if (-not (Test-Path $mt5Template)) {
-    Write-Host " ATTENZIONE: configura il template MT5 prima di avviare" -ForegroundColor Yellow
-    Write-Host "             (vedi istruzioni sopra)" -ForegroundColor Yellow
+if (-not (Test-Path "$mt5Template\terminal64.exe")) {
+    Write-Host " ATTENZIONE: MT5 non trovato in $mt5Template" -ForegroundColor Yellow
+    Write-Host "             Copia manualmente terminal64.exe e le sue DLL" -ForegroundColor Yellow
+    Write-Host "             poi rilancia setup.ps1" -ForegroundColor Yellow
     Write-Host ""
 }
 Write-Host " Edita $InstallDir\bot\vps\.env prima di avviare il bot" -ForegroundColor Yellow
