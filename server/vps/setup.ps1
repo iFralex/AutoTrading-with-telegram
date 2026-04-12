@@ -39,9 +39,13 @@ function Write-Warn([string]$Msg) {
 
 Write-Step "Verifica Python..."
 
+# Get-Command trova anche l'alias trappola del Microsoft Store (WindowsApps).
+# Consideriamo Python "reale" solo se il percorso non punta a WindowsApps.
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pythonCmd) {
-    Write-Warn "Python non trovato. Download di Python $PythonVersion..."
+$pythonReal = $pythonCmd -and ($pythonCmd.Source -notlike "*WindowsApps*")
+
+if (-not $pythonReal) {
+    Write-Warn "Python non trovato (o solo alias Store). Download di Python $PythonVersion..."
     $url       = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
     $installer = "$env:TEMP\python_setup.exe"
     Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
