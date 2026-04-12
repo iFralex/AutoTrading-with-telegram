@@ -1,6 +1,11 @@
 """
 Route /api/setup/*
 
+  GET  /api/setup/session                    → stato sessione per numero di telefono
+  POST /api/setup/session                    → aggiorna campi della sessione
+  DELETE /api/setup/session/fields           → cancella campi specifici della sessione
+  DELETE /api/setup/session                  → elimina la sessione completa
+
   POST /api/setup/telegram/request-code     → step 2: invia OTP
   POST /api/setup/telegram/verify-code      → step 2: verifica OTP
   POST /api/setup/telegram/verify-password  → step 2: 2FA opzionale
@@ -20,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from vps.services.telegram_manager import PasswordRequiredError, TelegramManager
 from vps.services.user_store import UserStore
+from vps.services.setup_session_store import SetupSessionStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -38,7 +44,32 @@ def get_store(request: Request) -> UserStore:
     return request.app.state.user_store
 
 
-# ── Modelli ──────────────────────────────────────────────────────────────────
+def get_session_store(request: Request) -> SetupSessionStore:
+    return request.app.state.setup_session_store
+
+
+# ── Modelli sessione ──────────────────────────────────────────────────────────
+
+class SaveSessionBody(BaseModel):
+    phone: str = Field(..., min_length=7)
+    api_id: int | None = None
+    api_hash: str | None = None
+    login_key: str | None = None
+    user_id: str | None = None
+    group_id: str | None = None
+    group_name: str | None = None
+    mt5_login: int | None = None
+    mt5_password: str | None = None
+    mt5_server: str | None = None
+    sizing_strategy: str | None = None
+
+
+class ClearSessionFieldsBody(BaseModel):
+    phone: str = Field(..., min_length=7)
+    fields: list[str]
+
+
+# ── Modelli Telegram / MT5 ────────────────────────────────────────────────────
 
 class RequestCodeBody(BaseModel):
     api_id: int = Field(..., gt=0)
@@ -73,6 +104,61 @@ class CompleteSetupBody(BaseModel):
     mt5_login: int | None = None
     mt5_password: str | None = None
     mt5_server: str | None = None
+    sizing_strategy: str | None = None
+
+
+# ── Session endpoints ────────────────────────────────────────────────────────
+
+@router.get("/session")
+async def get_session(
+    phone: str,
+    ss: SetupSessionStore = Depends(get_session_store),
+):
+    """
+    Ritorna lo stato della sessione di setup per il numero di telefono.
+    Se non esiste risponde {"exists": false}.
+    """
+    session = await ss.get(phone)
+    if session is None:
+        return {"exists": False}
+    return {"exists": True, **session}
+
+
+@router.post("/session")
+async def save_session(
+    body: SaveSessionBody,
+    ss: SetupSessionStore = Depends(get_session_store),
+):
+    """
+    Salva/aggiorna i campi della sessione per il numero di telefono.
+    Solo i campi non-None nel body vengono aggiornati.
+    """
+    fields = body.model_dump(exclude_none=True, exclude={"phone"})
+    await ss.upsert(body.phone, fields)
+    return {"ok": True}
+
+
+@router.delete("/session/fields")
+async def clear_session_fields(
+    body: ClearSessionFieldsBody,
+    ss: SetupSessionStore = Depends(get_session_store),
+):
+    """
+    Cancella (imposta a NULL) i campi specificati della sessione.
+    Usato dal pulsante Indietro per rimuovere dati non più validi.
+    """
+    await ss.clear_fields(body.phone, body.fields)
+    return {"ok": True}
+
+
+@router.delete("/session")
+async def delete_session(
+    phone: str,
+    ss: SetupSessionStore = Depends(get_session_store),
+):
+    """Elimina completamente la sessione (usato da 'Ricomincia da capo')."""
+    await ss.delete(phone)
+    return {"ok": True}
 
 
 # ── Telegram endpoints ───────────────────────────────────────────────────────
@@ -103,7 +189,6 @@ async def verify_code(
     try:
         return tm.verify_code(body.login_key, body.code)
     except PasswordRequiredError as exc:
-        # Non è un errore: il frontend deve solo chiedere la password 2FA
         return {"error": "2fa_required", "login_key": exc.login_key}
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc))
@@ -223,23 +308,31 @@ async def complete_setup(
     body: CompleteSetupBody,
     tm: TelegramManager = Depends(get_telegram),
     store: UserStore = Depends(get_store),
+    ss: SetupSessionStore = Depends(get_session_store),
 ):
     """
     Finalizza il setup:
-    1. Salva l'utente nel database (password MT5 cifrata)
-    2. Promuove la sessione Telegram a definitiva e avvia il listener
+    1. Se mt5_password non è fornita nel body, la recupera dalla sessione di setup
+    2. Salva l'utente nel database (password MT5 cifrata)
+    3. Promuove la sessione Telegram a definitiva e avvia il listener
+    4. Elimina la sessione di setup temporanea
     """
     try:
+        mt5_password = body.mt5_password
+        if not mt5_password:
+            mt5_password = await ss.get_mt5_password(body.phone)
+
         await store.upsert({
-            "user_id":      body.user_id,
-            "api_id":       body.api_id,
-            "api_hash":     body.api_hash,
-            "phone":        body.phone,
-            "group_id":     int(body.group_id),
-            "group_name":   body.group_name,
-            "mt5_login":    body.mt5_login,
-            "mt5_password": body.mt5_password,
-            "mt5_server":   body.mt5_server,
+            "user_id":         body.user_id,
+            "api_id":          body.api_id,
+            "api_hash":        body.api_hash,
+            "phone":           body.phone,
+            "group_id":        int(body.group_id),
+            "group_name":      body.group_name,
+            "mt5_login":       body.mt5_login,
+            "mt5_password":    mt5_password,
+            "mt5_server":      body.mt5_server,
+            "sizing_strategy": body.sizing_strategy,
         })
 
         tm.add_user(
@@ -249,6 +342,9 @@ async def complete_setup(
             group_id=int(body.group_id),
             login_key=body.login_key,
         )
+
+        # Pulizia della sessione temporanea
+        await ss.delete(body.phone)
 
         logger.info("Setup completato — utente %s attivo", body.user_id)
         return {"status": "active", "user_id": body.user_id}

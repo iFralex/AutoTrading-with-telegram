@@ -42,7 +42,7 @@ export function GroupSelectStep({ data, onDataChange, onNext, onBack }: StepProp
       <CardHeader className="px-8 pt-8 pb-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 text-primary font-bold text-sm">
-            3
+            4
           </div>
           <div>
             <CardTitle>Seleziona il gruppo</CardTitle>

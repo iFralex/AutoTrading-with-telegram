@@ -48,6 +48,38 @@ export interface CompleteSetupPayload {
   mt5_login?: number
   mt5_password?: string
   mt5_server?: string
+  sizing_strategy?: string
+}
+
+export interface SetupSession {
+  exists: true
+  phone: string
+  api_id: number | null
+  api_hash: string | null
+  login_key: string | null
+  user_id: string | null
+  group_id: string | null
+  group_name: string | null
+  mt5_login: number | null
+  has_mt5_password: boolean
+  mt5_server: string | null
+  sizing_strategy: string | null
+}
+
+export type SessionResponse = SetupSession | { exists: false }
+
+export interface SaveSessionPayload {
+  phone: string
+  api_id?: number
+  api_hash?: string
+  login_key?: string
+  user_id?: string
+  group_id?: string
+  group_name?: string
+  mt5_login?: number
+  mt5_password?: string
+  mt5_server?: string
+  sizing_strategy?: string
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────
@@ -160,6 +192,38 @@ export const api = {
       "POST",
       "/api/setup/complete",
       payload
+    )
+  },
+
+  // ── Session ───────────────────────────────────────────────────────────────
+
+  /** Recupera la sessione di setup esistente per un numero di telefono. */
+  getSession(phone: string) {
+    return call<SessionResponse>(
+      "GET",
+      `/api/setup/session?phone=${encodeURIComponent(phone)}`
+    )
+  },
+
+  /** Salva/aggiorna campi della sessione di setup. */
+  saveSession(payload: SaveSessionPayload) {
+    return call<{ ok: boolean }>("POST", "/api/setup/session", payload)
+  },
+
+  /**
+   * Cancella campi specifici della sessione (usato dal pulsante Indietro).
+   * Accepted field names: api_id, api_hash, login_key, user_id, group_id,
+   * group_name, mt5_login, mt5_password, mt5_server, sizing_strategy
+   */
+  clearSessionFields(phone: string, fields: string[]) {
+    return call<{ ok: boolean }>("DELETE", "/api/setup/session/fields", { phone, fields })
+  },
+
+  /** Elimina la sessione di setup (usato da "Ricomincia da capo"). */
+  deleteSession(phone: string) {
+    return call<{ ok: boolean }>(
+      "DELETE",
+      `/api/setup/session?phone=${encodeURIComponent(phone)}`
     )
   },
 }

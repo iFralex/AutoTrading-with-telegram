@@ -3,29 +3,36 @@
 import { useState } from "react"
 import { StepIndicator } from "./StepIndicator"
 import { WelcomeStep } from "./steps/WelcomeStep"
+import { PhoneStep } from "./steps/PhoneStep"
 import { TelegramCredentialsStep } from "./steps/TelegramCredentialsStep"
 import { TelegramAuthStep } from "./steps/TelegramAuthStep"
 import { GroupSelectStep } from "./steps/GroupSelectStep"
 import { MT5Step } from "./steps/MT5Step"
+import { SizingStrategyStep } from "./steps/SizingStrategyStep"
 import { CompleteStep } from "./steps/CompleteStep"
+import { api, type SetupSession } from "@/lib/api"
 
 export interface SetupData {
-  // Step 1 — Telegram API
+  // Step 1 — Numero di telefono
+  phone: string
+  // Step 2 — Telegram API
   apiId: string
   apiHash: string
-  // Step 2 — autenticazione Telegram
-  phone: string
+  // Step 2b — login_key da request_code (inviato nel passo credenziali)
+  loginKey: string
+  // Step 3 — autenticazione Telegram
   code: string
-  loginKey: string   // da request_code
-  userId: string     // da verify_code
-  // Step 3 — gruppo
+  userId: string
+  // Step 4 — gruppo
   groupId: string
   groupName: string
-  // Step 4 — MetaTrader 5
+  // Step 5 — MetaTrader 5
   mt5Login: string
   mt5Password: string
   mt5Server: string
   mt5AccountName: string  // da verify_mt5 (per il riepilogo finale)
+  // Step 6 — strategia di sizing
+  sizingStrategy: string
 }
 
 export interface StepProps {
@@ -35,21 +42,39 @@ export interface StepProps {
   onBack: () => void
 }
 
+/**
+ * Passi mostrati nell'indicatore (esclusi Welcome e Phone che hanno layout proprio).
+ * I passi 2-6 corrispondono agli indici 0-4 dell'indicatore.
+ */
 const INDICATOR_STEPS = [
-  { label: "Telegram API" },
+  { label: "Credenziali" },
   { label: "Login" },
   { label: "Gruppo" },
   { label: "MetaTrader" },
+  { label: "Sizing" },
 ]
 
+/**
+ * Wizard di setup.
+ *
+ * Step map:
+ *   0 — Welcome
+ *   1 — PhoneStep (nuovo)
+ *   2 — TelegramCredentialsStep  (invia anche OTP alla fine)
+ *   3 — TelegramAuthStep         (verifica OTP / 2FA)
+ *   4 — GroupSelectStep
+ *   5 — MT5Step
+ *   6 — SizingStrategyStep
+ *   7 — CompleteStep
+ */
 export function SetupWizard() {
   const [step, setStep] = useState(0)
   const [data, setData] = useState<SetupData>({
+    phone: "",
     apiId: "",
     apiHash: "",
-    phone: "",
-    code: "",
     loginKey: "",
+    code: "",
     userId: "",
     groupId: "",
     groupName: "",
@@ -57,28 +82,140 @@ export function SetupWizard() {
     mt5Password: "",
     mt5Server: "",
     mt5AccountName: "",
+    sizingStrategy: "",
   })
 
   const updateData = (partial: Partial<SetupData>) =>
     setData(prev => ({ ...prev, ...partial }))
 
-  const goNext = () => setStep(s => Math.min(s + 1, 5))
-  const goBack = () => setStep(s => Math.max(s - 1, 0))
+  // ── Navigazione con persistenza della sessione ────────────────────────────
+
+  /**
+   * Avanza di un passo e salva in sessione i dati del passo corrente.
+   * La sessione è già stata creata sul server al completamento del PhoneStep.
+   */
+  const goNext = async () => {
+    // Salva i dati del passo appena completato nella sessione server
+    try {
+      switch (step) {
+        case 2:
+          // Credenziali + login_key (OTP già inviato dal TelegramCredentialsStep)
+          await api.saveSession({
+            phone: data.phone,
+            api_id: Number(data.apiId),
+            api_hash: data.apiHash,
+            login_key: data.loginKey,
+          })
+          break
+        case 3:
+          // Autenticazione completata
+          await api.saveSession({ phone: data.phone, user_id: data.userId })
+          break
+        case 4:
+          // Gruppo selezionato
+          await api.saveSession({
+            phone: data.phone,
+            group_id: data.groupId,
+            group_name: data.groupName,
+          })
+          break
+        case 5:
+          // Credenziali MT5
+          await api.saveSession({
+            phone: data.phone,
+            mt5_login: Number(data.mt5Login),
+            mt5_server: data.mt5Server,
+            mt5_password: data.mt5Password,
+          })
+          break
+        case 6:
+          // Strategia di sizing
+          await api.saveSession({
+            phone: data.phone,
+            sizing_strategy: data.sizingStrategy,
+          })
+          break
+      }
+    } catch {
+      // Fallimento del salvataggio sessione non blocca il wizard
+    }
+    setStep(s => Math.min(s + 1, 7))
+  }
+
+  /**
+   * Torna al passo precedente e cancella dalla sessione i dati del passo
+   * che si sta lasciando, così l'utente può reinserirli.
+   */
+  const goBack = async () => {
+    try {
+      switch (step) {
+        case 2:
+          // Lascia le credenziali Telegram (torna al telefono)
+          await api.clearSessionFields(data.phone, ["api_id", "api_hash", "login_key"])
+          updateData({ apiId: "", apiHash: "", loginKey: "" })
+          break
+        case 3:
+          // Lascia l'auth OTP (torna alle credenziali)
+          await api.clearSessionFields(data.phone, ["login_key", "user_id"])
+          updateData({ loginKey: "", userId: "", code: "" })
+          break
+        case 5:
+          // Lascia il passo MT5 (torna al gruppo)
+          await api.clearSessionFields(data.phone, ["mt5_login", "mt5_password", "mt5_server"])
+          updateData({ mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "" })
+          break
+        case 6:
+          // Lascia il sizing (torna a MT5)
+          await api.clearSessionFields(data.phone, ["sizing_strategy"])
+          updateData({ sizingStrategy: "" })
+          break
+        // step 4 (Group → Auth): nessuna pulizia, Auth mostrerà "già autenticato"
+        // step 7 (Complete → Sizing): nessuna pulizia
+      }
+    } catch {
+      // Errore di pulizia sessione: procedi comunque
+    }
+    setStep(s => Math.max(s - 1, 0))
+  }
+
+  /**
+   * Salta direttamente a uno step specifico (usato dal PhoneStep quando
+   * viene trovata una sessione esistente).
+   */
+  const jumpToStep = (targetStep: number, session: SetupSession) => {
+    updateData({
+      apiId:          String(session.api_id ?? ""),
+      apiHash:        session.api_hash ?? "",
+      loginKey:       session.login_key ?? "",
+      userId:         session.user_id ?? "",
+      groupId:        session.group_id ?? "",
+      groupName:      session.group_name ?? "",
+      mt5Login:       String(session.mt5_login ?? ""),
+      mt5Server:      session.mt5_server ?? "",
+      sizingStrategy: session.sizing_strategy ?? "",
+      // mt5Password resta vuoto: viene recuperato dal server in completeSetup
+    })
+    setStep(targetStep)
+  }
 
   const props: StepProps = { data, onDataChange: updateData, onNext: goNext, onBack: goBack }
 
   return (
     <div className="w-full">
-      {step >= 1 && step <= 4 && (
-        <StepIndicator steps={INDICATOR_STEPS} currentStep={step - 1} />
+      {step >= 2 && step <= 6 && (
+        <StepIndicator steps={INDICATOR_STEPS} currentStep={step - 2} />
       )}
       <div key={step} className="step-enter">
         {step === 0 && <WelcomeStep {...props} />}
-        {step === 1 && <TelegramCredentialsStep {...props} />}
-        {step === 2 && <TelegramAuthStep {...props} />}
-        {step === 3 && <GroupSelectStep {...props} />}
-        {step === 4 && <MT5Step {...props} />}
-        {step === 5 && <CompleteStep {...props} />}
+        {step === 1 && (
+          <PhoneStep {...props} onJumpToStep={jumpToStep} />
+        )}
+        {step === 2 && <TelegramCredentialsStep {...props} />}
+        {step === 3 && <TelegramAuthStep {...props} />}
+        {step === 4 && <GroupSelectStep {...props} />}
+        {step === 5 && <MT5Step {...props} />}
+        {step === 6 && <SizingStrategyStep {...props} />}
+        {step === 7 && <CompleteStep {...props} />}
       </div>
     </div>
   )

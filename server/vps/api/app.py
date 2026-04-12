@@ -32,8 +32,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from vps.api.routes.setup import router as setup_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
+from vps.services.setup_session_store import SetupSessionStore
 from vps.services.signal_processor import SignalProcessor
 from vps.services.mt5_trader import MT5Trader
+from vps.services.mt5_range_watcher import RangeOrderWatcher, WatchedOrder
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,7 @@ logger = logging.getLogger(__name__)
 
 _sessions_dir    = _bot_dir / "sessions"
 _db_path         = _bot_dir / "data" / "users.db"
+_sessions_db     = _bot_dir / "data" / "setup_sessions.db"
 _mt5_template    = _bot_dir / "mt5_template"
 _mt5_users_dir   = _bot_dir / "mt5_users"
 
@@ -66,10 +69,15 @@ async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     logger.info("Avvio Trading Bot API...")
 
-    # Database
+    # Database utenti
     store = UserStore(_db_path)
     await store.init()
     app.state.user_store = store
+
+    # Database sessioni di setup temporanee
+    session_store = SetupSessionStore(_sessions_db)
+    await session_store.init()
+    app.state.setup_session_store = session_store
 
     # Gemini signal processor (opzionale: se la chiave non è configurata
     # i messaggi vengono loggati ma non processati)
@@ -91,6 +99,10 @@ async def lifespan(app: FastAPI):
         default_lot=default_lot,
     )
 
+    # Range order watcher
+    range_watcher = RangeOrderWatcher()
+    range_watcher.start()
+
     # Telegram manager
     async def on_message(user_id: str, message: str, raw_event, sender) -> None:
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "title", "?")
@@ -99,12 +111,14 @@ async def lifespan(app: FastAPI):
         if signal_processor is None:
             return
 
-        # ── Step 1+2: classifica ed estrae segnali ────────────────────────────
-        signals = await signal_processor.process(message)
-        if not signals:
+        # ── Step 1: rilevamento rapido (Flash) — prima di aprire MT5 ─────────
+        if not await signal_processor.detect_signal(message):
+            logger.debug("Messaggio classificato come non-segnale (Flash)")
             return
 
-        # ── Step 3: recupera credenziali MT5 dal DB ───────────────────────────
+        logger.info("Segnale rilevato — recupero credenziali utente %s...", user_id)
+
+        # ── Step 2: recupera credenziali MT5 dal DB ───────────────────────────
         user = await store.get_user(user_id)
         if user is None:
             logger.error("Utente %s non trovato nel DB — skip", user_id)
@@ -120,7 +134,32 @@ async def lifespan(app: FastAPI):
             )
             return
 
-        # ── Step 4: esegui gli ordini su MT5 ─────────────────────────────────
+        # ── Step 3: recupera info conto per il calcolo sizing ─────────────────
+        sizing_strategy = user.get("sizing_strategy") or None
+        account_info: dict | None = None
+        if sizing_strategy:
+            account_info = await mt5_trader.get_account_info(
+                user_id      = user_id,
+                mt5_login    = int(mt5_login),
+                mt5_password = mt5_password,
+                mt5_server   = mt5_server,
+            )
+            if account_info is None:
+                logger.warning(
+                    "Utente %s: account_info non disponibile — sizing senza contesto conto",
+                    user_id,
+                )
+
+        # ── Step 4: extraction strutturata (Pro) con contesto sizing ──────────
+        signals = await signal_processor.extract_signals(
+            message,
+            sizing_strategy=sizing_strategy,
+            account_info=account_info,
+        )
+        if not signals:
+            return
+
+        # ── Step 5: esegui gli ordini su MT5 ─────────────────────────────────
         results = await mt5_trader.execute_signals(
             user_id      = user_id,
             signals      = signals,
@@ -135,6 +174,28 @@ async def lifespan(app: FastAPI):
             "Utente %s: %d ordini OK, %d falliti su %d segnali",
             user_id, ok, err, len(signals),
         )
+
+        # ── Step 6: registra ordini range nel watcher ─────────────────────────
+        for result in results:
+            sig = result.signal
+            if (
+                result.success
+                and result.order_id is not None
+                and sig is not None
+                and isinstance(sig.entry_price, list)
+            ):
+                range_watcher.add(WatchedOrder(
+                    ticket       = result.order_id,
+                    symbol       = sig.symbol,
+                    order_type   = sig.order_type,
+                    sl           = sig.stop_loss,
+                    tp           = sig.take_profit,
+                    user_id      = user_id,
+                    user_dir     = _mt5_users_dir / user_id,
+                    mt5_login    = int(mt5_login),
+                    mt5_password = mt5_password,
+                    mt5_server   = mt5_server,
+                ))
 
     tm = TelegramManager(sessions_dir=_sessions_dir, on_message=on_message)
     tm.start()
@@ -153,6 +214,7 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
+    await range_watcher.stop()
     tm.stop()
     logger.info("Trading Bot API fermata")
 

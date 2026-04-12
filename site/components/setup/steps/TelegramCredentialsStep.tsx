@@ -1,4 +1,7 @@
-import { ExternalLink, Info } from "lucide-react"
+"use client"
+
+import { useState } from "react"
+import { ExternalLink, Info, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -9,6 +12,8 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ErrorAlert } from "../ErrorAlert"
+import { api, ApiError } from "@/lib/api"
 import type { StepProps } from "../SetupWizard"
 
 export function TelegramCredentialsStep({
@@ -17,14 +22,39 @@ export function TelegramCredentialsStep({
   onNext,
   onBack,
 }: StepProps) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
   const canNext = data.apiId.trim() !== "" && data.apiHash.trim() !== ""
+
+  /**
+   * Invia il codice OTP usando le credenziali inserite e il numero di telefono
+   * già salvato nel passo precedente, poi avanza al passo di verifica.
+   */
+  async function handleSendCode() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.requestCode(
+        Number(data.apiId),
+        data.apiHash,
+        data.phone,
+      )
+      onDataChange({ loginKey: res.login_key })
+      onNext()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Errore imprevisto")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <Card>
       <CardHeader className="px-8 pt-8 pb-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 text-primary font-bold text-sm">
-            1
+            2
           </div>
           <div>
             <CardTitle>Credenziali Telegram API</CardTitle>
@@ -65,7 +95,8 @@ export function TelegramCredentialsStep({
             type="number"
             placeholder="12345678"
             value={data.apiId}
-            onChange={e => onDataChange({ apiId: e.target.value })}
+            onChange={e => { onDataChange({ apiId: e.target.value }); setError(null) }}
+            disabled={loading}
           />
         </div>
 
@@ -75,19 +106,29 @@ export function TelegramCredentialsStep({
             id="apiHash"
             placeholder="0123456789abcdef0123456789abcdef"
             value={data.apiHash}
-            onChange={e => onDataChange({ apiHash: e.target.value })}
+            onChange={e => { onDataChange({ apiHash: e.target.value }); setError(null) }}
             className="font-mono text-xs"
+            disabled={loading}
           />
         </div>
 
+        {error && <ErrorAlert message={error} />}
+
         <div className="flex gap-3 pt-2">
-          <Button variant="outline" onClick={onBack} className="flex-1">
+          <Button variant="outline" onClick={onBack} disabled={loading} className="flex-1">
             Indietro
           </Button>
-          <Button onClick={onNext} disabled={!canNext} className="flex-1">
-            Continua
+          <Button onClick={handleSendCode} disabled={!canNext || loading} className="flex-1">
+            {loading
+              ? <><Loader2 className="size-4 animate-spin" />Invio codice...</>
+              : "Continua"
+            }
           </Button>
         </div>
+
+        <p className="text-xs text-center text-muted-foreground -mt-1">
+          Invieremo un codice di verifica a <strong className="text-foreground">+{data.phone}</strong>
+        </p>
       </CardContent>
     </Card>
   )

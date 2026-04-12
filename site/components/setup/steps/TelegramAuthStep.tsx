@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Phone, MessageSquare, Lock, RefreshCw, Loader2 } from "lucide-react"
+import { MessageSquare, Lock, RefreshCw, Loader2, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -12,34 +12,16 @@ import { ErrorAlert } from "../ErrorAlert"
 import { api, ApiError } from "@/lib/api"
 import type { StepProps } from "../SetupWizard"
 
-type SubStep = "phone" | "code" | "2fa"
+type SubStep = "code" | "2fa" | "done"
 
 export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepProps) {
-  const [subStep, setSubStep] = useState<SubStep>("phone")
+  // Se userId è già impostato (ripresa sessione) → mostra la vista "done"
+  const [subStep, setSubStep] = useState<SubStep>(data.userId ? "done" : "code")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [twoFaPassword, setTwoFaPassword] = useState("")
 
   const clearError = () => setError(null)
-
-  // ── Sub-step: telefono ───────────────────────────────────────────────────
-
-  async function handleSendCode() {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await api.requestCode(
-        Number(data.apiId),
-        data.apiHash,
-        data.phone
-      )
-      onDataChange({ loginKey: res.login_key })
-      setSubStep("code")
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Errore imprevisto")
-    } finally {
-      setLoading(false)
-    }
-  }
 
   // ── Sub-step: codice OTP ─────────────────────────────────────────────────
 
@@ -50,12 +32,10 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
       const res = await api.verifyCode(data.loginKey, data.code)
 
       if ("error" in res && res.error === "2fa_required") {
-        // Account con verifica in due passaggi
         setSubStep("2fa")
         return
       }
 
-      // Login completato
       onDataChange({ userId: res.user_id })
       onNext()
     } catch (err) {
@@ -66,8 +46,6 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
   }
 
   // ── Sub-step: password 2FA ───────────────────────────────────────────────
-
-  const [twoFaPassword, setTwoFaPassword] = useState("")
 
   async function handleVerifyPassword() {
     setLoading(true)
@@ -83,65 +61,46 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Sub-step: già autenticato (ripresa sessione) ─────────────────────────
 
-  function goBackToPhone() {
-    setSubStep("phone")
-    onDataChange({ code: "", loginKey: "" })
-    clearError()
-  }
-
-  if (subStep === "phone") {
+  if (subStep === "done") {
     return (
       <Card>
         <CardHeader className="px-8 pt-8 pb-4">
           <div className="flex items-center gap-3 mb-1">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 text-primary font-bold text-sm">
-              2
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/20">
+              <CheckCircle2 className="size-4 text-emerald-400" />
             </div>
             <div>
-              <CardTitle>Login Telegram</CardTitle>
+              <CardTitle>Già autenticato</CardTitle>
               <CardDescription className="mt-0.5">
-                Inserisci il numero del tuo account Telegram
+                Il tuo account Telegram è già stato verificato in questa sessione
               </CardDescription>
             </div>
           </div>
         </CardHeader>
 
         <CardContent className="px-8 pb-8 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="phone">Numero di telefono</Label>
-            <div className="flex gap-2">
-              <div className="flex h-10 items-center rounded-lg border border-input bg-input/30 px-3 text-sm text-muted-foreground shrink-0 gap-1.5">
-                <Phone className="size-3.5" />+
-              </div>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="39 333 123 4567"
-                value={data.phone}
-                onChange={e => { onDataChange({ phone: e.target.value }); clearError() }}
-                onKeyDown={e => e.key === "Enter" && !loading && data.phone.trim() && handleSendCode()}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Formato internazionale senza il + (es:{" "}
-              <span className="font-mono text-foreground/70">393331234567</span>)
+          <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/15 p-4">
+            <p className="text-sm text-muted-foreground">
+              Puoi procedere direttamente al passo successivo oppure tornare
+              indietro per modificare le credenziali Telegram.
             </p>
           </div>
 
-          {error && <ErrorAlert message={error} />}
-
           <div className="flex gap-3 pt-2">
-            <Button variant="outline" onClick={onBack} disabled={loading} className="flex-1">
-              Indietro
-            </Button>
             <Button
-              onClick={handleSendCode}
-              disabled={!data.phone.trim() || loading}
+              variant="outline"
+              onClick={() => {
+                // Torna a credenziali: l'onBack del wizard pulirà login_key e userId
+                onBack()
+              }}
               className="flex-1"
             >
-              {loading ? <><Loader2 className="size-4 animate-spin" />Invio...</> : "Invia codice"}
+              Indietro
+            </Button>
+            <Button onClick={onNext} className="flex-1">
+              Continua
             </Button>
           </div>
         </CardContent>
@@ -149,13 +108,15 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
     )
   }
 
+  // ── Sub-step: codice OTP ─────────────────────────────────────────────────
+
   if (subStep === "code") {
     return (
       <Card>
         <CardHeader className="px-8 pt-8 pb-4">
           <div className="flex items-center gap-3 mb-1">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 text-primary font-bold text-sm">
-              2
+              3
             </div>
             <div>
               <CardTitle>Inserisci il codice</CardTitle>
@@ -184,18 +145,18 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
               />
             </div>
             <button
-              onClick={goBackToPhone}
+              onClick={() => { onDataChange({ code: "" }); onBack() }}
               className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
             >
               <RefreshCw className="size-3" />
-              Cambia numero
+              Cambia credenziali / numero
             </button>
           </div>
 
           {error && <ErrorAlert message={error} />}
 
           <div className="flex gap-3 pt-2">
-            <Button variant="outline" onClick={goBackToPhone} disabled={loading} className="flex-1">
+            <Button variant="outline" onClick={onBack} disabled={loading} className="flex-1">
               Indietro
             </Button>
             <Button
@@ -211,13 +172,14 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
     )
   }
 
-  // sub-step: 2FA
+  // ── Sub-step: 2FA ────────────────────────────────────────────────────────
+
   return (
     <Card>
       <CardHeader className="px-8 pt-8 pb-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 text-primary font-bold text-sm">
-            2
+            3
           </div>
           <div>
             <CardTitle>Verifica in due passaggi</CardTitle>
@@ -252,7 +214,12 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
         {error && <ErrorAlert message={error} />}
 
         <div className="flex gap-3 pt-2">
-          <Button variant="outline" onClick={() => { setSubStep("code"); clearError() }} disabled={loading} className="flex-1">
+          <Button
+            variant="outline"
+            onClick={() => { setSubStep("code"); clearError() }}
+            disabled={loading}
+            className="flex-1"
+          >
             Indietro
           </Button>
           <Button
