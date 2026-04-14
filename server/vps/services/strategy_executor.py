@@ -50,15 +50,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import google.generativeai as genai
-from google.generativeai import protos
+from google import genai
+from google.genai import types
 
 from vps.services.signal_processor import TradeSignal
 from vps.services.mt5_trader import MT5Trader
 
 logger = logging.getLogger(__name__)
 
-_PRO_MODEL    = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro-preview")
+_PRO_MODEL    = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro-preview-03-25")
 MAX_ITERATIONS = 30   # sicurezza: max cicli tool-call per esecuzione
 
 
@@ -509,7 +509,7 @@ class StrategyExecutor:
     """
 
     def __init__(self, api_key: str, mt5_trader: MT5Trader) -> None:
-        genai.configure(api_key=api_key)
+        self._client     = genai.Client(api_key=api_key)
         self._trader     = mt5_trader
         self._user_locks: dict[str, asyncio.Lock] = {}
         logger.info("StrategyExecutor inizializzato (model=%s)", _PRO_MODEL)
@@ -631,35 +631,29 @@ class StrategyExecutor:
         Ciclo principale: invia il prompt a Gemini, esegue i tool call in loop
         finché l'AI non produce una risposta finale (senza function call).
         """
-        tools      = _make_tools(include_pretrade=include_pretrade_tools)
-        tool_log:  list[dict] = []
+        tools     = _make_tools(include_pretrade=include_pretrade_tools)
+        tool_log: list[dict] = []
 
         system_prompt = _build_system_prompt(management_strategy)
-        full_prompt   = f"{system_prompt}\n\n{event_prompt}"
-
-        model = genai.GenerativeModel(model_name=_PRO_MODEL, tools=tools)  # type: ignore[arg-type]
-        chat  = model.start_chat()
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            tools=tools,  # type: ignore[arg-type]
+        )
+        chat = self._client.aio.chats.create(model=_PRO_MODEL, config=config)
 
         try:
-            response = await chat.send_message_async(full_prompt)
+            response = await chat.send_message(event_prompt)
         except Exception as exc:
             logger.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
             return StrategyResult(event_type="", error=str(exc))
 
         for iteration in range(MAX_ITERATIONS):
             # Raccogli tutti i function call della risposta corrente
-            fn_calls = [
-                p.function_call
-                for p in response.parts
-                if hasattr(p, "function_call") and p.function_call.name
-            ]
+            fn_calls = response.function_calls or []
 
             if not fn_calls:
                 # L'AI ha finito — raccoglie il testo finale
-                final_text = ""
-                for p in response.parts:
-                    if hasattr(p, "text") and p.text:
-                        final_text += p.text
+                final_text = response.text or ""
                 logger.info(
                     "StrategyExecutor utente %s: completato in %d iterazioni, %d tool call",
                     ctx.user_id, iteration + 1, len(tool_log),
@@ -670,11 +664,11 @@ class StrategyExecutor:
                     final_response=final_text.strip(),
                 )
 
-            # Esegui tutti i tool call in parallelo (letture) o sequenziali (scritture)
+            # Esegui i tool call e prepara le risposte
             fn_response_parts = []
             for fc in fn_calls:
-                name   = fc.name
-                args   = {k: v for k, v in fc.args.items()}
+                name = fc.name
+                args = dict(fc.args)
                 logger.debug("StrategyExecutor: tool call %s(%s)", name, args)
 
                 result_data = await self._dispatch(
@@ -684,17 +678,15 @@ class StrategyExecutor:
                 tool_log.append({"name": name, "args": args, "result": result_data})
 
                 fn_response_parts.append(
-                    protos.Part(
-                        function_response=protos.FunctionResponse(
-                            name=name,
-                            response={"result": json.dumps(result_data, default=str)},
-                        )
+                    types.Part.from_function_response(
+                        name=name,
+                        response={"result": json.dumps(result_data, default=str)},
                     )
                 )
 
             # Manda i risultati dei tool back all'AI
             try:
-                response = await chat.send_message_async(fn_response_parts)
+                response = await chat.send_message(fn_response_parts)
             except Exception as exc:
                 logger.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
                 return StrategyResult(

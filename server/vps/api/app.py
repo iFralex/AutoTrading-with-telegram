@@ -510,6 +510,64 @@ async def health():
     }
 
 
+# ── Utilità avvio ─────────────────────────────────────────────────────────────
+
+def _free_port_if_occupied(host: str, port: int) -> None:
+    """
+    Controlla se la porta è già occupata e, in caso, termina il processo
+    che la sta usando (utile quando il Task Scheduler rilancia il bot
+    mentre un'istanza precedente è ancora in esecuzione).
+    """
+    import socket
+    import subprocess
+    import sys
+
+    check_host = "127.0.0.1" if host == "0.0.0.0" else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)
+        if sock.connect_ex((check_host, port)) != 0:
+            return  # porta libera
+
+    logger.warning("Porta %d già in uso — cerco il processo da terminare...", port)
+
+    if sys.platform == "win32":
+        try:
+            out = subprocess.check_output(
+                ["netstat", "-ano"], text=True, errors="replace"
+            )
+            pid = None
+            for line in out.splitlines():
+                cols = line.split()
+                # formato: Proto  Indirizzo_locale  Indirizzo_remoto  Stato  PID
+                if len(cols) >= 5 and f":{port}" in cols[1] and cols[3] == "LISTENING":
+                    candidate = int(cols[-1])
+                    if candidate != os.getpid():
+                        pid = candidate
+                        break
+            if pid:
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], check=True)
+                logger.info("Processo %d terminato — porta %d liberata", pid, port)
+            else:
+                logger.warning(
+                    "Nessun processo esterno trovato in ascolto sulla porta %d", port
+                )
+        except Exception as exc:
+            logger.error("Impossibile liberare la porta %d: %s", port, exc)
+    else:
+        try:
+            import signal as _signal
+            out = subprocess.check_output(
+                ["lsof", "-t", f"-i:{port}"], text=True, errors="replace"
+            ).strip()
+            for pid_str in out.splitlines():
+                pid = int(pid_str.strip())
+                if pid != os.getpid():
+                    os.kill(pid, _signal.SIGTERM)
+                    logger.info("Processo %d terminato — porta %d liberata", pid, port)
+        except Exception as exc:
+            logger.error("Impossibile liberare la porta %d: %s", port, exc)
+
+
 # ── Avvio diretto ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -517,6 +575,8 @@ if __name__ == "__main__":
 
     host = os.environ.get("API_HOST", "0.0.0.0")
     port = int(os.environ.get("API_PORT", "8000"))
+
+    _free_port_if_occupied(host, port)
 
     logger.info("Avvio uvicorn su %s:%d", host, port)
     uvicorn.run(

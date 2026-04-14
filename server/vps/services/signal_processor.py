@@ -18,12 +18,12 @@ import logging
 import os
 from dataclasses import dataclass
 
-import google.generativeai as genai
+from google import genai
 
 logger = logging.getLogger(__name__)
 
-FLASH_MODEL = os.environ.get("GEMINI_FLASH_MODEL", "gemini-2.5-flash-preview")
-PRO_MODEL   = os.environ.get("GEMINI_PRO_MODEL",   "gemini-2.5-pro-preview")
+FLASH_MODEL = os.environ.get("GEMINI_FLASH_MODEL", "gemini-2.5-flash-preview-04-17")
+PRO_MODEL   = os.environ.get("GEMINI_PRO_MODEL",   "gemini-2.5-pro-preview-03-25")
 
 
 # ── Struttura dati ────────────────────────────────────────────────────────────
@@ -88,9 +88,7 @@ class SignalProcessor:
     """
 
     def __init__(self, api_key: str) -> None:
-        genai.configure(api_key=api_key)
-        self._flash = genai.GenerativeModel(FLASH_MODEL)
-        self._pro   = genai.GenerativeModel(PRO_MODEL)
+        self._client = genai.Client(api_key=api_key)
         logger.info(
             "SignalProcessor inizializzato (flash=%s, pro=%s)",
             FLASH_MODEL, PRO_MODEL,
@@ -172,8 +170,9 @@ class SignalProcessor:
     # ── Internals ─────────────────────────────────────────────────────────────
 
     async def _detect(self, message: str) -> bool:
-        resp = await self._flash.generate_content_async(
-            _DETECTION_PROMPT.format(message=message)
+        resp = await self._client.aio.models.generate_content(
+            model=FLASH_MODEL,
+            contents=_DETECTION_PROMPT.format(message=message),
         )
         return resp.text.strip().upper().startswith("YES")
 
@@ -188,7 +187,10 @@ class SignalProcessor:
             message=message,
             sizing_section=sizing_section,
         )
-        resp = await self._pro.generate_content_async(prompt)
+        resp = await self._client.aio.models.generate_content(
+            model=PRO_MODEL,
+            contents=prompt,
+        )
         text = resp.text.strip()
 
         # Rimuovi eventuale wrapper markdown ```json ... ```

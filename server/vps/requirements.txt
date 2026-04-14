@@ -16,4 +16,4 @@ cryptography>=43.0.0
 MetaTrader5>=5.0.4424
 
 # ── AI — parsing segnali ──────────────────────────────────────────────────────
-google-generativeai>=0.8.0
+google-genai>=1.0.0
