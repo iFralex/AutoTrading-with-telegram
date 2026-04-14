@@ -7,6 +7,8 @@ import {
   type SignalLog,
   type TradeSignalLog,
   type TradeResultLog,
+  type TestSignalInput,
+  type TestOrderResponse,
 } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -153,6 +155,123 @@ function AccountInfoBox({ info }: { info: NonNullable<SignalLog["account_info"]>
     </div>
   )
 }
+
+// ── Esempio JSON pre-compilato (formato output AI) ────────────────────────────
+
+const EXAMPLE_SIGNALS: TestSignalInput[] = [
+  {
+    symbol:      "XAUUSD",
+    order_type:  "BUY",
+    entry_price: null,
+    stop_loss:   2580.00,
+    take_profit: 2640.00,
+    lot_size:    0.01,
+    order_mode:  "MARKET",
+  },
+]
+
+// ── Pannello test ordine diretto ──────────────────────────────────────────────
+
+function TestOrderPanel({ userId }: { userId: string }) {
+  const [open, setOpen]         = useState(false)
+  const [json, setJson]         = useState(JSON.stringify(EXAMPLE_SIGNALS, null, 2))
+  const [loading, setLoading]   = useState(false)
+  const [result, setResult]     = useState<TestOrderResponse | null>(null)
+  const [error, setError]       = useState<string | null>(null)
+
+  const run = useCallback(async () => {
+    setError(null)
+    setResult(null)
+
+    let signals: TestSignalInput[]
+    try {
+      const parsed = JSON.parse(json)
+      if (!Array.isArray(parsed)) throw new Error("Il JSON deve essere un array")
+      signals = parsed as TestSignalInput[]
+    } catch (e: unknown) {
+      setError(e instanceof Error ? `JSON non valido: ${e.message}` : "JSON non valido")
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await api.testOrder(userId, signals)
+      setResult(res)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore sconosciuto")
+    } finally {
+      setLoading(false)
+    }
+  }, [userId, json])
+
+  return (
+    <div className="rounded-xl border border-indigo-500/20 bg-indigo-600/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-indigo-600/10 transition-colors"
+      >
+        <span className="text-indigo-400 font-mono text-sm">⚡</span>
+        <span className="text-sm font-medium text-indigo-300">Test ordine diretto</span>
+        <span className="text-xs text-muted-foreground ml-1">
+          — invia JSON nel formato AI direttamente a MT5
+        </span>
+        <span className="ml-auto text-muted-foreground text-sm">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3 border-t border-indigo-500/15 pt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Incolla l&apos;array JSON che l&apos;AI produrrebbe (stesso schema di{" "}
+            <code className="text-indigo-300 bg-indigo-900/30 px-1 rounded">SignalProcessor</code>).
+            L&apos;ordine viene eseguito su MT5 reale — usa lotti minimi.
+          </p>
+
+          <textarea
+            value={json}
+            onChange={e => setJson(e.target.value)}
+            rows={12}
+            spellCheck={false}
+            className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-xs font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50"
+          />
+
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={run}
+              disabled={loading}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+            >
+              {loading ? "Esecuzione…" : "Esegui su MT5"}
+            </Button>
+            <button
+              onClick={() => { setJson(JSON.stringify(EXAMPLE_SIGNALS, null, 2)); setResult(null); setError(null) }}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Ripristina esempio
+            </button>
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-500/20 bg-red-600/5 p-3 text-xs font-mono text-red-400">
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                Risposta MT5 ({result.results.length} risultati)
+              </p>
+              {result.results.map((res, i) => (
+                <TradeResultRow key={i} res={res} idx={i} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function LogEntry({ log, defaultExpanded }: { log: SignalLog; defaultExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? false)
@@ -464,6 +583,9 @@ export function Dashboard() {
         <div className="space-y-5">
           {/* Profilo utente */}
           <UserCard data={data.user} />
+
+          {/* Test ordine diretto */}
+          <TestOrderPanel userId={data.user.user_id} />
 
           {/* Stats */}
           <StatsBar logs={data.logs} total={data.total_logs} />

@@ -2,18 +2,52 @@
 Dashboard API — dati di debug per utente (ricerca per numero di telefono).
 
 Endpoints:
-  GET /api/dashboard/user?phone={phone}
-      Ritorna le info dell'utente registrato + i log segnali più recenti.
+  GET  /api/dashboard/user?phone={phone}
+       Ritorna le info dell'utente registrato + i log segnali più recenti.
 
-  GET /api/dashboard/logs?user_id={user_id}&limit=50&offset=0
-      Paginazione dei log segnali (per infinite-scroll nel frontend).
+  GET  /api/dashboard/logs?user_id={user_id}&limit=50&offset=0
+       Paginazione dei log segnali (per infinite-scroll nel frontend).
+
+  POST /api/dashboard/test-order
+       Esegue direttamente un array di segnali (formato JSON AI) su MT5
+       e ritorna i TradeResult. Utile per testare la connettività MT5.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
+
+from vps.services.signal_processor import TradeSignal
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+
+# ── Modelli request/response test-order ──────────────────────────────────────
+
+class TestSignalInput(BaseModel):
+    """Stesso schema prodotto da Gemini Pro / SignalProcessor."""
+    symbol:      str
+    order_type:  str
+    entry_price: float | list[float] | None = None
+    stop_loss:   float | None = None
+    take_profit: float | None = None
+    lot_size:    float | None = None
+    order_mode:  str = "MARKET"
+
+
+class TestOrderRequest(BaseModel):
+    user_id: str
+    signals: list[TestSignalInput]
+
+
+class TestOrderResult(BaseModel):
+    success:  bool
+    order_id: int | None
+    error:    str | None
+    signal:   dict[str, Any] | None
 
 
 @router.get("/user")
@@ -45,6 +79,71 @@ async def get_dashboard_user(
         "user":        user_safe,
         "logs":        logs,
         "total_logs":  total,
+    }
+
+
+@router.post("/test-order")
+async def test_order(
+    body: TestOrderRequest,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Esegue direttamente i segnali forniti su MT5 per l'utente indicato.
+    I segnali devono essere nel formato JSON prodotto dall'AI (vedi TestSignalInput).
+    Ritorna la lista dei TradeResult senza scrivere nulla nel log.
+    """
+    store      = request.app.state.user_store
+    mt5_trader = request.app.state.mt5_trader
+
+    user = await store.get_user(body.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
+
+    mt5_login    = user.get("mt5_login")
+    mt5_password = user.get("mt5_password")
+    mt5_server   = user.get("mt5_server")
+
+    if not (mt5_login and mt5_password and mt5_server):
+        raise HTTPException(
+            status_code=422,
+            detail="Credenziali MT5 mancanti per questo utente (login / password / server)"
+        )
+
+    if not body.signals:
+        raise HTTPException(status_code=422, detail="Lista segnali vuota")
+
+    signals = [
+        TradeSignal(
+            symbol      = s.symbol.upper().strip(),
+            order_type  = s.order_type.upper().strip(),
+            entry_price = s.entry_price,
+            stop_loss   = s.stop_loss,
+            take_profit = s.take_profit,
+            lot_size    = s.lot_size,
+            order_mode  = s.order_mode.upper().strip(),
+        )
+        for s in body.signals
+    ]
+
+    results = await mt5_trader.execute_signals(
+        user_id      = body.user_id,
+        signals      = signals,
+        mt5_login    = int(mt5_login),
+        mt5_password = mt5_password,
+        mt5_server   = mt5_server,
+    )
+
+    from dataclasses import asdict
+    return {
+        "results": [
+            {
+                "success":  r.success,
+                "order_id": r.order_id,
+                "error":    r.error,
+                "signal":   asdict(r.signal) if r.signal else None,
+            }
+            for r in results
+        ]
     }
 
 

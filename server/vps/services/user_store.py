@@ -3,18 +3,19 @@ UserStore — persistenza utenti su SQLite con aiosqlite.
 
 Schema:
   users(
-    user_id          TEXT PRIMARY KEY,   -- Telegram user ID
-    api_id           INTEGER NOT NULL,
-    api_hash         TEXT    NOT NULL,
-    phone            TEXT    NOT NULL,
-    group_id         INTEGER NOT NULL,
-    group_name       TEXT    NOT NULL,
-    mt5_login        INTEGER,
-    mt5_password_enc TEXT,               -- cifrato con Fernet
-    mt5_server       TEXT,
-    sizing_strategy  TEXT,               -- strategia di sizing in testo libero
-    active           INTEGER DEFAULT 1,
-    created_at       TEXT    DEFAULT CURRENT_TIMESTAMP
+    user_id             TEXT PRIMARY KEY,   -- Telegram user ID
+    api_id              INTEGER NOT NULL,
+    api_hash            TEXT    NOT NULL,
+    phone               TEXT    NOT NULL,
+    group_id            INTEGER NOT NULL,
+    group_name          TEXT    NOT NULL,
+    mt5_login           INTEGER,
+    mt5_password_enc    TEXT,               -- cifrato con Fernet
+    mt5_server          TEXT,
+    sizing_strategy     TEXT,               -- strategia di sizing (iniettata nel prompt Pro)
+    management_strategy TEXT,               -- strategia di gestione (eseguita dal StrategyExecutor)
+    active              INTEGER DEFAULT 1,
+    created_at          TEXT    DEFAULT CURRENT_TIMESTAMP
   )
 """
 
@@ -28,24 +29,26 @@ from cryptography.fernet import Fernet
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS users (
-    user_id          TEXT    PRIMARY KEY,
-    api_id           INTEGER NOT NULL,
-    api_hash         TEXT    NOT NULL,
-    phone            TEXT    NOT NULL,
-    group_id         INTEGER NOT NULL,
-    group_name       TEXT    NOT NULL,
-    mt5_login        INTEGER,
-    mt5_password_enc TEXT,
-    mt5_server       TEXT,
-    sizing_strategy  TEXT,
-    active           INTEGER NOT NULL DEFAULT 1,
-    created_at       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    user_id             TEXT    PRIMARY KEY,
+    api_id              INTEGER NOT NULL,
+    api_hash            TEXT    NOT NULL,
+    phone               TEXT    NOT NULL,
+    group_id            INTEGER NOT NULL,
+    group_name          TEXT    NOT NULL,
+    mt5_login           INTEGER,
+    mt5_password_enc    TEXT,
+    mt5_server          TEXT,
+    sizing_strategy     TEXT,
+    management_strategy TEXT,
+    active              INTEGER NOT NULL DEFAULT 1,
+    created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
 # Migrations: colonne aggiunte dopo la versione iniziale dello schema
 _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN sizing_strategy TEXT",
+    "ALTER TABLE users ADD COLUMN management_strategy TEXT",
 ]
 
 
@@ -118,20 +121,21 @@ class UserStore:
                     (user_id, api_id, api_hash, phone,
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
-                     sizing_strategy, active)
+                     sizing_strategy, management_strategy, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    api_id           = excluded.api_id,
-                    api_hash         = excluded.api_hash,
-                    phone            = excluded.phone,
-                    group_id         = excluded.group_id,
-                    group_name       = excluded.group_name,
-                    mt5_login        = excluded.mt5_login,
-                    mt5_password_enc = excluded.mt5_password_enc,
-                    mt5_server       = excluded.mt5_server,
-                    sizing_strategy  = excluded.sizing_strategy,
-                    active           = 1
+                    api_id              = excluded.api_id,
+                    api_hash            = excluded.api_hash,
+                    phone               = excluded.phone,
+                    group_id            = excluded.group_id,
+                    group_name          = excluded.group_name,
+                    mt5_login           = excluded.mt5_login,
+                    mt5_password_enc    = excluded.mt5_password_enc,
+                    mt5_server          = excluded.mt5_server,
+                    sizing_strategy     = excluded.sizing_strategy,
+                    management_strategy = excluded.management_strategy,
+                    active              = 1
                 """,
                 (
                     user["user_id"],
@@ -144,6 +148,7 @@ class UserStore:
                     mt5_password_enc,
                     user.get("mt5_server"),
                     user.get("sizing_strategy"),
+                    user.get("management_strategy"),
                 ),
             )
             await db.commit()
@@ -186,16 +191,17 @@ class UserStore:
 
             result.append(
                 {
-                    "user_id":         row["user_id"],
-                    "api_id":          row["api_id"],
-                    "api_hash":        row["api_hash"],
-                    "phone":           row["phone"],
-                    "group_id":        row["group_id"],
-                    "group_name":      row["group_name"],
-                    "mt5_login":       row["mt5_login"],
-                    "mt5_password":    mt5_password,
-                    "mt5_server":      row["mt5_server"],
-                    "sizing_strategy": row["sizing_strategy"],
+                    "user_id":             row["user_id"],
+                    "api_id":              row["api_id"],
+                    "api_hash":            row["api_hash"],
+                    "phone":               row["phone"],
+                    "group_id":            row["group_id"],
+                    "group_name":          row["group_name"],
+                    "mt5_login":           row["mt5_login"],
+                    "mt5_password":        mt5_password,
+                    "mt5_server":          row["mt5_server"],
+                    "sizing_strategy":     row["sizing_strategy"],
+                    "management_strategy": row["management_strategy"],
                 }
             )
         return result
@@ -220,18 +226,19 @@ class UserStore:
                 pass
 
         return {
-            "user_id":         row["user_id"],
-            "api_id":          row["api_id"],
-            "api_hash":        row["api_hash"],
-            "phone":           row["phone"],
-            "group_id":        row["group_id"],
-            "group_name":      row["group_name"],
-            "mt5_login":       row["mt5_login"],
-            "mt5_password":    mt5_password,
-            "mt5_server":      row["mt5_server"],
-            "sizing_strategy": row["sizing_strategy"],
-            "active":          bool(row["active"]),
-            "created_at":      row["created_at"],
+            "user_id":             row["user_id"],
+            "api_id":              row["api_id"],
+            "api_hash":            row["api_hash"],
+            "phone":               row["phone"],
+            "group_id":            row["group_id"],
+            "group_name":          row["group_name"],
+            "mt5_login":           row["mt5_login"],
+            "mt5_password":        mt5_password,
+            "mt5_server":          row["mt5_server"],
+            "sizing_strategy":     row["sizing_strategy"],
+            "management_strategy": row["management_strategy"],
+            "active":              bool(row["active"]),
+            "created_at":          row["created_at"],
         }
 
     async def get_user(self, user_id: str) -> dict | None:
@@ -253,16 +260,17 @@ class UserStore:
                 pass
 
         return {
-            "user_id":         row["user_id"],
-            "api_id":          row["api_id"],
-            "api_hash":        row["api_hash"],
-            "phone":           row["phone"],
-            "group_id":        row["group_id"],
-            "group_name":      row["group_name"],
-            "mt5_login":       row["mt5_login"],
-            "mt5_password":    mt5_password,
-            "mt5_server":      row["mt5_server"],
-            "sizing_strategy": row["sizing_strategy"],
-            "active":          bool(row["active"]),
-            "created_at":      row["created_at"],
+            "user_id":             row["user_id"],
+            "api_id":              row["api_id"],
+            "api_hash":            row["api_hash"],
+            "phone":               row["phone"],
+            "group_id":            row["group_id"],
+            "group_name":          row["group_name"],
+            "mt5_login":           row["mt5_login"],
+            "mt5_password":        mt5_password,
+            "mt5_server":          row["mt5_server"],
+            "sizing_strategy":     row["sizing_strategy"],
+            "management_strategy": row["management_strategy"],
+            "active":              bool(row["active"]),
+            "created_at":          row["created_at"],
         }

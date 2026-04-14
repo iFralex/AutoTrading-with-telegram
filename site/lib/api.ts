@@ -199,6 +199,21 @@ export interface DashboardLogsResponse {
   total: number
 }
 
+/** Stesso schema accettato da POST /api/dashboard/test-order */
+export interface TestSignalInput {
+  symbol:      string
+  order_type:  "BUY" | "SELL"
+  entry_price: number | [number, number] | null
+  stop_loss:   number | null
+  take_profit: number | null
+  lot_size:    number | null
+  order_mode:  "MARKET" | "LIMIT" | "STOP"
+}
+
+export interface TestOrderResponse {
+  results: TradeResultLog[]
+}
+
 export const api = {
   /**
    * Step 2a — invia il codice OTP al numero di telefono.
@@ -312,5 +327,16 @@ export const api = {
       "GET",
       `/api/dashboard/logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`
     )
+  },
+
+  /**
+   * Esegue direttamente un array di segnali (formato JSON AI) su MT5
+   * per l'utente indicato e ritorna i TradeResult.
+   */
+  testOrder(userId: string, signals: TestSignalInput[]) {
+    return call<TestOrderResponse>("POST", "/api/dashboard/test-order", {
+      user_id: userId,
+      signals,
+    })
   },
 }

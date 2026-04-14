@@ -37,7 +37,10 @@ from vps.services.setup_session_store import SetupSessionStore
 from vps.services.signal_processor import SignalProcessor
 from vps.services.mt5_trader import MT5Trader
 from vps.services.mt5_range_watcher import RangeOrderWatcher, WatchedOrder
+from vps.services.mt5_position_watcher import PositionWatcher
 from vps.services.signal_log_store import SignalLogStore
+from vps.services.strategy_executor import StrategyExecutor, PreTradeDecision
+from vps.services.strategy_log_store import StrategyLogStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +89,11 @@ async def lifespan(app: FastAPI):
     await signal_log_store.init()
     app.state.signal_log_store = signal_log_store
 
+    # Log esecuzioni strategia (stessa users.db)
+    strategy_log_store = StrategyLogStore(_db_path)
+    await strategy_log_store.init()
+    app.state.strategy_log_store = strategy_log_store
+
     # Gemini signal processor (opzionale: se la chiave non è configurata
     # i messaggi vengono loggati ma non processati)
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
@@ -105,27 +113,110 @@ async def lifespan(app: FastAPI):
         mt5_users_dir=_mt5_users_dir,
         default_lot=default_lot,
     )
+    app.state.mt5_trader = mt5_trader
+
+    # Strategy executor (opzionale: stessa chiave Gemini del signal processor)
+    if gemini_key:
+        strategy_executor = StrategyExecutor(api_key=gemini_key, mt5_trader=mt5_trader)
+        logger.info("StrategyExecutor attivo (Gemini)")
+    else:
+        strategy_executor = None
+        logger.warning("StrategyExecutor non attivo (GEMINI_API_KEY mancante)")
 
     # Range order watcher
     range_watcher = RangeOrderWatcher()
     range_watcher.start()
 
+    # ── Position watcher + callback al StrategyExecutor ──────────────────────
+    async def on_position_event(user_id: str, event_type: str, event_data: dict) -> None:
+        """
+        Callback invocato dal PositionWatcher quando rileva un cambiamento di posizione.
+        Delega al StrategyExecutor se l'utente ha una management_strategy configurata.
+        """
+        if strategy_executor is None:
+            return
+
+        user = await store.get_user(user_id)
+        if user is None:
+            return
+
+        management_strategy = user.get("management_strategy") or ""
+        if not management_strategy.strip():
+            return
+
+        mt5_login    = user.get("mt5_login")
+        mt5_password = user.get("mt5_password")
+        mt5_server   = user.get("mt5_server")
+        if not (mt5_login and mt5_password and mt5_server):
+            return
+
+        logger.info(
+            "StrategyExecutor utente %s: evento %s — avvio agent...",
+            user_id, event_type,
+        )
+
+        try:
+            result = await strategy_executor.on_event(
+                user_id             = user_id,
+                event_type          = event_type,
+                event_data          = event_data,
+                management_strategy = management_strategy,
+                mt5_login           = int(mt5_login),
+                mt5_password        = mt5_password,
+                mt5_server          = mt5_server,
+            )
+        except Exception as exc:
+            logger.error("StrategyExecutor on_event errore: %s", exc, exc_info=True)
+            await strategy_log_store.insert(
+                user_id             = user_id,
+                event_type          = event_type,
+                event_data          = event_data,
+                management_strategy = management_strategy,
+                error_msg           = str(exc),
+            )
+            return
+
+        logger.info(
+            "StrategyExecutor utente %s: %s completato — %d tool call, risposta: %.120s",
+            user_id, event_type,
+            len(result.tool_calls),
+            result.final_response,
+        )
+
+        await strategy_log_store.insert(
+            user_id             = user_id,
+            event_type          = event_type,
+            event_data          = event_data,
+            management_strategy = management_strategy,
+            tool_calls          = result.tool_calls,
+            final_response      = result.final_response,
+            error_msg           = result.error,
+        )
+
+    position_watcher = PositionWatcher(
+        mt5_trader = mt5_trader,
+        on_event   = on_position_event,
+    )
+    position_watcher.start()
+
     # Telegram manager
     async def on_message(user_id: str, message: str, raw_event, sender) -> None:
+        import uuid
         from dataclasses import asdict
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "title", "?")
         logger.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
+        signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
 
         # Variabili log — costruite step by step e salvate alla fine
-        log_is_signal     = False
-        log_flash_raw:     str | None  = None
-        log_has_mt5_creds              = False
-        log_sizing_strategy: str | None = None
-        log_account_info:  dict | None = None
-        log_signals:       list | None = None
-        log_results:       list | None = None
-        log_error_step:    str | None  = None
-        log_error_msg:     str | None  = None
+        log_is_signal       = False
+        log_flash_raw:       str | None  = None
+        log_has_mt5_creds                = False
+        log_sizing_strategy: str | None  = None
+        log_account_info:    dict | None = None
+        log_signals:         list | None = None
+        log_results:         list | None = None
+        log_error_step:      str | None  = None
+        log_error_msg:       str | None  = None
 
         async def _save_log() -> None:
             await signal_log_store.insert(
@@ -175,10 +266,11 @@ async def lifespan(app: FastAPI):
             await _save_log()
             return
 
-        mt5_login    = user.get("mt5_login")
-        mt5_password = user.get("mt5_password")   # già decifrata da UserStore
-        mt5_server   = user.get("mt5_server")
+        mt5_login           = user.get("mt5_login")
+        mt5_password        = user.get("mt5_password")   # già decifrata da UserStore
+        mt5_server          = user.get("mt5_server")
         log_sizing_strategy = user.get("sizing_strategy") or None
+        management_strategy = user.get("management_strategy") or None
 
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
@@ -231,14 +323,83 @@ async def lifespan(app: FastAPI):
 
         log_signals = [asdict(s) for s in signals]
 
-        # ── Step 5: esegui gli ordini su MT5 ─────────────────────────────────
+        # ── Step 5 (opzionale): filtro pre-trade con StrategyExecutor ─────────
+        if strategy_executor and management_strategy:
+            try:
+                decisions = await strategy_executor.pre_trade(
+                    user_id             = user_id,
+                    signals             = signals,
+                    management_strategy = management_strategy,
+                    mt5_login           = int(mt5_login),
+                    mt5_password        = mt5_password,
+                    mt5_server          = mt5_server,
+                    signal_message      = message,
+                )
+                await strategy_log_store.insert(
+                    user_id             = user_id,
+                    event_type          = "pre_trade",
+                    management_strategy = management_strategy,
+                    signals             = log_signals,
+                    decisions           = [
+                        {
+                            "signal_index":  d.signal_index,
+                            "approved":      d.approved,
+                            "modified_lots": d.modified_lots,
+                            "modified_sl":   d.modified_sl,
+                            "modified_tp":   d.modified_tp,
+                            "reason":        d.reason,
+                        }
+                        for d in decisions
+                    ],
+                )
+                # Applica le decisioni: rimuovi i rifiutati, applica le modifiche
+                approved_signals = []
+                for i, sig in enumerate(signals):
+                    dec = decisions[i] if i < len(decisions) else None
+                    if dec is None or dec.approved:
+                        if dec and (dec.modified_lots is not None
+                                    or dec.modified_sl  is not None
+                                    or dec.modified_tp  is not None):
+                            from dataclasses import replace as dc_replace
+                            sig = dc_replace(
+                                sig,
+                                lot_size    = dec.modified_lots if dec.modified_lots is not None else sig.lot_size,
+                                stop_loss   = dec.modified_sl   if dec.modified_sl   is not None else sig.stop_loss,
+                                take_profit = dec.modified_tp   if dec.modified_tp   is not None else sig.take_profit,
+                            )
+                        approved_signals.append(sig)
+                    else:
+                        logger.info(
+                            "StrategyExecutor utente %s: segnale [%d] rifiutato — %s",
+                            user_id, i, dec.reason,
+                        )
+
+                if not approved_signals:
+                    logger.info(
+                        "StrategyExecutor utente %s: tutti i segnali rifiutati dalla strategia",
+                        user_id,
+                    )
+                    log_error_step = "strategy_pretrade"
+                    log_error_msg  = "Tutti i segnali rifiutati dalla management_strategy"
+                    await _save_log()
+                    return
+
+                signals     = approved_signals
+                log_signals = [asdict(s) for s in signals]
+
+            except Exception as exc:
+                logger.error("StrategyExecutor pre_trade errore: %s", exc, exc_info=True)
+                # Non blocchiamo l'esecuzione se lo strategy executor fallisce
+
+        # ── Step 6: esegui gli ordini su MT5 ─────────────────────────────────
         try:
             results = await mt5_trader.execute_signals(
-                user_id      = user_id,
-                signals      = signals,
-                mt5_login    = int(mt5_login),
-                mt5_password = mt5_password,
-                mt5_server   = mt5_server,
+                user_id         = user_id,
+                signals         = signals,
+                mt5_login       = int(mt5_login),
+                mt5_password    = mt5_password,
+                mt5_server      = mt5_server,
+                signal_group_id = signal_group_id,
             )
         except Exception as exc:
             logger.error("MT5 execute_signals errore: %s", exc)
@@ -266,7 +427,7 @@ async def lifespan(app: FastAPI):
 
         await _save_log()
 
-        # ── Step 6: registra ordini range nel watcher ─────────────────────────
+        # ── Step 7: registra ordini range nel watcher ─────────────────────────
         for result in results:
             sig = result.signal
             if (
@@ -297,6 +458,9 @@ async def lifespan(app: FastAPI):
     if active_users:
         logger.info("Ripristino %d utenti attivi...", len(active_users))
         tm.restore_users(active_users)
+        # Registra gli utenti nel PositionWatcher (solo quelli con management_strategy)
+        for u in active_users:
+            position_watcher.register_user(u["user_id"], u)
     else:
         logger.info("Nessun utente da ripristinare")
 
@@ -306,6 +470,7 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
     await range_watcher.stop()
+    await position_watcher.stop()
     tm.stop()
     logger.info("Trading Bot API fermata")
 
