@@ -112,17 +112,26 @@ else:
     mt5.shutdown()
 
 
-# ── Step 3: initialize con path del template ─────────────────────────────────
+# ── Step 3+4: initialize con credenziali (startup + login in un'unica chiamata) ─
 
-sep("STEP 3 — initialize() con il template (portable=True)")
+sep("STEP 3 — initialize() + login() in una sola chiamata")
 
 terminal_path = str(template / "terminal64.exe")
-info(f"Path: {terminal_path}")
-info("Chiamo mt5.initialize(path=..., portable=True, timeout=30000) ...")
+info(f"Path:   {terminal_path}")
+info(f"Login:  {MT5_LOGIN}  Server: {MT5_SERVER}")
+info("Chiamo mt5.initialize(path, portable=True, login, password, server, timeout=60s)")
+info("(startup + login atomico: evita IPC disruption da server switch)")
 
 mt5.shutdown()
 t0 = time.time()
-if mt5.initialize(path=terminal_path, portable=True, timeout=30_000):
+if mt5.initialize(
+    path=terminal_path,
+    portable=True,
+    login=MT5_LOGIN,
+    password=MT5_PASSWORD,
+    server=MT5_SERVER,
+    timeout=60_000,
+):
     elapsed = time.time() - t0
     ok(f"initialize() riuscito in {elapsed:.1f}s")
     tinfo = mt5.terminal_info()
@@ -133,60 +142,28 @@ if mt5.initialize(path=terminal_path, portable=True, timeout=30_000):
         info(f"Trade allowed: {tinfo.trade_allowed}")
         if not tinfo.trade_allowed:
             print()
-            fail("Trade allowed = False: il tasto 'Algo Trading' nella toolbar di MT5 e' OFF.")
-            info("  Apri il template MT5, clicca il tasto 'Algo Trading' (diventa verde),")
-            info("  poi chiudi MT5. Il bot non puo' inviare ordini senza questo.")
+            fail("Trade allowed = False: algo trading disabilitato nel terminale.")
+            info("  Riesegui setup.ps1 — imposta ExpertsEnabled=1 in common.ini")
             print()
+    acc = mt5.account_info()
+    if acc:
+        ok(f"Login confermato: {acc.name} | {acc.server} | {acc.balance} {acc.currency}")
+    else:
+        fail("initialize() OK ma account_info() e' None — login non riuscito.")
+        mt5.shutdown()
+        sys.exit(1)
 else:
     code, msg = mt5.last_error()
     elapsed = time.time() - t0
     fail(f"initialize() fallito dopo {elapsed:.1f}s — {msg} (codice {code})")
     if code == -10005:
-        info("IPC timeout: MT5 si avvia ma non risponde all'IPC.")
-        info("Cause comuni:")
-        info("  - Il processo gira in Session 0 (servizio Windows)")
-        info("  - Antivirus blocca la named pipe")
-        info("  - Il terminal64.exe nel template non è mai stato avviato a mano")
+        info("IPC timeout: MT5 avviato ma non completa startup+login entro 60s.")
+        info("Possibili cause:")
+        info("  - La VPS non raggiunge il server '" + MT5_SERVER + "'")
+        info("  - Nome server errato (controlla maiuscole/spazi)")
+        info("  - MT5 mostra un dialogo bloccante (antivirus, update, disclaimer)")
     elif code == -10001:
-        info("IPC send failed: connessione IPC rotta o processo già terminato.")
-    mt5.shutdown()
-    sys.exit(1)
-
-
-# ── Step 4: login ─────────────────────────────────────────────────────────────
-
-sep("STEP 4 — login()")
-
-info(f"Chiamo mt5.login({MT5_LOGIN}, server={MT5_SERVER!r}) ...")
-t0 = time.time()
-if mt5.login(MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER):
-    elapsed = time.time() - t0
-    ok(f"login() riuscito in {elapsed:.1f}s")
-    acc = mt5.account_info()
-    if acc:
-        info(f"Nome:    {acc.name}")
-        info(f"Server:  {acc.server}")
-        info(f"Balance: {acc.balance} {acc.currency}")
-        info(f"Equity:  {acc.equity} {acc.currency}")
-        info(f"Leverage: 1:{acc.leverage}")
-else:
-    code, msg = mt5.last_error()
-    elapsed = time.time() - t0
-    fail(f"login() fallito dopo {elapsed:.1f}s — {msg} (codice {code})")
-    if code == -10005:
-        info("IPC timeout su login(): MT5 non riesce a raggiungere il server del broker.")
-        info("Causa piu' probabile: il server '" + MT5_SERVER + "' non e' nella")
-        info("lista server del template MT5, oppure la VPS non lo raggiunge.")
-        info("")
-        info("Soluzione:")
-        info("  1. Apri C:\\TradingBot\\mt5_template\\terminal64.exe")
-        info("  2. File > Login to Trade Account")
-        info("  3. Cerca e seleziona il server '" + MT5_SERVER + "'")
-        info("  4. Inserisci le credenziali e fai login attraverso la GUI")
-        info("  5. Aspetta che il terminale sia connesso, poi chiudi MT5")
-        info("  6. Riesegui questo script")
-    elif code == -10004 or "invalid" in msg.lower():
-        info("Credenziali errate: controlla login, password e nome server esatto.")
+        info("IPC send failed: processo MT5 crashato durante l'avvio.")
     mt5.shutdown()
     sys.exit(1)
 

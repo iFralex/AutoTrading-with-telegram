@@ -144,6 +144,9 @@ class MT5Trader:
                 if mt5.initialize(
                     path=terminal_path,
                     portable=True,
+                    login=login,
+                    password=password,
+                    server=server,
                     timeout=MT5_INIT_TIMEOUT_MS,
                 ):
                     init_ok = True
@@ -158,7 +161,8 @@ class MT5Trader:
                 return None
 
             try:
-                if not mt5.login(login, password=password, server=server):
+                info_check = mt5.account_info()
+                if info_check is None:
                     return None
 
                 info = mt5.account_info()
@@ -269,14 +273,15 @@ class MT5Trader:
                 init_ok = False
                 last_err = ""
                 for attempt in range(1, MT5_INIT_RETRIES + 1):
-                    # Shutdown prima di ogni tentativo per pulire connessioni
-                    # parziali o processi appesi dal tentativo precedente.
                     if attempt > 1:
                         mt5.shutdown()
                         time.sleep(MT5_INIT_RETRY_DELAY)
                     if mt5.initialize(
                         path=terminal_path,
                         portable=True,
+                        login=login,
+                        password=password,
+                        server=server,
                         timeout=MT5_INIT_TIMEOUT_MS,
                     ):
                         init_ok = True
@@ -292,10 +297,10 @@ class MT5Trader:
                     logger.error("Utente %s — %s", user_id, last_err)
                     return [TradeResult(success=False, error=last_err, signal=s) for s in signals]
 
-                # ── Login ─────────────────────────────────────────────────────
-                if not mt5.login(login, password=password, server=server):
-                    code, msg = mt5.last_error()
-                    err = f"Login MT5 fallito: {msg} (codice {code})"
+                # Verifica che il login sia avvenuto correttamente
+                acc = mt5.account_info()
+                if acc is None:
+                    err = "MT5 avviato ma login non riuscito (account_info None)"
                     logger.error("Utente %s — %s", user_id, err)
                     return [TradeResult(success=False, error=err, signal=s) for s in signals]
 
@@ -460,7 +465,14 @@ class MT5Trader:
             if attempt > 1:
                 mt5.shutdown()
                 time.sleep(MT5_INIT_RETRY_DELAY)
-            if mt5.initialize(path=terminal_path, portable=True, timeout=MT5_INIT_TIMEOUT_MS):
+            if mt5.initialize(
+                path=terminal_path,
+                portable=True,
+                login=login,
+                password=password,
+                server=server,
+                timeout=MT5_INIT_TIMEOUT_MS,
+            ):
                 init_ok = True
                 break
             code, msg = mt5.last_error()
@@ -469,9 +481,8 @@ class MT5Trader:
             raise RuntimeError(last_err)
 
         try:
-            if not mt5.login(login, password=password, server=server):
-                code, msg = mt5.last_error()
-                raise RuntimeError(f"MT5 login fallito: {msg} (cod.{code})")
+            if mt5.account_info() is None:
+                raise RuntimeError("MT5 avviato ma login non riuscito")
             return fn(mt5)
         finally:
             mt5.shutdown()
