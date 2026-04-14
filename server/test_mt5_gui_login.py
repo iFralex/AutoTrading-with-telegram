@@ -246,9 +246,9 @@ def _kill_process(pid: int) -> None:
 sep("STEP 2 — Avvio template MT5 + login GUI automatizzato")
 
 terminal_exe = str(template / "terminal64.exe")
-info(f"Avvio: {terminal_exe} /portable")
+info(f"Avvio: {terminal_exe}")
 try:
-    proc = subprocess.Popen([terminal_exe, "/portable"])
+    proc = subprocess.Popen([terminal_exe])
     mt5_pid = proc.pid
     ok(f"MT5 avviato — PID {mt5_pid}")
 except Exception as e:
@@ -282,14 +282,14 @@ time.sleep(5.0)   # pausa iniziale prima di controllare
 
 sep("STEP 4 — Connessione API Python (initialize senza credenziali)")
 
-info(f"Chiamo mt5.initialize(path={terminal_exe!r}, portable=True)")
+info(f"Chiamo mt5.initialize(path={terminal_exe!r})")
 info("(MT5 è già in esecuzione e loggato via GUI — l'API si aggancia all'istanza)")
 
 mt5.shutdown()
 t0 = time.time()
 init_ok = False
 for attempt in range(1, 7):   # max 6 tentativi, ogni 10s = 60s totali
-    if mt5.initialize(path=terminal_exe, portable=True, timeout=10_000):
+    if mt5.initialize(path=terminal_exe, timeout=10_000):
         elapsed = time.time() - t0
         ok(f"initialize() riuscito in {elapsed:.1f}s (tentativo {attempt})")
         init_ok = True
@@ -361,11 +361,11 @@ _kill_process(mt5_pid)
 time.sleep(3.0)
 ok("MT5 terminato")
 
-info("Riavvio via mt5.initialize(path=..., portable=True) — SENZA credenziali")
+info("Riavvio via mt5.initialize(path=...) — SENZA credenziali")
 info("(MT5 dovrebbe fare auto-login leggendo le credenziali salvate al step 3)")
 
 t0 = time.time()
-if mt5.initialize(path=terminal_exe, portable=True, timeout=60_000):
+if mt5.initialize(path=terminal_exe, timeout=60_000):
     elapsed = time.time() - t0
     ok(f"initialize() riuscito in {elapsed:.1f}s")
     tinfo = mt5.terminal_info()
