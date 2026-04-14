@@ -239,12 +239,12 @@ if (-not (Test-Path $commonIni)) {
     if (Test-Path $commonIni) {
         Write-OK "MT5 template inizializzato correttamente (common.ini presente)"
     } else {
-        Write-Warn "common.ini non trovato — MT5 potrebbe non essere stato chiuso correttamente."
-        Write-Warn "Se il bot da' IPC timeout, ripeti questo passo a mano:"
-        Write-Warn "  Apri $mt5Exe, accetta dialoghi, chiudi."
+        Write-Warn "common.ini non trovato - MT5 potrebbe non essere stato chiuso."
+        Write-Warn "Se il bot da IPC timeout, ripeti questo passo a mano:"
+        Write-Warn "  Apri $mt5Exe, accetta dialoghi, poi chiudi."
     }
 } else {
-    Write-OK "MT5 template gia' inizializzato (common.ini presente)"
+    Write-OK "MT5 template gia inizializzato (common.ini presente)"
 }
 
 # ── 7. Redis / Memurai ───────────────────────────────────────────────────────
