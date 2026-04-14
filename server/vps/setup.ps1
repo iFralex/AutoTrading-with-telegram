@@ -201,6 +201,56 @@ Profile=default
     }
 }
 
+# 6f. Primo avvio manuale del template (OBBLIGATORIO)
+#
+# La libreria Python MetaTrader5 usa IPC (named pipe) per comunicare col
+# terminale. Al primo avvio, MT5 mostra dialoghi (licenza, configurazione
+# broker) che bloccano l'IPC. Il template deve essere avviato ALMENO UNA
+# VOLTA a mano, con tutti i dialoghi accettati, prima che il bot possa
+# usarlo in automatico.
+#
+# Le copie create per ogni utente ereditano i config gia' scritti dal
+# primo avvio, quindi non mostrano piu' dialoghi.
+
+$commonIni = "$mt5ConfigDir\common.ini"
+if (-not (Test-Path $commonIni)) {
+    Write-Host ""
+    Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "  ║  AZIONE RICHIESTA — PRIMO AVVIO MT5 (una volta sola)║" -ForegroundColor Yellow
+    Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor Yellow
+    Write-Host "  ║                                                      ║" -ForegroundColor Yellow
+    Write-Host "  ║  1. MT5 sta per aprirsi. Aspetta che carichi.        ║" -ForegroundColor Yellow
+    Write-Host "  ║  2. Accetta la licenza se richiesta.                 ║" -ForegroundColor Yellow
+    Write-Host "  ║  3. Salta o cancella la schermata di login.          ║" -ForegroundColor Yellow
+    Write-Host "  ║     (NON serve fare login ora — il bot lo fara'      ║" -ForegroundColor Yellow
+    Write-Host "  ║      automaticamente con le credenziali di ogni      ║" -ForegroundColor Yellow
+    Write-Host "  ║      utente.)                                        ║" -ForegroundColor Yellow
+    Write-Host "  ║  4. Aspetta che MT5 sia completamente caricato.      ║" -ForegroundColor Yellow
+    Write-Host "  ║  5. CHIUDI MT5.                                      ║" -ForegroundColor Yellow
+    Write-Host "  ║  6. Torna qui e premi INVIO per continuare.          ║" -ForegroundColor Yellow
+    Write-Host "  ║                                                      ║" -ForegroundColor Yellow
+    Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
+    Read-Host "  Premi INVIO per aprire MT5..."
+
+    Start-Process -FilePath $mt5Exe -ArgumentList "/portable" -PassThru | Out-Null
+
+    Write-Host ""
+    Write-Host "  MT5 avviato. Completa i passi sopra, poi chiudi MT5." -ForegroundColor Cyan
+    Read-Host "  Quando hai chiuso MT5, premi INVIO per continuare..."
+
+    # Verifica che il common.ini sia stato creato (MT5 lo scrive al primo avvio)
+    if (Test-Path $commonIni) {
+        Write-OK "MT5 template inizializzato correttamente (common.ini presente)"
+    } else {
+        Write-Warn "common.ini non trovato — MT5 potrebbe non essere stato chiuso correttamente."
+        Write-Warn "Se il bot da' IPC timeout, ripeti questo passo a mano:"
+        Write-Warn "  Apri $mt5Exe, accetta dialoghi, chiudi."
+    }
+} else {
+    Write-OK "MT5 template gia' inizializzato (common.ini presente)"
+}
+
 # ── 7. Redis / Memurai ───────────────────────────────────────────────────────
 
 Write-Step "Verifica Redis..."
@@ -245,9 +295,14 @@ $settings  = New-ScheduledTaskSettingsSet `
                 -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
                 -MultipleInstances IgnoreNew
 
+# IMPORTANTE: NON usare SYSTEM (Session 0).
+# MetaTrader5 usa named pipe IPC che richiede una sessione desktop interattiva.
+# Con SYSTEM il terminale MT5 si avvia ma non risponde mai all'IPC (timeout).
+# Il task gira come Administrator nella sua sessione utente.
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal `
-                -UserId "SYSTEM" `
-                -LogonType ServiceAccount `
+                -UserId $currentUser `
+                -LogonType Interactive `
                 -RunLevel Highest
 
 Register-ScheduledTask `
@@ -258,7 +313,9 @@ Register-ScheduledTask `
     -Principal $principal `
     -Force | Out-Null
 
-Write-OK "Task '$taskName' registrato (avvio a ogni boot come SYSTEM)"
+Write-OK "Task '$taskName' registrato come $currentUser (sessione interattiva)"
+Write-Warn "Il bot si avvia automaticamente al login di $currentUser."
+Write-Warn "Assicurati che questo utente sia sempre connesso alla VPS (es. RDP attivo)."
 
 # ── 9. Variabili d'ambiente sistema ─────────────────────────────────────────
 
