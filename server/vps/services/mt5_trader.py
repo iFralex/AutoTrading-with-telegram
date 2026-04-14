@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re as _re
 import shutil
+import subprocess as _subprocess
+import sys as _sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -54,8 +57,84 @@ MT5_LOCK = threading.Lock()
 # Parametri retry per mt5.initialize() — usati anche da setup.py
 MT5_INIT_RETRIES         = 3
 MT5_INIT_RETRY_DELAY     = 10.0   # secondi tra un tentativo e l'altro
-MT5_INIT_TIMEOUT_MS      = 30_000  # 30 secondi per tentativo
+MT5_INIT_TIMEOUT_MS      = 60_000  # 60 secondi per tentativo
 MT5_FIRST_BOOT_DELAY     = 15.0   # attesa dopo copia template (primo avvio)
+
+
+# ── Helpers MT5 pre-flight ────────────────────────────────────────────────────
+
+def _ensure_experts_enabled(mt5_dir: Path) -> None:
+    """Garantisce ExpertsEnabled=1 in config/common.ini prima di avviare MT5.
+
+    MT5 legge questo file allo startup per impostare il pulsante "Algo Trading".
+    Se l'utente lo ha disabilitato manualmente, viene reimpostato qui prima che
+    il processo MT5 venga avviato.
+    """
+    common_ini = mt5_dir / "config" / "common.ini"
+    try:
+        common_ini.parent.mkdir(parents=True, exist_ok=True)
+        if common_ini.exists():
+            text = common_ini.read_text(encoding="utf-8", errors="replace")
+            if _re.search(r"ExpertsEnabled\s*=\s*0", text):
+                text = _re.sub(r"ExpertsEnabled\s*=\s*0", "ExpertsEnabled=1", text)
+                common_ini.write_text(text, encoding="utf-8")
+                logger.info("ExpertsEnabled corretto a 1 in %s", common_ini)
+            elif "ExpertsEnabled" not in text:
+                if "[Common]" in text:
+                    text = text.replace("[Common]", "[Common]\r\nExpertsEnabled=1", 1)
+                else:
+                    text = "[Common]\r\nExpertsEnabled=1\r\n" + text
+                common_ini.write_text(text, encoding="utf-8")
+                logger.info("ExpertsEnabled=1 aggiunto a %s", common_ini)
+        else:
+            common_ini.write_text("[Common]\r\nExpertsEnabled=1\r\n", encoding="utf-8")
+            logger.info("common.ini creato con ExpertsEnabled=1 in %s", mt5_dir)
+    except Exception as exc:
+        logger.warning("_ensure_experts_enabled(%s): %s", mt5_dir, exc)
+
+
+def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
+    """Termina terminal64.exe in esecuzione dalla directory mt5_dir.
+
+    Necessario per garantire che MT5 riparta da zero leggendo il common.ini
+    aggiornato. Senza kill, initialize() si aggancia all'istanza già in
+    esecuzione (0 ms) mantenendo lo stato precedente (algo trading off, server
+    diverso, ecc.) e il successivo login() va in IPC timeout.
+
+    Ritorna True se almeno un processo è stato terminato.
+    """
+    if _sys.platform != "win32":
+        return False
+    try:
+        result = _subprocess.run(
+            [
+                "wmic", "process", "where", "name='terminal64.exe'",
+                "get", "ProcessId,ExecutablePath", "/format:csv",
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        target = str(mt5_dir).lower().rstrip("\\")
+        killed = False
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(",")
+            # formato CSV: Node,ExecutablePath,ProcessId
+            if len(parts) < 3:
+                continue
+            exe_path = parts[1].strip().lower().rstrip("\\")
+            pid_str = parts[2].strip()
+            if exe_path.startswith(target) and pid_str.isdigit():
+                _subprocess.run(
+                    ["taskkill", "/PID", pid_str, "/F"],
+                    capture_output=True, timeout=5,
+                )
+                logger.info("MT5 PID %s terminato (dir: %s)", pid_str, mt5_dir)
+                killed = True
+        if killed:
+            time.sleep(2.0)   # attende che il processo si chiuda completamente
+        return killed
+    except Exception as exc:
+        logger.warning("_kill_mt5_for_dir(%s): %s", mt5_dir, exc)
+        return False
 
 
 # ── Risultato di ogni ordine ──────────────────────────────────────────────────
@@ -132,7 +211,13 @@ class MT5Trader:
 
         terminal_path = str(user_dir / "terminal64.exe")
 
+        # Pre-flight: garantisce ExpertsEnabled=1 prima di avviare MT5.
+        # Al primo avvio (copia dal template) e al retry (kill + restart)
+        # MT5 leggerà il common.ini aggiornato e partirà con algo trading abilitato.
+        _ensure_experts_enabled(user_dir)
+
         if is_first_boot:
+            _kill_mt5_for_dir(user_dir)
             time.sleep(MT5_FIRST_BOOT_DELAY)
 
         with MT5_LOCK:
@@ -140,6 +225,8 @@ class MT5Trader:
             for attempt in range(1, MT5_INIT_RETRIES + 1):
                 if attempt > 1:
                     mt5.shutdown()
+                    _kill_mt5_for_dir(user_dir)
+                    _ensure_experts_enabled(user_dir)
                     time.sleep(MT5_INIT_RETRY_DELAY)
                 if mt5.initialize(
                     path=terminal_path,
@@ -161,10 +248,6 @@ class MT5Trader:
                 return None
 
             try:
-                info_check = mt5.account_info()
-                if info_check is None:
-                    return None
-
                 info = mt5.account_info()
                 if info is None:
                     return None
@@ -258,13 +341,17 @@ class MT5Trader:
         terminal_path = str(user_dir / "terminal64.exe")
         results: list[TradeResult] = []
 
-        # Al primo avvio MT5 deve inizializzare la sua configurazione e
-        # connettersi al broker: aspetta prima di acquisire il lock.
+        # Pre-flight: garantisce ExpertsEnabled=1 prima di avviare MT5.
+        _ensure_experts_enabled(user_dir)
+
+        # Al primo avvio: kill di eventuali processi residui dal template/dir,
+        # poi attesa che MT5 inizializzi la configurazione e si connetta al broker.
         if is_first_boot:
             logger.info(
                 "Utente %s — primo avvio MT5, attesa %ss per inizializzazione...",
                 user_id, MT5_FIRST_BOOT_DELAY,
             )
+            _kill_mt5_for_dir(user_dir)
             time.sleep(MT5_FIRST_BOOT_DELAY)
 
         with MT5_LOCK:
@@ -275,6 +362,9 @@ class MT5Trader:
                 for attempt in range(1, MT5_INIT_RETRIES + 1):
                     if attempt > 1:
                         mt5.shutdown()
+                        # Al retry: kill del processo bloccato e fix ExpertsEnabled
+                        _kill_mt5_for_dir(user_dir)
+                        _ensure_experts_enabled(user_dir)
                         time.sleep(MT5_INIT_RETRY_DELAY)
                     if mt5.initialize(
                         path=terminal_path,

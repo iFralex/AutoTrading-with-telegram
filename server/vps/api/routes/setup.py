@@ -26,7 +26,10 @@ from pydantic import BaseModel, Field
 from vps.services.telegram_manager import PasswordRequiredError, TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
-from vps.services.mt5_trader import MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS
+from vps.services.mt5_trader import (
+    MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS,
+    _ensure_experts_enabled, _kill_mt5_for_dir,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -275,8 +278,20 @@ async def verify_mt5(body: MT5VerifyBody):
 
 
 def _mt5_login_sync(login: int, password: str, server: str) -> dict:
-    """Eseguita in ThreadPoolExecutor — può bloccare senza problemi."""
+    """Eseguita in ThreadPoolExecutor — può bloccare senza problemi.
+
+    Usa il one-shot approach: credenziali passate direttamente a initialize()
+    insieme al path del template. Questo evita l'IPC timeout che si verifica
+    quando initialize() si aggancia a un MT5 già in esecuzione e poi login()
+    tenta di cambiare server/account.
+
+    Pre-flight: fix ExpertsEnabled=1 in common.ini + kill di eventuali processi
+    MT5 residui dal template, in modo che MT5 parta da zero con le credenziali
+    corrette in un'unica chiamata atomica.
+    """
+    import os
     import time
+    from pathlib import Path
 
     try:
         import MetaTrader5 as mt5
@@ -286,14 +301,41 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
             "(richiede Windows con MT5 installato)"
         )
 
+    # Percorso template letto dalla variabile d'ambiente impostata da setup.ps1.
+    bot_dir = Path(os.environ.get("TRADING_BOT_DIR", r"C:\TradingBot"))
+    template_dir = bot_dir / "mt5_template"
+    terminal_exe = template_dir / "terminal64.exe"
+
+    if not terminal_exe.exists():
+        raise RuntimeError(
+            f"MT5 template non trovato in {template_dir}. "
+            "Eseguire setup.ps1 prima di usare il bot."
+        )
+
     with MT5_LOCK:
+        # Pre-flight: garantisce ExpertsEnabled=1 e nessun processo bloccante.
+        # Il kill è necessario perché initialize() senza processi in esecuzione
+        # avvia MT5 da zero (con le credenziali corrette), mentre se MT5 è già
+        # in esecuzione si aggancia all'istanza esistente ignorando le credenziali.
+        _ensure_experts_enabled(template_dir)
+        _kill_mt5_for_dir(template_dir)
+
         init_ok = False
         last_err = ""
         for attempt in range(1, MT5_INIT_RETRIES + 1):
             if attempt > 1:
                 mt5.shutdown()
+                _kill_mt5_for_dir(template_dir)
+                _ensure_experts_enabled(template_dir)
                 time.sleep(MT5_INIT_RETRY_DELAY)
-            if mt5.initialize(timeout=MT5_INIT_TIMEOUT_MS):
+            if mt5.initialize(
+                path=str(terminal_exe),
+                portable=True,
+                login=login,
+                password=password,
+                server=server,
+                timeout=MT5_INIT_TIMEOUT_MS,
+            ):
                 init_ok = True
                 break
             code, msg = mt5.last_error()
@@ -306,14 +348,9 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
             raise RuntimeError(last_err)
 
         try:
-            ok = mt5.login(login, password=password, server=server)
-            if not ok:
-                code, msg = mt5.last_error()
-                raise RuntimeError(f"Login fallito: {msg} (codice {code})")
-
             info = mt5.account_info()
             if info is None:
-                raise RuntimeError("Login riuscito ma account_info() ha restituito None")
+                raise RuntimeError("initialize() OK ma login non riuscito (account_info None)")
 
             return {
                 "valid": True,

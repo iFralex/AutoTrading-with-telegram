@@ -88,28 +88,70 @@ except ImportError as e:
     sys.exit(1)
 
 
-# ── Step 2: initialize senza path (MT5 di sistema, se installato) ────────────
+# ── Step 2: pre-flight (ExpertsEnabled + kill processi residui) ──────────────
 
-sep("STEP 2 — initialize() senza path (MT5 di sistema)")
+sep("STEP 2 — Pre-flight: ExpertsEnabled=1 + kill MT5 residuo")
 
-info("Chiamo mt5.initialize() senza path e senza portable...")
-mt5.shutdown()  # reset per sicurezza
+import re as _re
+import subprocess as _subprocess
 
-t0 = time.time()
-if mt5.initialize(timeout=10_000):
-    elapsed = time.time() - t0
-    ok(f"initialize() riuscito in {elapsed:.1f}s")
-    build = mt5.terminal_info()
-    if build:
-        info(f"Terminal: {build.path}")
-        info(f"Build:    {build.build}")
-    mt5.shutdown()
-else:
-    code, msg = mt5.last_error()
-    elapsed = time.time() - t0
-    fail(f"initialize() fallito dopo {elapsed:.1f}s — {msg} (codice {code})")
-    info("MT5 di sistema non disponibile (normale se usi solo la copia portable)")
-    mt5.shutdown()
+def _ensure_experts_enabled_diag(mt5_dir: Path) -> None:
+    common_ini = mt5_dir / "config" / "common.ini"
+    try:
+        common_ini.parent.mkdir(parents=True, exist_ok=True)
+        if common_ini.exists():
+            text = common_ini.read_text(encoding="utf-8", errors="replace")
+            if _re.search(r"ExpertsEnabled\s*=\s*0", text):
+                text = _re.sub(r"ExpertsEnabled\s*=\s*0", "ExpertsEnabled=1", text)
+                common_ini.write_text(text, encoding="utf-8")
+                ok("ExpertsEnabled corretto da 0 a 1 in common.ini")
+            elif "ExpertsEnabled" not in text:
+                if "[Common]" in text:
+                    text = text.replace("[Common]", "[Common]\r\nExpertsEnabled=1", 1)
+                else:
+                    text = "[Common]\r\nExpertsEnabled=1\r\n" + text
+                common_ini.write_text(text, encoding="utf-8")
+                ok("ExpertsEnabled=1 aggiunto a common.ini")
+            else:
+                ok("ExpertsEnabled=1 già presente in common.ini")
+        else:
+            common_ini.write_text("[Common]\r\nExpertsEnabled=1\r\n", encoding="utf-8")
+            ok("common.ini creato con ExpertsEnabled=1")
+    except Exception as e:
+        fail(f"Impossibile aggiornare common.ini: {e}")
+
+
+def _kill_mt5_diag(mt5_dir: Path) -> None:
+    try:
+        result = _subprocess.run(
+            ["wmic", "process", "where", "name='terminal64.exe'",
+             "get", "ProcessId,ExecutablePath", "/format:csv"],
+            capture_output=True, text=True, timeout=10,
+        )
+        target = str(mt5_dir).lower().rstrip("\\")
+        killed_any = False
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(",")
+            if len(parts) < 3:
+                continue
+            exe_path = parts[1].strip().lower().rstrip("\\")
+            pid_str = parts[2].strip()
+            if exe_path.startswith(target) and pid_str.isdigit():
+                _subprocess.run(["taskkill", "/PID", pid_str, "/F"],
+                                capture_output=True, timeout=5)
+                ok(f"MT5 PID {pid_str} terminato")
+                killed_any = True
+        if not killed_any:
+            ok("Nessun processo MT5 in esecuzione dalla directory template")
+        else:
+            info("Attendo 2s per la chiusura completa...")
+            time.sleep(2.0)
+    except Exception as e:
+        fail(f"Kill MT5: {e}")
+
+
+_ensure_experts_enabled_diag(template)
+_kill_mt5_diag(template)
 
 
 # ── Step 3+4: initialize con credenziali (startup + login in un'unica chiamata) ─
@@ -170,7 +212,7 @@ else:
 
 # ── Step 5: simbolo di test ───────────────────────────────────────────────────
 
-sep("STEP 5 — lettura simbolo EURUSD")
+sep("STEP 4 — lettura simbolo EURUSD")
 
 TEST_SYMBOL = "EURUSD"
 info(f"Chiamo mt5.symbol_info({TEST_SYMBOL!r}) ...")
