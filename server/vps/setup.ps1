@@ -215,21 +215,17 @@ Profile=default
 $commonIni = "$mt5ConfigDir\common.ini"
 if (-not (Test-Path $commonIni)) {
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Yellow
-    Write-Host "  ║  AZIONE RICHIESTA — PRIMO AVVIO MT5 (una volta sola)║" -ForegroundColor Yellow
-    Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor Yellow
-    Write-Host "  ║                                                      ║" -ForegroundColor Yellow
-    Write-Host "  ║  1. MT5 sta per aprirsi. Aspetta che carichi.        ║" -ForegroundColor Yellow
-    Write-Host "  ║  2. Accetta la licenza se richiesta.                 ║" -ForegroundColor Yellow
-    Write-Host "  ║  3. Salta o cancella la schermata di login.          ║" -ForegroundColor Yellow
-    Write-Host "  ║     (NON serve fare login ora — il bot lo fara'      ║" -ForegroundColor Yellow
-    Write-Host "  ║      automaticamente con le credenziali di ogni      ║" -ForegroundColor Yellow
-    Write-Host "  ║      utente.)                                        ║" -ForegroundColor Yellow
-    Write-Host "  ║  4. Aspetta che MT5 sia completamente caricato.      ║" -ForegroundColor Yellow
-    Write-Host "  ║  5. CHIUDI MT5.                                      ║" -ForegroundColor Yellow
-    Write-Host "  ║  6. Torna qui e premi INVIO per continuare.          ║" -ForegroundColor Yellow
-    Write-Host "  ║                                                      ║" -ForegroundColor Yellow
-    Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host "  +------------------------------------------------------+" -ForegroundColor Yellow
+    Write-Host "  |  AZIONE RICHIESTA: PRIMO AVVIO MT5 (una volta sola)  |" -ForegroundColor Yellow
+    Write-Host "  +------------------------------------------------------+" -ForegroundColor Yellow
+    Write-Host "  |  1. MT5 sta per aprirsi. Aspetta che carichi.        |" -ForegroundColor Yellow
+    Write-Host "  |  2. Accetta la licenza se richiesta.                 |" -ForegroundColor Yellow
+    Write-Host "  |  3. Salta/cancella la schermata di login del broker. |" -ForegroundColor Yellow
+    Write-Host "  |     (il bot fara' login automatico per ogni utente)  |" -ForegroundColor Yellow
+    Write-Host "  |  4. Aspetta che MT5 sia completamente caricato.      |" -ForegroundColor Yellow
+    Write-Host "  |  5. CHIUDI MT5.                                      |" -ForegroundColor Yellow
+    Write-Host "  |  6. Torna qui e premi INVIO per continuare.          |" -ForegroundColor Yellow
+    Write-Host "  +------------------------------------------------------+" -ForegroundColor Yellow
     Write-Host ""
     Read-Host "  Premi INVIO per aprire MT5..."
 
