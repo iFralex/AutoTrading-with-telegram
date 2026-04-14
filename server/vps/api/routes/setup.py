@@ -290,6 +290,9 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
         init_ok = False
         last_err = ""
         for attempt in range(1, MT5_INIT_RETRIES + 1):
+            if attempt > 1:
+                mt5.shutdown()
+                time.sleep(MT5_INIT_RETRY_DELAY)
             if mt5.initialize(timeout=MT5_INIT_TIMEOUT_MS):
                 init_ok = True
                 break
@@ -298,8 +301,6 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
             logger.warning(
                 "verify_mt5 tentativo %d/%d: %s", attempt, MT5_INIT_RETRIES, last_err
             )
-            if attempt < MT5_INIT_RETRIES:
-                time.sleep(MT5_INIT_RETRY_DELAY)
 
         if not init_ok:
             raise RuntimeError(last_err)

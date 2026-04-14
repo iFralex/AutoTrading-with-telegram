@@ -52,9 +52,10 @@ _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mt5-trade")
 MT5_LOCK = threading.Lock()
 
 # Parametri retry per mt5.initialize() — usati anche da setup.py
-MT5_INIT_RETRIES    = 3
-MT5_INIT_RETRY_DELAY = 5.0    # secondi tra un tentativo e l'altro
-MT5_INIT_TIMEOUT_MS  = 120_000 # 2 minuti (default MT5 è 60 s)
+MT5_INIT_RETRIES         = 3
+MT5_INIT_RETRY_DELAY     = 10.0   # secondi tra un tentativo e l'altro
+MT5_INIT_TIMEOUT_MS      = 30_000  # 30 secondi per tentativo
+MT5_FIRST_BOOT_DELAY     = 15.0   # attesa dopo copia template (primo avvio)
 
 
 # ── Risultato di ogni ordine ──────────────────────────────────────────────────
@@ -125,15 +126,21 @@ class MT5Trader:
             return None
 
         try:
-            user_dir = self._ensure_user_dir(user_id)
+            user_dir, is_first_boot = self._ensure_user_dir(user_id)
         except Exception:
             return None
 
         terminal_path = str(user_dir / "terminal64.exe")
 
+        if is_first_boot:
+            time.sleep(MT5_FIRST_BOOT_DELAY)
+
         with MT5_LOCK:
             init_ok = False
             for attempt in range(1, MT5_INIT_RETRIES + 1):
+                if attempt > 1:
+                    mt5.shutdown()
+                    time.sleep(MT5_INIT_RETRY_DELAY)
                 if mt5.initialize(
                     path=terminal_path,
                     portable=True,
@@ -146,8 +153,6 @@ class MT5Trader:
                     "Utente %s — get_account_info tentativo %d/%d: %s (codice %s)",
                     user_id, attempt, MT5_INIT_RETRIES, msg, code,
                 )
-                if attempt < MT5_INIT_RETRIES:
-                    time.sleep(MT5_INIT_RETRY_DELAY)
 
             if not init_ok:
                 return None
@@ -199,10 +204,16 @@ class MT5Trader:
 
     # ── Sync — gira in ThreadPoolExecutor ─────────────────────────────────────
 
-    def _ensure_user_dir(self, user_id: str) -> Path:
-        """Crea la directory MT5 dell'utente dal template se non esiste ancora."""
+    def _ensure_user_dir(self, user_id: str) -> tuple[Path, bool]:
+        """Crea la directory MT5 dell'utente dal template se non esiste ancora.
+
+        Returns:
+            (user_dir, is_first_boot) — is_first_boot=True se la directory
+            è stata appena creata e il terminale non è mai stato avviato.
+        """
         user_dir = self._users_dir / user_id
-        if not (user_dir / "terminal64.exe").exists():
+        first_boot = not (user_dir / "terminal64.exe").exists()
+        if first_boot:
             if not (self._template / "terminal64.exe").exists():
                 raise RuntimeError(
                     f"MT5 template non trovato in {self._template}. "
@@ -213,7 +224,7 @@ class MT5Trader:
                 user_id,
             )
             shutil.copytree(self._template, user_dir, dirs_exist_ok=True)
-        return user_dir
+        return user_dir, first_boot
 
     def _execute_block(
         self,
@@ -234,7 +245,7 @@ class MT5Trader:
 
         # Prepara directory utente
         try:
-            user_dir = self._ensure_user_dir(user_id)
+            user_dir, is_first_boot = self._ensure_user_dir(user_id)
         except Exception as exc:
             msg = str(exc)
             logger.error("Utente %s — setup MT5: %s", user_id, msg)
@@ -243,12 +254,26 @@ class MT5Trader:
         terminal_path = str(user_dir / "terminal64.exe")
         results: list[TradeResult] = []
 
+        # Al primo avvio MT5 deve inizializzare la sua configurazione e
+        # connettersi al broker: aspetta prima di acquisire il lock.
+        if is_first_boot:
+            logger.info(
+                "Utente %s — primo avvio MT5, attesa %ss per inizializzazione...",
+                user_id, MT5_FIRST_BOOT_DELAY,
+            )
+            time.sleep(MT5_FIRST_BOOT_DELAY)
+
         with MT5_LOCK:
             try:
                 # ── Inizializza (con retry su IPC timeout) ────────────────────
                 init_ok = False
                 last_err = ""
                 for attempt in range(1, MT5_INIT_RETRIES + 1):
+                    # Shutdown prima di ogni tentativo per pulire connessioni
+                    # parziali o processi appesi dal tentativo precedente.
+                    if attempt > 1:
+                        mt5.shutdown()
+                        time.sleep(MT5_INIT_RETRY_DELAY)
                     if mt5.initialize(
                         path=terminal_path,
                         portable=True,
@@ -262,8 +287,6 @@ class MT5Trader:
                         "Utente %s — tentativo %d/%d fallito: %s",
                         user_id, attempt, MT5_INIT_RETRIES, last_err,
                     )
-                    if attempt < MT5_INIT_RETRIES:
-                        time.sleep(MT5_INIT_RETRY_DELAY)
 
                 if not init_ok:
                     logger.error("Utente %s — %s", user_id, last_err)
@@ -425,12 +448,25 @@ class MT5Trader:
         except ImportError:
             raise RuntimeError("Libreria MetaTrader5 non disponibile su questo server")
 
-        user_dir      = self._ensure_user_dir(user_id)
+        user_dir, is_first_boot = self._ensure_user_dir(user_id)
         terminal_path = str(user_dir / "terminal64.exe")
 
-        if not mt5.initialize(path=terminal_path, portable=True):
+        if is_first_boot:
+            time.sleep(MT5_FIRST_BOOT_DELAY)
+
+        init_ok = False
+        last_err = ""
+        for attempt in range(1, MT5_INIT_RETRIES + 1):
+            if attempt > 1:
+                mt5.shutdown()
+                time.sleep(MT5_INIT_RETRY_DELAY)
+            if mt5.initialize(path=terminal_path, portable=True, timeout=MT5_INIT_TIMEOUT_MS):
+                init_ok = True
+                break
             code, msg = mt5.last_error()
-            raise RuntimeError(f"MT5 init fallito: {msg} (cod.{code})")
+            last_err = f"MT5 init fallito: {msg} (cod.{code})"
+        if not init_ok:
+            raise RuntimeError(last_err)
 
         try:
             if not mt5.login(login, password=password, server=server):
