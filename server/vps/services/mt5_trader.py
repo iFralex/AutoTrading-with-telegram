@@ -46,22 +46,15 @@ logger = logging.getLogger(__name__)
 # Pool dedicato: una thread per utente alla volta va bene, max 8 paralleli
 _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mt5-trade")
 
-# Lock per-utente: impedisce initialize() concorrenti sullo stesso terminale
-_user_locks: dict[str, threading.Lock] = {}
-_user_locks_mutex = threading.Lock()
+# Lock globale di processo: la libreria MetaTrader5 è un singleton IPC —
+# una sola connessione per volta in tutta l'applicazione.
+# Importato anche da setup.py per le chiamate di verifica credenziali.
+MT5_LOCK = threading.Lock()
 
-
-def _get_user_lock(user_id: str) -> threading.Lock:
-    with _user_locks_mutex:
-        if user_id not in _user_locks:
-            _user_locks[user_id] = threading.Lock()
-        return _user_locks[user_id]
-
-
-# Parametri retry per mt5.initialize()
-_MT5_INIT_RETRIES = 3
-_MT5_INIT_RETRY_DELAY = 5.0   # secondi tra un tentativo e l'altro
-_MT5_INIT_TIMEOUT_MS = 120_000  # 2 minuti (default MT5 è 60 s)
+# Parametri retry per mt5.initialize() — usati anche da setup.py
+MT5_INIT_RETRIES    = 3
+MT5_INIT_RETRY_DELAY = 5.0    # secondi tra un tentativo e l'altro
+MT5_INIT_TIMEOUT_MS  = 120_000 # 2 minuti (default MT5 è 60 s)
 
 
 # ── Risultato di ogni ordine ──────────────────────────────────────────────────
@@ -138,24 +131,23 @@ class MT5Trader:
 
         terminal_path = str(user_dir / "terminal64.exe")
 
-        user_lock = _get_user_lock(user_id)
-        with user_lock:
+        with MT5_LOCK:
             init_ok = False
-            for attempt in range(1, _MT5_INIT_RETRIES + 1):
+            for attempt in range(1, MT5_INIT_RETRIES + 1):
                 if mt5.initialize(
                     path=terminal_path,
                     portable=True,
-                    timeout=_MT5_INIT_TIMEOUT_MS,
+                    timeout=MT5_INIT_TIMEOUT_MS,
                 ):
                     init_ok = True
                     break
                 code, msg = mt5.last_error()
                 logger.warning(
                     "Utente %s — get_account_info tentativo %d/%d: %s (codice %s)",
-                    user_id, attempt, _MT5_INIT_RETRIES, msg, code,
+                    user_id, attempt, MT5_INIT_RETRIES, msg, code,
                 )
-                if attempt < _MT5_INIT_RETRIES:
-                    time.sleep(_MT5_INIT_RETRY_DELAY)
+                if attempt < MT5_INIT_RETRIES:
+                    time.sleep(MT5_INIT_RETRY_DELAY)
 
             if not init_ok:
                 return None
@@ -251,17 +243,16 @@ class MT5Trader:
         terminal_path = str(user_dir / "terminal64.exe")
         results: list[TradeResult] = []
 
-        user_lock = _get_user_lock(user_id)
-        with user_lock:
+        with MT5_LOCK:
             try:
                 # ── Inizializza (con retry su IPC timeout) ────────────────────
                 init_ok = False
                 last_err = ""
-                for attempt in range(1, _MT5_INIT_RETRIES + 1):
+                for attempt in range(1, MT5_INIT_RETRIES + 1):
                     if mt5.initialize(
                         path=terminal_path,
                         portable=True,
-                        timeout=_MT5_INIT_TIMEOUT_MS,
+                        timeout=MT5_INIT_TIMEOUT_MS,
                     ):
                         init_ok = True
                         break
@@ -269,10 +260,10 @@ class MT5Trader:
                     last_err = f"MT5 non avviabile: {msg} (codice {code})"
                     logger.warning(
                         "Utente %s — tentativo %d/%d fallito: %s",
-                        user_id, attempt, _MT5_INIT_RETRIES, last_err,
+                        user_id, attempt, MT5_INIT_RETRIES, last_err,
                     )
-                    if attempt < _MT5_INIT_RETRIES:
-                        time.sleep(_MT5_INIT_RETRY_DELAY)
+                    if attempt < MT5_INIT_RETRIES:
+                        time.sleep(MT5_INIT_RETRY_DELAY)
 
                 if not init_ok:
                     logger.error("Utente %s — %s", user_id, last_err)

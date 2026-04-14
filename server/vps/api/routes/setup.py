@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from vps.services.telegram_manager import PasswordRequiredError, TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
+from vps.services.mt5_trader import MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -266,6 +267,8 @@ async def verify_mt5(body: MT5VerifyBody):
 
 def _mt5_login_sync(login: int, password: str, server: str) -> dict:
     """Eseguita in ThreadPoolExecutor — può bloccare senza problemi."""
+    import time
+
     try:
         import MetaTrader5 as mt5
     except ImportError:
@@ -274,31 +277,45 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
             "(richiede Windows con MT5 installato)"
         )
 
-    try:
-        if not mt5.initialize():
+    with MT5_LOCK:
+        init_ok = False
+        last_err = ""
+        for attempt in range(1, MT5_INIT_RETRIES + 1):
+            if mt5.initialize(timeout=MT5_INIT_TIMEOUT_MS):
+                init_ok = True
+                break
             code, msg = mt5.last_error()
-            raise RuntimeError(f"MT5 non avviabile: {msg} (codice {code})")
+            last_err = f"MT5 non avviabile: {msg} (codice {code})"
+            logger.warning(
+                "verify_mt5 tentativo %d/%d: %s", attempt, MT5_INIT_RETRIES, last_err
+            )
+            if attempt < MT5_INIT_RETRIES:
+                time.sleep(MT5_INIT_RETRY_DELAY)
 
-        ok = mt5.login(login, password=password, server=server)
-        if not ok:
-            code, msg = mt5.last_error()
-            raise RuntimeError(f"Login fallito: {msg} (codice {code})")
+        if not init_ok:
+            raise RuntimeError(last_err)
 
-        info = mt5.account_info()
-        if info is None:
-            raise RuntimeError("Login riuscito ma account_info() ha restituito None")
+        try:
+            ok = mt5.login(login, password=password, server=server)
+            if not ok:
+                code, msg = mt5.last_error()
+                raise RuntimeError(f"Login fallito: {msg} (codice {code})")
 
-        return {
-            "valid": True,
-            "account": {
-                "name":     info.name,
-                "server":   info.server,
-                "balance":  round(info.balance, 2),
-                "currency": info.currency,
-            },
-        }
-    finally:
-        mt5.shutdown()
+            info = mt5.account_info()
+            if info is None:
+                raise RuntimeError("Login riuscito ma account_info() ha restituito None")
+
+            return {
+                "valid": True,
+                "account": {
+                    "name":     info.name,
+                    "server":   info.server,
+                    "balance":  round(info.balance, 2),
+                    "currency": info.currency,
+                },
+            }
+        finally:
+            mt5.shutdown()
 
 
 # ── Complete endpoint ─────────────────────────────────────────────────────────
