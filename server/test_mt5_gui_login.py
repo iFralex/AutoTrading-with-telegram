@@ -120,6 +120,10 @@ try {{
 Start-Sleep -Milliseconds 600
 
 $shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("+{{TAB}}")       # Shift+Tab (1)
+Start-Sleep -Milliseconds 150
+$shell.SendKeys("+{{TAB}}")       # Shift+Tab (2)
+Start-Sleep -Milliseconds 150
 $shell.SendKeys("{server_str}")   # digita il nome del server
 Start-Sleep -Milliseconds 300
 $shell.SendKeys("{{ENTER}}")      # conferma
