@@ -1,6 +1,11 @@
 import { Dashboard } from "@/components/dashboard/Dashboard"
 
-export default function DashboardPage() {
+interface Props {
+  searchParams: Promise<{ phone?: string }>
+}
+
+export default async function DashboardPage({ searchParams }: Props) {
+  const { phone } = await searchParams
   return (
     <main className="min-h-screen p-6 relative overflow-hidden">
       {/* Ambient glow */}
@@ -17,7 +22,7 @@ export default function DashboardPage() {
       />
 
       <div className="relative z-10 max-w-5xl mx-auto">
-        <Dashboard />
+        <Dashboard initialPhone={phone} />
       </div>
     </main>
   )
