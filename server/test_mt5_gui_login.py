@@ -470,47 +470,46 @@ if not RUN_ORDER_TEST:
     info("Imposta RUN_ORDER_TEST = True in cima allo script per eseguirlo.")
     info("ATTENZIONE: usa solo su conto DEMO.")
 else:
-    warn(f"Apertura ordine BUY {ORDER_LOT} {ORDER_SYMBOL} (conto DEMO)...")
+    # Ordine SELL LIMIT al +10% rispetto al prezzo corrente.
+    # Un SELL LIMIT sopra mercato non viene eseguito immediatamente: è un
+    # ordine pendente sicuro per testare il piazzamento senza aprire posizioni.
     tick = mt5.symbol_info_tick(ORDER_SYMBOL)
-    if tick is None:
-        fail(f"Impossibile ottenere tick per {ORDER_SYMBOL}")
+    sym_info = mt5.symbol_info(ORDER_SYMBOL)
+    if tick is None or sym_info is None:
+        fail(f"Impossibile ottenere tick/info per {ORDER_SYMBOL}")
     else:
+        digits = sym_info.digits
+        entry_price = round(tick.ask * 1.10, digits)
+        warn(f"Piazzo SELL LIMIT {ORDER_LOT} {ORDER_SYMBOL} @ {entry_price} "
+             f"(+10% rispetto a Ask={tick.ask}) — ordine pendente, non eseguito subito")
         request = {
-            "action":    mt5.TRADE_ACTION_DEAL,
-            "symbol":    ORDER_SYMBOL,
-            "volume":    ORDER_LOT,
-            "type":      mt5.ORDER_TYPE_BUY,
-            "price":     tick.ask,
-            "deviation": 20,
-            "magic":     999999,
-            "comment":   "diag_test",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "action":      mt5.TRADE_ACTION_PENDING,
+            "symbol":      ORDER_SYMBOL,
+            "volume":      ORDER_LOT,
+            "type":        mt5.ORDER_TYPE_SELL_LIMIT,
+            "price":       entry_price,
+            "magic":       999999,
+            "comment":     "diag_test",
+            "type_time":   mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
         }
         result_order = mt5.order_send(request)
         if result_order and result_order.retcode == mt5.TRADE_RETCODE_DONE:
-            ok(f"Ordine eseguito — ticket #{result_order.order}")
-            # Chiudi subito la posizione
+            ticket = result_order.order
+            ok(f"Ordine pendente piazzato — ticket #{ticket}  prezzo={entry_price}")
+            # Cancella subito l'ordine (è solo un test)
             time.sleep(1)
-            tick2 = mt5.symbol_info_tick(ORDER_SYMBOL)
-            close_req = {
-                "action":    mt5.TRADE_ACTION_DEAL,
-                "symbol":    ORDER_SYMBOL,
-                "volume":    ORDER_LOT,
-                "type":      mt5.ORDER_TYPE_SELL,
-                "price":     tick2.bid if tick2 else tick.bid,
-                "position":  result_order.order,
-                "deviation": 20,
-                "magic":     999999,
-                "comment":   "diag_test_close",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+            cancel_req = {
+                "action": mt5.TRADE_ACTION_REMOVE,
+                "order":  ticket,
             }
-            res_close = mt5.order_send(close_req)
-            if res_close and res_close.retcode == mt5.TRADE_RETCODE_DONE:
-                ok(f"Posizione chiusa — ticket #{res_close.order}")
+            res_cancel = mt5.order_send(cancel_req)
+            if res_cancel and res_cancel.retcode == mt5.TRADE_RETCODE_DONE:
+                ok(f"Ordine #{ticket} cancellato correttamente")
             else:
-                warn(f"Chiusura fallita: {res_close}")
+                warn(f"Cancellazione fallita: retcode={getattr(res_cancel, 'retcode', '?')} "
+                     f"— {getattr(res_cancel, 'comment', '?')}")
+                warn(f"  Cancella manualmente l'ordine #{ticket} da MT5.")
         else:
             fail(f"Ordine fallito: retcode={getattr(result_order, 'retcode', '?')} "
                  f"— {getattr(result_order, 'comment', '?')}")
