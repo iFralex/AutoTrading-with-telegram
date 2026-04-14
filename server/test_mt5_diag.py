@@ -131,6 +131,12 @@ if mt5.initialize(path=terminal_path, portable=True, timeout=30_000):
         info(f"Build:         {tinfo.build}")
         info(f"Connected:     {tinfo.connected}")
         info(f"Trade allowed: {tinfo.trade_allowed}")
+        if not tinfo.trade_allowed:
+            print()
+            fail("Trade allowed = False: il tasto 'Algo Trading' nella toolbar di MT5 e' OFF.")
+            info("  Apri il template MT5, clicca il tasto 'Algo Trading' (diventa verde),")
+            info("  poi chiudi MT5. Il bot non puo' inviare ordini senza questo.")
+            print()
 else:
     code, msg = mt5.last_error()
     elapsed = time.time() - t0
@@ -167,6 +173,20 @@ else:
     code, msg = mt5.last_error()
     elapsed = time.time() - t0
     fail(f"login() fallito dopo {elapsed:.1f}s — {msg} (codice {code})")
+    if code == -10005:
+        info("IPC timeout su login(): MT5 non riesce a raggiungere il server del broker.")
+        info("Causa piu' probabile: il server '" + MT5_SERVER + "' non e' nella")
+        info("lista server del template MT5, oppure la VPS non lo raggiunge.")
+        info("")
+        info("Soluzione:")
+        info("  1. Apri C:\\TradingBot\\mt5_template\\terminal64.exe")
+        info("  2. File > Login to Trade Account")
+        info("  3. Cerca e seleziona il server '" + MT5_SERVER + "'")
+        info("  4. Inserisci le credenziali e fai login attraverso la GUI")
+        info("  5. Aspetta che il terminale sia connesso, poi chiudi MT5")
+        info("  6. Riesegui questo script")
+    elif code == -10004 or "invalid" in msg.lower():
+        info("Credenziali errate: controlla login, password e nome server esatto.")
     mt5.shutdown()
     sys.exit(1)
 

@@ -243,8 +243,35 @@ if (-not (Test-Path $commonIni)) {
         Write-Warn "Se il bot da IPC timeout, ripeti questo passo a mano:"
         Write-Warn "  Apri $mt5Exe, accetta dialoghi, poi chiudi."
     }
+}
+
+# Forza ExpertsEnabled=1 nel common.ini del template.
+# Anche se l'utente ha cliccato il tasto Algo Trading nella GUI, verifichiamo
+# che il valore sia scritto correttamente nel file, perche' le copie per ogni
+# utente ereditano questo config.
+if (Test-Path $commonIni) {
+    $ini = Get-Content $commonIni -Raw
+    if ($ini -match "ExpertsEnabled\s*=\s*0") {
+        $ini = $ini -replace "ExpertsEnabled\s*=\s*0", "ExpertsEnabled=1"
+        Set-Content $commonIni $ini -Encoding UTF8
+        Write-OK "ExpertsEnabled corretto a 1 in common.ini (era 0)"
+    } elseif ($ini -notmatch "ExpertsEnabled") {
+        # Aggiunge la chiave sotto [Common] se non esiste
+        if ($ini -match "\[Common\]") {
+            $ini = $ini -replace "\[Common\]", "[Common]`r`nExpertsEnabled=1"
+        } else {
+            $ini = "[Common]`r`nExpertsEnabled=1`r`n" + $ini
+        }
+        Set-Content $commonIni $ini -Encoding UTF8
+        Write-OK "ExpertsEnabled=1 aggiunto a common.ini"
+    } else {
+        Write-OK "ExpertsEnabled=1 gia presente in common.ini"
+    }
 } else {
-    Write-OK "MT5 template gia inizializzato (common.ini presente)"
+    # common.ini non esiste ancora: lo creiamo con il minimo necessario
+    New-Item -ItemType File -Path $commonIni -Force | Out-Null
+    Set-Content $commonIni "[Common]`r`nExpertsEnabled=1" -Encoding UTF8
+    Write-OK "common.ini creato con ExpertsEnabled=1"
 }
 
 # ── 7. Redis / Memurai ───────────────────────────────────────────────────────
