@@ -114,15 +114,24 @@ class CompleteSetupBody(BaseModel):
 async def get_session(
     phone: str,
     ss: SetupSessionStore = Depends(get_session_store),
+    store: UserStore = Depends(get_store),
 ):
     """
     Ritorna lo stato della sessione di setup per il numero di telefono.
+    Controlla prima la sessione di setup in corso, poi gli utenti già registrati.
     Se non esiste risponde {"exists": false}.
     """
+    # 1. Setup in corso (sessione temporanea)
     session = await ss.get(phone)
-    if session is None:
-        return {"exists": False}
-    return {"exists": True, **session}
+    if session is not None:
+        return {"exists": True, **session}
+
+    # 2. Utente che ha già completato il setup → redirect alla dashboard
+    user = await store.get_user_by_phone(phone)
+    if user is not None:
+        return {"exists": True, "setup_complete": True, "user_id": user["user_id"]}
+
+    return {"exists": False}
 
 
 @router.post("/session")

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   api,
   type DashboardUserResponse,
@@ -505,7 +506,8 @@ function StatsBar({ logs, total }: { logs: SignalLog[]; total: number }) {
 // ── Componente principale ─────────────────────────────────────────────────────
 
 export function Dashboard() {
-  const [phone, setPhone]         = useState("")
+  const searchParams = useSearchParams()
+  const [phone, setPhone]         = useState(() => searchParams.get("phone") ?? "")
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
   const [data, setData]           = useState<DashboardUserResponse | null>(null)
@@ -526,6 +528,13 @@ export function Dashboard() {
       setLoading(false)
     }
   }, [phone])
+
+  // Auto-carica l'utente se il phone arriva dal query param (es. redirect da setup)
+  useEffect(() => {
+    const phoneFromUrl = searchParams.get("phone")
+    if (phoneFromUrl) search()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const loadMore = useCallback(async () => {
     if (!data) return

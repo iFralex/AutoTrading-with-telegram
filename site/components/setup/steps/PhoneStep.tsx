@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Phone, RotateCcw, ArrowRight, Loader2, History } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Phone, RotateCcw, ArrowRight, Loader2, History, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -45,6 +46,7 @@ function stepLabel(step: number): string {
 }
 
 export function PhoneStep({ data, onDataChange, onNext, onBack, onJumpToStep }: PhoneStepProps) {
+  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [foundSession, setFoundSession] = useState<SetupSession | null>(null)
@@ -62,6 +64,11 @@ export function PhoneStep({ data, onDataChange, onNext, onBack, onJumpToStep }: 
       const res = await api.getSession(phone)
 
       if (res.exists) {
+        // Utente con setup già completato → vai direttamente alla dashboard
+        if (res.setup_complete) {
+          router.push(`/dashboard?phone=${encodeURIComponent(phone)}`)
+          return
+        }
         const step = getResumeStep(res)
         setFoundSession(res)
         setResumeStep(step)

@@ -53,17 +53,19 @@ export interface CompleteSetupPayload {
 
 export interface SetupSession {
   exists: true
-  phone: string
-  api_id: number | null
-  api_hash: string | null
-  login_key: string | null
-  user_id: string | null
-  group_id: string | null
-  group_name: string | null
-  mt5_login: number | null
-  has_mt5_password: boolean
-  mt5_server: string | null
-  sizing_strategy: string | null
+  /** true se l'utente ha già completato il setup ed è presente nel database utenti */
+  setup_complete?: boolean
+  phone?: string
+  api_id?: number | null
+  api_hash?: string | null
+  login_key?: string | null
+  user_id?: string | null
+  group_id?: string | null
+  group_name?: string | null
+  mt5_login?: number | null
+  has_mt5_password?: boolean
+  mt5_server?: string | null
+  sizing_strategy?: string | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
