@@ -1,18 +1,13 @@
 """
-Diagnostica MT5 — copia template in directory utente, setup manuale server,
-poi login e ordine tramite API Python.
+Diagnostica MT5 — flusso completamente automatizzato.
 
 Eseguire DIRETTAMENTE sul VPS (non tramite server), in sessione RDP attiva.
 
 Flusso:
   STEP 0  Configurazione e prerequisiti
   STEP 1  Import libreria MetaTrader5
-  STEP 2  Copia template -> directory utente test (login resettato)
-  STEP 3  Avvio MT5 — azione manuale richiesta:
-           - scrivi il nome del server nel campo già focalizzato
-           - Tab -> invio
-           - chiudi MT5
-           Poi premi Invio nello script per continuare.
+  STEP 2  Copia template -> directory utente test
+  STEP 3  Avvio MT5 + invio nome server (SendKeys) + chiusura
   STEP 4  Login via API Python (initialize con credenziali)
   STEP 5  BUY LIMIT a -10% del prezzo corrente, size 0.01
            (ordine pendente — cancellato subito dopo)
@@ -70,6 +65,75 @@ def warn(msg: str) -> None:
     print(f"  [!!]  {msg}")
 
 
+def _kill_pid(pid: int) -> None:
+    try:
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                       capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _sendkeys_escape(s: str) -> str:
+    """Escapa i caratteri speciali di WScript.Shell SendKeys."""
+    special = {
+        "+": "{+}", "^": "{^}", "%": "{%}", "~": "{~}",
+        "{": "{{",  "}": "}}", "(": "{(}", ")": "{)}",
+        "[": "{[}", "]": "{]}",
+    }
+    return "".join(special.get(c, c) for c in s)
+
+
+def _send_server_and_enter(pid: int, server: str) -> bool:
+    """
+    Attende che la finestra MT5 sia visibile, poi invia:
+      - il nome del server (il focus è già sul campo server)
+      - Invio per confermare
+
+    Usa PowerShell + WScript.Shell (sempre disponibile su Windows).
+    """
+    server_str = _sendkeys_escape(server)
+    ps = f"""
+Add-Type -AssemblyName Microsoft.VisualBasic
+
+$proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
+if (-not $proc) {{ exit 1 }}
+
+# Attende finestra principale (max 30s)
+$found = $false
+for ($i = 0; $i -lt 30; $i++) {{
+    $proc.Refresh()
+    if ($proc.MainWindowHandle -ne 0) {{
+        $found = $true
+        break
+    }}
+    Start-Sleep 1
+}}
+if (-not $found) {{ Write-Host "Nessuna finestra trovata"; exit 1 }}
+
+# Porta la finestra in primo piano
+try {{
+    [Microsoft.VisualBasic.Interaction]::AppActivate({pid})
+}} catch {{
+    $s2 = New-Object -ComObject WScript.Shell
+    $s2.AppActivate("MetaTrader 5") | Out-Null
+}}
+Start-Sleep -Milliseconds 600
+
+$shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("{server_str}")   # digita il nome del server
+Start-Sleep -Milliseconds 300
+$shell.SendKeys("{{ENTER}}")      # conferma
+exit 0
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        warn(f"SendKeys stderr: {result.stderr.strip()[:200]}")
+    return result.returncode == 0
+
+
 # ── Step 0: configurazione ────────────────────────────────────────────────────
 
 sep("STEP 0 — Configurazione")
@@ -120,7 +184,7 @@ except ImportError as e:
 sep("STEP 2 — Copia template → directory utente test")
 
 if test_user_dir.exists():
-    info(f"Directory esistente, rimozione in corso...")
+    info("Directory esistente, rimozione in corso...")
     shutil.rmtree(test_user_dir, ignore_errors=True)
 
 try:
@@ -133,11 +197,11 @@ except Exception as e:
 terminal_exe = str(test_user_dir / "terminal64.exe")
 
 
-# ── Step 3: avvio MT5 — azione manuale ───────────────────────────────────────
+# ── Step 3: avvio MT5 + invio server + chiusura ───────────────────────────────
 
-sep("STEP 3 — Avvio MT5 — azione manuale richiesta")
+sep("STEP 3 — Avvio MT5 + invio server + chiusura")
 
-info(f"Avvio MT5: {terminal_exe}")
+info(f"Avvio: {terminal_exe} /portable")
 try:
     proc = subprocess.Popen([terminal_exe, "/portable"])
     mt5_pid = proc.pid
@@ -147,26 +211,27 @@ except Exception as e:
     shutil.rmtree(test_user_dir, ignore_errors=True)
     sys.exit(1)
 
-print()
-print("  ┌─────────────────────────────────────────────────────┐")
-print("  │  AZIONE RICHIESTA                                   │")
-print("  │                                                     │")
-print(f"  │  1. Nel campo gia' focalizzato digita il server:   │")
-print(f"  │     {MT5_SERVER:<49}│")
-print("  │  2. Premi Tab                                       │")
-print("  │  3. Premi Invio                                     │")
-print("  │  4. Chiudi MT5                                      │")
-print("  └─────────────────────────────────────────────────────┘")
-print()
-input("  Quando hai chiuso MT5, premi Invio qui per continuare... ")
-print()
+info("Attendo 4s (startup MT5)...")
+time.sleep(4.0)
+
+info(f"Invio server '{MT5_SERVER}' + Invio...")
+if _send_server_and_enter(mt5_pid, MT5_SERVER):
+    ok("Tasti inviati")
+else:
+    warn("SendKeys ha restituito un errore — continuo comunque.")
+
+info("Attendo 3s poi chiudo MT5...")
+time.sleep(3.0)
+
+_kill_pid(mt5_pid)
+time.sleep(2.0)
+ok("MT5 chiuso")
 
 
 # ── Step 4: login via API Python ─────────────────────────────────────────────
 
 sep("STEP 4 — Login via API Python (initialize con credenziali)")
 
-info(f"Path:   {terminal_exe}")
 info(f"Login:  {MT5_LOGIN}  Server: {MT5_SERVER}")
 info("Chiamo mt5.initialize(path, portable=True, login, password, server, timeout=60s)")
 
@@ -240,7 +305,7 @@ digits = sym_info.digits
 entry_price = round(tick.bid * 0.90, digits)
 info(f"Bid corrente: {tick.bid}  Entry BUY LIMIT: {entry_price} (-10%)")
 
-request = {
+result_order = mt5.order_send({
     "action":       mt5.TRADE_ACTION_PENDING,
     "symbol":       ORDER_SYMBOL,
     "volume":       ORDER_LOT,
@@ -250,13 +315,11 @@ request = {
     "comment":      "diag_test",
     "type_time":    mt5.ORDER_TIME_GTC,
     "type_filling": mt5.ORDER_FILLING_RETURN,
-}
+})
 
-result_order = mt5.order_send(request)
 if result_order and result_order.retcode == mt5.TRADE_RETCODE_DONE:
     ticket = result_order.order
     ok(f"BUY LIMIT piazzato — ticket #{ticket}  prezzo={entry_price}")
-    # Cancella subito (è solo un test)
     time.sleep(1)
     res_cancel = mt5.order_send({
         "action": mt5.TRADE_ACTION_REMOVE,
@@ -278,13 +341,6 @@ mt5.shutdown()
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 sep("CLEANUP")
-
-try:
-    subprocess.run(["taskkill", "/PID", str(mt5_pid), "/F"],
-                   capture_output=True, timeout=5)
-except Exception:
-    pass
-time.sleep(1)
 
 try:
     shutil.rmtree(test_user_dir)
