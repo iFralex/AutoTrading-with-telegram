@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
     mt5_server          TEXT,
     sizing_strategy     TEXT,
     management_strategy TEXT,
+    range_entry_pct     INTEGER NOT NULL DEFAULT 0,
     active              INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS users (
 _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN sizing_strategy TEXT",
     "ALTER TABLE users ADD COLUMN management_strategy TEXT",
+    "ALTER TABLE users ADD COLUMN range_entry_pct INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -121,9 +123,9 @@ class UserStore:
                     (user_id, api_id, api_hash, phone,
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
-                     sizing_strategy, management_strategy, active)
+                     sizing_strategy, management_strategy, range_entry_pct, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     api_id              = excluded.api_id,
                     api_hash            = excluded.api_hash,
@@ -149,6 +151,7 @@ class UserStore:
                     user.get("mt5_server"),
                     user.get("sizing_strategy"),
                     user.get("management_strategy"),
+                    int(user.get("range_entry_pct") or 0),
                 ),
             )
             await db.commit()
@@ -159,6 +162,16 @@ class UserStore:
             await db.execute(
                 "UPDATE users SET sizing_strategy = ? WHERE user_id = ?",
                 (sizing_strategy or None, user_id),
+            )
+            await db.commit()
+
+    async def update_range_entry_pct(self, user_id: str, range_entry_pct: int) -> None:
+        """Aggiorna solo il campo range_entry_pct per l'utente (0–100)."""
+        pct = max(0, min(100, int(range_entry_pct)))
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET range_entry_pct = ? WHERE user_id = ?",
+                (pct, user_id),
             )
             await db.commit()
 
@@ -211,6 +224,7 @@ class UserStore:
                     "mt5_server":          row["mt5_server"],
                     "sizing_strategy":     row["sizing_strategy"],
                     "management_strategy": row["management_strategy"],
+                    "range_entry_pct":     int(row["range_entry_pct"] or 0),
                 }
             )
         return result
@@ -246,6 +260,7 @@ class UserStore:
             "mt5_server":          row["mt5_server"],
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
+            "range_entry_pct":     int(row["range_entry_pct"] or 0),
             "active":              bool(row["active"]),
             "created_at":          row["created_at"],
         }
@@ -280,6 +295,7 @@ class UserStore:
             "mt5_server":          row["mt5_server"],
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
+            "range_entry_pct":     int(row["range_entry_pct"] or 0),
             "active":              bool(row["active"]),
             "created_at":          row["created_at"],
         }

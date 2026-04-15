@@ -104,6 +104,25 @@ async def update_sizing_strategy(
     return {"ok": True}
 
 
+class UpdateRangeEntryPctBody(BaseModel):
+    range_entry_pct: int = Field(..., ge=0, le=100)
+
+
+@router.patch("/user/{user_id}/range-entry-pct")
+async def update_range_entry_pct(
+    user_id: str,
+    body: UpdateRangeEntryPctBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la percentuale di posizionamento nel range di ingresso (0–100)."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_range_entry_pct(user_id, body.range_entry_pct)
+    return {"ok": True}
+
+
 @router.post("/test-order")
 async def test_order(
     body: TestOrderRequest,

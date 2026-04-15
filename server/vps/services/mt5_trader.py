@@ -460,6 +460,7 @@ class MT5Trader:
         mt5_password: str,
         mt5_server: str,
         signal_group_id: str | None = None,
+        range_entry_pct: int = 0,
     ) -> list[TradeResult]:
         """
         Esegue tutti i segnali per l'utente in un unico blocco MT5
@@ -468,6 +469,12 @@ class MT5Trader:
         signal_group_id: identificatore del gruppo di segnali (es. UUID[:8]).
             Viene codificato nel campo comment dell'ordine MT5 come "TgBot:<id>"
             per permettere al PositionWatcher di correlare le posizioni.
+
+        range_entry_pct: percentuale (0–100) che determina dove nel range di
+            ingresso viene piazzato il limite.
+            0   = estremo favorevole (BUY→minimo, SELL→massimo) — default
+            50  = punto medio del range
+            100 = estremo opposto (BUY→massimo, SELL→minimo)
         """
         if not signals:
             return []
@@ -476,7 +483,8 @@ class MT5Trader:
         return await loop.run_in_executor(
             _executor,
             self._execute_block,
-            user_id, signals, mt5_login, mt5_password, mt5_server, signal_group_id,
+            user_id, signals, mt5_login, mt5_password, mt5_server,
+            signal_group_id, range_entry_pct,
         )
 
     # ── Sync — gira in ThreadPoolExecutor ─────────────────────────────────────
@@ -511,6 +519,7 @@ class MT5Trader:
         password: str,
         server: str,
         signal_group_id: str | None = None,
+        range_entry_pct: int = 0,
     ) -> list[TradeResult]:
         """Apre MT5, esegue tutti gli ordini, chiude MT5."""
         try:
@@ -593,7 +602,10 @@ class MT5Trader:
                 # ── Ordini ────────────────────────────────────────────────────
                 for sig in signals:
                     results.append(
-                        self._send_order(mt5, sig, user_id, signal_group_id, user_dir, login)
+                        self._send_order(
+                            mt5, sig, user_id, signal_group_id,
+                            user_dir, login, range_entry_pct,
+                        )
                     )
 
             finally:
@@ -610,6 +622,7 @@ class MT5Trader:
         signal_group_id: str | None = None,
         user_dir: Path | None = None,
         mt5_login: int | None = None,
+        range_entry_pct: int = 0,
     ) -> TradeResult:
         """Costruisce e invia un singolo ordine MT5.
 
@@ -652,12 +665,17 @@ class MT5Trader:
             action = mt5.TRADE_ACTION_PENDING
 
             if isinstance(sig.entry_price, list):
-                # Range: piazza al bordo più favorevole
-                #   BUY  → bordo basso (prezzo minimo del range)
-                #   SELL → bordo alto  (prezzo massimo del range)
-                low   = min(sig.entry_price)
-                high  = max(sig.entry_price)
-                price = low if sig.order_type == "BUY" else high
+                # Range: piazza al livello scelto dalla configurazione utente.
+                # range_entry_pct=0  → estremo favorevole (BUY→min, SELL→max)
+                # range_entry_pct=50 → punto medio del range
+                # range_entry_pct=100 → estremo opposto (BUY→max, SELL→min)
+                low  = min(sig.entry_price)
+                high = max(sig.entry_price)
+                frac = max(0, min(100, range_entry_pct)) / 100.0
+                if sig.order_type == "BUY":
+                    price = low + (high - low) * frac
+                else:
+                    price = high - (high - low) * frac
             else:
                 price = sig.entry_price
 

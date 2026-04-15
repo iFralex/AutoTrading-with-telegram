@@ -262,6 +262,115 @@ function SizingStrategyEditor({
   )
 }
 
+// ── Editor range entry pct ────────────────────────────────────────────────────
+
+function RangeEntryPctEditor({
+  userId,
+  current,
+  onSaved,
+}: {
+  userId: string
+  current: number
+  onSaved: (value: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue]     = useState(current)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  function startEdit() {
+    setValue(current)
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancel() {
+    setEditing(false)
+    setError(null)
+  }
+
+  async function save() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.updateRangeEntryPct(userId, value)
+      onSaved(value)
+      setEditing(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function pctLabel(pct: number): string {
+    if (pct === 0)   return "Estremo favorevole (0% — BUY al minimo del range, SELL al massimo)"
+    if (pct === 50)  return "Punto medio del range (50%)"
+    if (pct === 100) return "Estremo opposto (100% — BUY al massimo del range, SELL al minimo)"
+    return `${pct}% del range`
+  }
+
+  return (
+    <Card className="border-white/10">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Posizione nel range di ingresso</CardTitle>
+            <CardDescription className="mt-0.5">
+              Dove piazzare il limite quando il segnale indica un range di entry
+            </CardDescription>
+          </div>
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={startEdit} className="text-xs">
+              Modifica
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!editing ? (
+          <p className="text-sm font-mono text-foreground/80 bg-black/20 rounded-lg border border-white/8 px-3 py-2">
+            {pctLabel(current)}
+          </p>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Estremo favorevole (0%)</span>
+                <span className="font-mono text-foreground">{value}%</span>
+                <span>Estremo opposto (100%)</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={value}
+                onChange={e => setValue(Number(e.target.value))}
+                className="w-full accent-indigo-500"
+              />
+              <p className="text-xs text-muted-foreground italic">{pctLabel(value)}</p>
+            </div>
+            {error && (
+              <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={save} disabled={loading} size="sm" className="text-xs">
+                {loading ? "Salvataggio…" : "Salva"}
+              </Button>
+              <Button onClick={cancel} disabled={loading} variant="outline" size="sm" className="text-xs">
+                Annulla
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Pannello test ordine diretto ──────────────────────────────────────────────
 
 function TestOrderPanel({ userId }: { userId: string }) {
@@ -688,6 +797,16 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
             current={data.user.sizing_strategy}
             onSaved={value => setData(prev => prev
               ? { ...prev, user: { ...prev.user, sizing_strategy: value } }
+              : prev
+            )}
+          />
+
+          {/* Range entry pct */}
+          <RangeEntryPctEditor
+            userId={data.user.user_id}
+            current={data.user.range_entry_pct ?? 0}
+            onSaved={value => setData(prev => prev
+              ? { ...prev, user: { ...prev.user, range_entry_pct: value } }
               : prev
             )}
           />

@@ -144,6 +144,7 @@ export interface DashboardUser {
   mt5_login: number | null
   mt5_server: string | null
   sizing_strategy: string | null
+  range_entry_pct: number
   active: boolean
   created_at: string
 }
@@ -348,6 +349,15 @@ export const api = {
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/sizing-strategy`,
       { sizing_strategy: sizingStrategy || null }
+    )
+  },
+
+  /** Aggiorna la percentuale di posizionamento nel range di ingresso (0–100). */
+  updateRangeEntryPct(userId: string, rangeEntryPct: number) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/range-entry-pct`,
+      { range_entry_pct: rangeEntryPct }
     )
   },
 }
