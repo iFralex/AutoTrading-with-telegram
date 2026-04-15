@@ -417,6 +417,16 @@ Start-Sleep -Milliseconds 1000
     info(f"account_info().trade_allowed   = {acc2.trade_allowed if acc2 else '?'}")
     info(f"symbol_info().trade_mode       = {sym2.trade_mode if sym2 else '?'}")
 
+    # trade_mode=0 = SYMBOL_TRADE_MODE_DISABLED: ri-seleziona il simbolo
+    if sym2 is None or sym2.trade_mode == 0:
+        warn(f"{ORDER_SYMBOL} trade_mode=0 — ri-seleziono il simbolo e attendo...")
+        mt5.symbol_select(ORDER_SYMBOL, False)
+        time.sleep(0.5)
+        mt5.symbol_select(ORDER_SYMBOL, True)
+        time.sleep(2.0)
+        sym3 = mt5.symbol_info(ORDER_SYMBOL)
+        info(f"symbol_info().trade_mode dopo re-select = {sym3.trade_mode if sym3 else '?'}")
+
     result_order = mt5.order_send(ORDER_REQUEST)
 
 if result_order and result_order.retcode == mt5.TRADE_RETCODE_DONE:
