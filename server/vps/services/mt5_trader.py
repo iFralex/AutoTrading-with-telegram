@@ -680,6 +680,17 @@ class MT5Trader:
 
         comment = f"TgBot:{signal_group_id}" if signal_group_id else "TgBot"
 
+        # ── Filling mode: letta dal bitmask del simbolo ───────────────────────
+        # filling_mode: bit 0 = FOK supportato, bit 1 = IOC supportato.
+        # Se nessuno dei due è attivo il broker usa RETURN.
+        _fm = sym_info.filling_mode
+        if _fm & 1:
+            type_filling = mt5.ORDER_FILLING_FOK
+        elif _fm & 2:
+            type_filling = mt5.ORDER_FILLING_IOC
+        else:
+            type_filling = mt5.ORDER_FILLING_RETURN
+
         request = {
             "action":       action,
             "symbol":       sig.symbol,
@@ -692,7 +703,7 @@ class MT5Trader:
             "magic":        234000,
             "comment":      comment,
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_RETURN,
+            "type_filling": type_filling,
         }
 
         res = mt5.order_send(request)
