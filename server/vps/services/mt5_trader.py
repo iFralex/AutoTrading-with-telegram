@@ -137,6 +137,73 @@ def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
         return False
 
 
+def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:
+    """Ritorna il PID del processo terminal64.exe in esecuzione dalla directory."""
+    if _sys.platform != "win32":
+        return None
+    try:
+        result = _subprocess.run(
+            ["wmic", "process", "where", "name='terminal64.exe'",
+             "get", "ProcessId,ExecutablePath", "/format:csv"],
+            capture_output=True, text=True, timeout=10,
+        )
+        target = str(mt5_dir).lower().rstrip("\\")
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(",")
+            if len(parts) < 3:
+                continue
+            exe_path = parts[1].strip().lower().rstrip("\\")
+            pid_str  = parts[2].strip()
+            if exe_path.startswith(target) and pid_str.isdigit():
+                return int(pid_str)
+    except Exception:
+        pass
+    return None
+
+
+def _enable_autotrading_via_gui(mt5_dir: Path) -> bool:
+    """
+    Trova il processo MT5 in esecuzione dalla directory e invia Ctrl+E
+    per abilitare l'autotrading (risolutivo per retcode 10027).
+
+    Ritorna True se il comando è stato inviato senza errori.
+    """
+    if _sys.platform != "win32":
+        return False
+
+    pid = _get_mt5_pid_for_dir(mt5_dir)
+    if pid is None:
+        logger.warning("_enable_autotrading_via_gui: nessun processo MT5 trovato in %s", mt5_dir)
+        return False
+
+    ps = f"""
+Add-Type -AssemblyName Microsoft.VisualBasic
+try {{
+    [Microsoft.VisualBasic.Interaction]::AppActivate({pid})
+}} catch {{
+    $s = New-Object -ComObject WScript.Shell
+    $s.AppActivate("MetaTrader 5") | Out-Null
+}}
+Start-Sleep -Milliseconds 600
+$shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("^e")
+Start-Sleep -Milliseconds 1000
+"""
+    result = _subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, timeout=15,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "_enable_autotrading_via_gui: SendKeys Ctrl+E fallito (PID %s): %s",
+            pid, result.stderr,
+        )
+        return False
+
+    logger.info("_enable_autotrading_via_gui: Ctrl+E inviato a MT5 PID %s", pid)
+    return True
+
+
 def _sendkeys_escape(s: str) -> str:
     """Escapa i caratteri speciali di WScript.Shell SendKeys."""
     special = {
@@ -498,7 +565,9 @@ class MT5Trader:
 
                 # ── Ordini ────────────────────────────────────────────────────
                 for sig in signals:
-                    results.append(self._send_order(mt5, sig, user_id, signal_group_id))
+                    results.append(
+                        self._send_order(mt5, sig, user_id, signal_group_id, user_dir)
+                    )
 
             finally:
                 mt5.shutdown()
@@ -511,8 +580,14 @@ class MT5Trader:
         sig: TradeSignal,
         user_id: str,
         signal_group_id: str | None = None,
+        user_dir: Path | None = None,
     ) -> TradeResult:
-        """Costruisce e invia un singolo ordine MT5."""
+        """Costruisce e invia un singolo ordine MT5.
+
+        Se l'ordine viene rifiutato con retcode 10027 (autotrading disabilitato),
+        invia Ctrl+E alla finestra MT5, ri-seleziona il simbolo se necessario
+        e riprova l'ordine una volta.
+        """
 
         # ── Abilita il simbolo se non è nel Market Watch ──────────────────────
         if mt5.symbol_info(sig.symbol) is None:
@@ -593,6 +668,30 @@ class MT5Trader:
         }
 
         res = mt5.order_send(request)
+
+        # ── Gestione retcode 10027: autotrading disabilitato ──────────────────
+        # Invia Ctrl+E alla finestra MT5, ri-seleziona il simbolo se trade_mode=0
+        # e riprova l'ordine una volta (replica flusso diagnostica STEP 5).
+        if res is not None and res.retcode == 10027 and user_dir is not None:
+            logger.warning(
+                "Utente %s | %s %s | retcode 10027 — invio Ctrl+E e retry...",
+                user_id, sig.order_type, sig.symbol,
+            )
+            _enable_autotrading_via_gui(user_dir)
+            time.sleep(1.0)
+
+            sym2 = mt5.symbol_info(sig.symbol)
+            if sym2 is None or sym2.trade_mode == 0:
+                logger.warning(
+                    "Utente %s | %s trade_mode=0 — ri-seleziono simbolo...",
+                    user_id, sig.symbol,
+                )
+                mt5.symbol_select(sig.symbol, False)
+                time.sleep(0.5)
+                mt5.symbol_select(sig.symbol, True)
+                time.sleep(2.0)
+
+            res = mt5.order_send(request)
 
         if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
             comment = getattr(res, "comment", "?")
