@@ -163,6 +163,7 @@ Start-Sleep -Milliseconds 800
 $shell.SendKeys("{{ESC}}")        # chiude eventuali dialog residui
 Start-Sleep -Milliseconds 400
 $shell.SendKeys("^e")             # Ctrl+E -> attiva algo trading
+Start-Sleep -Milliseconds 1000
 exit 0
 """
     result = subprocess.run(
