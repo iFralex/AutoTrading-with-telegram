@@ -97,6 +97,28 @@ def _ensure_experts_enabled(mt5_dir: Path) -> None:
         warn(f"_ensure_experts_enabled: {e}")
 
 
+def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:
+    """Trova il PID del processo terminal64.exe in esecuzione dalla directory."""
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where", "name='terminal64.exe'",
+             "get", "ProcessId,ExecutablePath", "/format:csv"],
+            capture_output=True, text=True, timeout=10,
+        )
+        target = str(mt5_dir).lower().rstrip("\\")
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(",")
+            if len(parts) < 3:
+                continue
+            exe_path = parts[1].strip().lower().rstrip("\\")
+            pid_str = parts[2].strip()
+            if exe_path.startswith(target) and pid_str.isdigit():
+                return int(pid_str)
+    except Exception:
+        pass
+    return None
+
+
 def _kill_pid(pid: int) -> None:
     try:
         subprocess.run(["taskkill", "/PID", str(pid), "/F"],
@@ -368,10 +390,14 @@ result_order = mt5.order_send(ORDER_REQUEST)
 # Riattiva Ctrl+E sulla finestra MT5 e riprova.
 if result_order and result_order.retcode == 10027:
     warn("Autotrading disabilitato (10027) — invio Ctrl+E alla finestra MT5 e riprovo...")
+    # mt5_pid è il processo killato nello step 3 — serve il PID del processo
+    # corrente avviato da mt5.initialize() in step 4.
+    current_pid = _get_mt5_pid_for_dir(test_user_dir) or mt5_pid
+    info(f"PID processo MT5 corrente: {current_pid}")
     ps_enable = f"""
 Add-Type -AssemblyName Microsoft.VisualBasic
 try {{
-    [Microsoft.VisualBasic.Interaction]::AppActivate({mt5_pid})
+    [Microsoft.VisualBasic.Interaction]::AppActivate({current_pid})
 }} catch {{
     $s = New-Object -ComObject WScript.Shell
     $s.AppActivate("MetaTrader 5") | Out-Null
