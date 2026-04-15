@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { StatsSection } from "@/components/dashboard/StatsSection"
+import { AILogsPanel } from "@/components/dashboard/AILogsPanel"
 
 // ── Utilità ───────────────────────────────────────────────────────────────────
 
@@ -1100,6 +1101,12 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
 
           {/* Statistiche dettagliate */}
           <StatsSection userId={data.user.user_id} />
+
+          {/* Log chiamate AI */}
+          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-5 space-y-4">
+            <h2 className="text-base font-semibold text-slate-200">Utilizzo AI (Gemini)</h2>
+            <AILogsPanel userId={data.user.user_id} />
+          </div>
 
           {/* Simulatore messaggio Telegram */}
           <MessageSimulatorPanel userId={data.user.user_id} />

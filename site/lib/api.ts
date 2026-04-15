@@ -478,6 +478,80 @@ export const api = {
       `/api/dashboard/trade-stats?user_id=${encodeURIComponent(userId)}`
     )
   },
+
+  /** Ultimi N log di chiamate AI per un utente. */
+  getAILogs(userId: string, limit = 50, offset = 0) {
+    return call<{ logs: AILog[]; total: number }>(
+      "GET",
+      `/api/dashboard/ai-logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`
+    )
+  },
+
+  /** Statistiche aggregate sull'utilizzo AI per un utente. */
+  getAIStats(userId: string) {
+    return call<AIStats>(
+      "GET",
+      `/api/dashboard/ai-stats?user_id=${encodeURIComponent(userId)}`
+    )
+  },
+}
+
+// ── AI Logs types ─────────────────────────────────────────────────────────────
+
+export interface AILog {
+  id:                number
+  user_id:           string | null
+  ts:                string
+  call_type:         "flash_detect" | "pro_extract" | "strategy_pretrade" | "strategy_event"
+  model:             string
+  prompt_tokens:     number | null
+  completion_tokens: number | null
+  total_tokens:      number | null
+  cost_usd:          number | null
+  latency_ms:        number | null
+  error:             string | null
+  context:           Record<string, unknown> | null
+}
+
+export interface AICallTypeStats {
+  call_type:         string
+  calls:             number
+  prompt_tokens:     number
+  completion_tokens: number
+  total_tokens:      number
+  cost_usd:          number
+  avg_latency_ms:    number
+  errors:            number
+}
+
+export interface AIModelStats {
+  model:             string
+  calls:             number
+  prompt_tokens:     number
+  completion_tokens: number
+  total_tokens:      number
+  cost_usd:          number
+  avg_latency_ms:    number
+}
+
+export interface AIDaily {
+  day:          string
+  calls:        number
+  total_tokens: number
+  cost_usd:     number
+}
+
+export interface AIStats {
+  total_calls:             number
+  total_prompt_tokens:     number
+  total_completion_tokens: number
+  total_tokens:            number
+  total_cost_usd:          number
+  avg_latency_ms:          number
+  total_errors:            number
+  by_call_type:            AICallTypeStats[]
+  by_model:                AIModelStats[]
+  daily:                   AIDaily[]
 }
 
 // ── Trade Stats types ─────────────────────────────────────────────────────────

@@ -48,13 +48,16 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from google import genai
 from google.genai import types
 
 from vps.services.signal_processor import TradeSignal
 from vps.services.mt5_trader import MT5Trader
+
+if TYPE_CHECKING:
+    from vps.services.ai_log_store import AILogStore
 
 logger = logging.getLogger(__name__)
 
@@ -512,7 +515,12 @@ class StrategyExecutor:
         self._client     = genai.Client(api_key=api_key)
         self._trader     = mt5_trader
         self._user_locks: dict[str, asyncio.Lock] = {}
+        self._ai_logs:    AILogStore | None = None
         logger.info("StrategyExecutor inizializzato (model=%s)", _PRO_MODEL)
+
+    def set_ai_log_store(self, store: AILogStore) -> None:
+        """Inietta il log store per tracciare ogni chiamata Gemini."""
+        self._ai_logs = store
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         if user_id not in self._user_locks:
@@ -565,6 +573,7 @@ class StrategyExecutor:
                 ctx=ctx,
                 include_pretrade_tools=True,
                 pretrade_decisions=decisions,
+                call_type="strategy_pretrade",
             )
 
         # Segnali non gestiti → approvati di default
@@ -626,11 +635,13 @@ class StrategyExecutor:
         ctx: _ExecCtx,
         include_pretrade_tools: bool,
         pretrade_decisions: dict[int, PreTradeDecision] | None,
+        call_type: str = "strategy_event",
     ) -> StrategyResult:
         """
         Ciclo principale: invia il prompt a Gemini, esegue i tool call in loop
         finché l'AI non produce una risposta finale (senza function call).
         """
+        from vps.services.ai_log_store import make_timer
         tools     = _make_tools(include_pretrade=include_pretrade_tools)
         tool_log: list[dict] = []
 
@@ -641,70 +652,114 @@ class StrategyExecutor:
         )
         chat = self._client.aio.chats.create(model=_PRO_MODEL, config=config)
 
+        timer = make_timer()
+        total_prompt_tokens:     int = 0
+        total_completion_tokens: int = 0
+        error_str: str | None        = None
+        final_text: str              = ""
+
+        def _accumulate_tokens(resp: Any) -> None:
+            nonlocal total_prompt_tokens, total_completion_tokens
+            meta = getattr(resp, "usage_metadata", None)
+            if meta:
+                total_prompt_tokens     += getattr(meta, "prompt_token_count",     0) or 0
+                total_completion_tokens += getattr(meta, "candidates_token_count", 0) or 0
+
         try:
-            response = await chat.send_message(event_prompt)
-        except Exception as exc:
-            logger.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
-            return StrategyResult(event_type="", error=str(exc))
-
-        for iteration in range(MAX_ITERATIONS):
-            # Raccogli tutti i function call della risposta corrente
-            fn_calls = response.function_calls or []
-
-            if not fn_calls:
-                # L'AI ha finito — raccoglie il testo finale
-                final_text = response.text or ""
-                logger.info(
-                    "StrategyExecutor utente %s: completato in %d iterazioni, %d tool call",
-                    ctx.user_id, iteration + 1, len(tool_log),
-                )
-                return StrategyResult(
-                    event_type="",
-                    tool_calls=tool_log,
-                    final_response=final_text.strip(),
-                )
-
-            # Esegui i tool call e prepara le risposte
-            fn_response_parts = []
-            for fc in fn_calls:
-                name = fc.name
-                args = dict(fc.args)
-                logger.debug("StrategyExecutor: tool call %s(%s)", name, args)
-
-                result_data = await self._dispatch(
-                    name, args, ctx, pretrade_decisions
-                )
-
-                tool_log.append({"name": name, "args": args, "result": result_data})
-
-                fn_response_parts.append(
-                    types.Part.from_function_response(
-                        name=name,
-                        response={"result": json.dumps(result_data, default=str)},
-                    )
-                )
-
-            # Manda i risultati dei tool back all'AI
             try:
-                response = await chat.send_message(fn_response_parts)
+                response = await chat.send_message(event_prompt)
             except Exception as exc:
-                logger.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
-                return StrategyResult(
-                    event_type="",
-                    tool_calls=tool_log,
-                    error=str(exc),
-                )
+                logger.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
+                error_str = str(exc)
+                return StrategyResult(event_type="", error=error_str)
 
-        # Raggiunto MAX_ITERATIONS senza risposta finale
-        logger.warning(
-            "StrategyExecutor utente %s: raggiunto MAX_ITERATIONS (%d)",
-            ctx.user_id, MAX_ITERATIONS,
-        )
-        return StrategyResult(
-            event_type="",
-            tool_calls=tool_log,
-            error=f"MAX_ITERATIONS ({MAX_ITERATIONS}) raggiunte senza risposta finale",
-        )
+            _accumulate_tokens(response)
+
+            for iteration in range(MAX_ITERATIONS):
+                # Raccogli tutti i function call della risposta corrente
+                fn_calls = response.function_calls or []
+
+                if not fn_calls:
+                    # L'AI ha finito — raccoglie il testo finale
+                    final_text = response.text or ""
+                    logger.info(
+                        "StrategyExecutor utente %s: completato in %d iterazioni, %d tool call",
+                        ctx.user_id, iteration + 1, len(tool_log),
+                    )
+                    return StrategyResult(
+                        event_type="",
+                        tool_calls=tool_log,
+                        final_response=final_text.strip(),
+                    )
+
+                # Esegui i tool call e prepara le risposte
+                fn_response_parts = []
+                for fc in fn_calls:
+                    name = fc.name
+                    args = dict(fc.args)
+                    logger.debug("StrategyExecutor: tool call %s(%s)", name, args)
+
+                    result_data = await self._dispatch(
+                        name, args, ctx, pretrade_decisions
+                    )
+
+                    tool_log.append({"name": name, "args": args, "result": result_data})
+
+                    fn_response_parts.append(
+                        types.Part.from_function_response(
+                            name=name,
+                            response={"result": json.dumps(result_data, default=str)},
+                        )
+                    )
+
+                # Manda i risultati dei tool back all'AI
+                try:
+                    response = await chat.send_message(fn_response_parts)
+                except Exception as exc:
+                    logger.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
+                    error_str = str(exc)
+                    return StrategyResult(
+                        event_type="",
+                        tool_calls=tool_log,
+                        error=error_str,
+                    )
+
+                _accumulate_tokens(response)
+
+            # Raggiunto MAX_ITERATIONS senza risposta finale
+            logger.warning(
+                "StrategyExecutor utente %s: raggiunto MAX_ITERATIONS (%d)",
+                ctx.user_id, MAX_ITERATIONS,
+            )
+            error_str = f"MAX_ITERATIONS ({MAX_ITERATIONS}) raggiunte senza risposta finale"
+            return StrategyResult(
+                event_type="",
+                tool_calls=tool_log,
+                error=error_str,
+            )
+
+        finally:
+            if self._ai_logs is not None:
+                latency = timer.elapsed_ms()
+                try:
+                    await self._ai_logs.insert(
+                        call_type         = call_type,
+                        model             = _PRO_MODEL,
+                        user_id           = ctx.user_id,
+                        prompt_tokens     = total_prompt_tokens     or None,
+                        completion_tokens = total_completion_tokens or None,
+                        latency_ms        = latency,
+                        error             = error_str,
+                        context           = {
+                            "event_prompt_preview":   event_prompt[:200],
+                            "iterations":             len(tool_log),
+                            "tool_calls_count":       len(tool_log),
+                            "final_response_preview": final_text[:300] if final_text else None,
+                            "include_pretrade_tools": include_pretrade_tools,
+                        },
+                    )
+                except Exception as log_exc:
+                    logger.warning("ai_logs insert (strategy): %s", log_exc)
 
     # ── Dispatcher tool ───────────────────────────────────────────────────────
 

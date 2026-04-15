@@ -42,6 +42,7 @@ from vps.services.signal_log_store import SignalLogStore
 from vps.services.strategy_executor import StrategyExecutor, PreTradeDecision
 from vps.services.strategy_log_store import StrategyLogStore
 from vps.services.closed_trade_store import ClosedTradeStore
+from vps.services.ai_log_store import AILogStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -100,11 +101,17 @@ async def lifespan(app: FastAPI):
     await closed_trade_store.init()
     app.state.closed_trade_store = closed_trade_store
 
+    # Log chiamate AI (stessa users.db)
+    ai_log_store = AILogStore(_db_path)
+    await ai_log_store.init()
+    app.state.ai_log_store = ai_log_store
+
     # Gemini signal processor (opzionale: se la chiave non è configurata
     # i messaggi vengono loggati ma non processati)
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if gemini_key:
         signal_processor = SignalProcessor(api_key=gemini_key)
+        signal_processor.set_ai_log_store(ai_log_store)
         logger.info("SignalProcessor attivo (Gemini)")
     else:
         signal_processor = None
@@ -125,6 +132,7 @@ async def lifespan(app: FastAPI):
     # Strategy executor (opzionale: stessa chiave Gemini del signal processor)
     if gemini_key:
         strategy_executor = StrategyExecutor(api_key=gemini_key, mt5_trader=mt5_trader)
+        strategy_executor.set_ai_log_store(ai_log_store)
         logger.info("StrategyExecutor attivo (Gemini)")
     else:
         strategy_executor = None
@@ -255,7 +263,7 @@ async def lifespan(app: FastAPI):
 
         # ── Step 1: rilevamento rapido (Flash) — prima di aprire MT5 ─────────
         try:
-            flash_result = await signal_processor._detect(message)
+            flash_result = await signal_processor._detect(message, user_id=user_id)
             log_flash_raw = "YES" if flash_result else "NO"
             log_is_signal = flash_result
         except Exception as exc:
@@ -324,6 +332,7 @@ async def lifespan(app: FastAPI):
                 message,
                 sizing_strategy=log_sizing_strategy,
                 account_info=log_account_info,
+                user_id=user_id,
             )
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)

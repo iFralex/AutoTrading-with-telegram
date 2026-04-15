@@ -356,3 +356,27 @@ async def get_dashboard_logs(
     total = await log_store.count_by_user_id(user_id)
 
     return {"logs": logs, "total": total}
+
+
+@router.get("/ai-logs")
+async def get_ai_logs(
+    user_id: str = Query(..., description="Telegram user_id"),
+    limit:   int = Query(50, ge=1, le=200),
+    offset:  int = Query(0,  ge=0),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Ultimi N log di chiamate AI (Flash + Pro + Strategy) per un utente."""
+    ai_log_store = request.app.state.ai_log_store
+    logs = await ai_log_store.get_by_user_id(user_id, limit=limit, offset=offset)
+    return {"logs": logs, "total": len(logs)}
+
+
+@router.get("/ai-stats")
+async def get_ai_stats(
+    user_id: str = Query(..., description="Telegram user_id"),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Statistiche aggregate sull'utilizzo AI per un utente."""
+    ai_log_store = request.app.state.ai_log_store
+    stats = await ai_log_store.get_stats(user_id)
+    return stats
