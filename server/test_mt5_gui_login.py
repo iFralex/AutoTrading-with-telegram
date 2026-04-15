@@ -388,29 +388,29 @@ result_order = mt5.order_send(ORDER_REQUEST)
 
 # retcode 10027 = autotrading disabilitato dal client terminal.
 # Riattiva Ctrl+E sulla finestra MT5 e riprova.
-if result_order and result_order.retcode == 10027:
-    warn("Autotrading disabilitato (10027) — invio Ctrl+E alla finestra MT5 e riprovo...")
-    # mt5_pid è il processo killato nello step 3 — serve il PID del processo
-    # corrente avviato da mt5.initialize() in step 4.
-    current_pid = _get_mt5_pid_for_dir(test_user_dir) or mt5_pid
-    info(f"PID processo MT5 corrente: {current_pid}")
-    ps_enable = f"""
-Add-Type -AssemblyName Microsoft.VisualBasic
-try {{
-    [Microsoft.VisualBasic.Interaction]::AppActivate({current_pid})
-}} catch {{
-    $s = New-Object -ComObject WScript.Shell
-    $s.AppActivate("MetaTrader 5") | Out-Null
-}}
-Start-Sleep -Milliseconds 600
-$shell = New-Object -ComObject WScript.Shell
-$shell.SendKeys("^e")
-Start-Sleep -Milliseconds 1000
-"""
-    subprocess.run(["powershell", "-NoProfile", "-Command", ps_enable],
-                   capture_output=True, timeout=15)
-    time.sleep(1.0)
-    result_order = mt5.order_send(ORDER_REQUEST)
+if result_order and result_order.retcode in (10017, 10027):
+    warn(f"Trading disabilitato ({result_order.retcode}) — restart MT5 con ExpertsEnabled=1...")
+    mt5.shutdown()
+    current_pid = _get_mt5_pid_for_dir(test_user_dir)
+    if current_pid:
+        _kill_pid(current_pid)
+        time.sleep(2.0)
+    _ensure_experts_enabled(test_user_dir)
+    reinit_ok = mt5.initialize(
+        path=terminal_exe,
+        portable=True,
+        login=MT5_LOGIN,
+        password=MT5_PASSWORD,
+        server=MT5_SERVER,
+        timeout=60_000,
+    )
+    if not reinit_ok:
+        code, msg = mt5.last_error()
+        fail(f"Reinizializzazione fallita: {msg} (codice {code})")
+    else:
+        tinfo = mt5.terminal_info()
+        info(f"Trade allowed dopo restart: {tinfo.trade_allowed if tinfo else '?'}")
+        result_order = mt5.order_send(ORDER_REQUEST)
 
 if result_order and result_order.retcode == mt5.TRADE_RETCODE_DONE:
     ticket = result_order.order
