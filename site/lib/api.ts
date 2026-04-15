@@ -230,6 +230,78 @@ export interface SimulateMessageResponse {
   error:            string | null
 }
 
+// ── Dashboard Stats types ─────────────────────────────────────────────────────
+
+export interface DailyStats {
+  day:         string
+  messages:    number
+  signals:     number
+  orders_sent: number
+}
+
+export interface WeeklyStats {
+  week:     string
+  messages: number
+  signals:  number
+  orders:   number
+}
+
+export interface HourlyStats {
+  hour:     number
+  messages: number
+  signals:  number
+}
+
+export interface SymbolStats {
+  symbol:       string
+  total:        number
+  successful:   number
+  failed:       number
+  buy:          number
+  sell:         number
+  avg_lot:      number | null
+  success_rate: number
+}
+
+export interface BalanceTrendPoint {
+  ts:      string
+  balance: number | null
+  equity:  number | null
+}
+
+export interface ErrorStepCount {
+  error_step: string
+  count:      number
+}
+
+export interface SenderCount {
+  sender_name: string
+  count:       number
+}
+
+export interface DashboardStats {
+  total_messages:         number
+  total_signals:          number
+  signal_rate:            number
+  total_order_executions: number
+  successful_orders:      number
+  failed_orders:          number
+  execution_success_rate: number
+  total_errors:           number
+  errors_by_step:         ErrorStepCount[]
+  daily_stats:            DailyStats[]
+  weekly_stats:           WeeklyStats[]
+  hourly_distribution:    HourlyStats[]
+  top_senders:            SenderCount[]
+  by_symbol:              SymbolStats[]
+  by_order_type:          { BUY: number; SELL: number }
+  by_order_mode:          Record<string, number>
+  avg_lot_size:           number | null
+  min_lot_size:           number | null
+  max_lot_size:           number | null
+  balance_trend:          BalanceTrendPoint[]
+}
+
 export const api = {
   /**
    * Step 2a — invia il codice OTP al numero di telefono.
@@ -390,4 +462,94 @@ export const api = {
       { range_entry_pct: rangeEntryPct }
     )
   },
+
+  /** Statistiche aggregate complete per un utente. */
+  getDashboardStats(userId: string) {
+    return call<DashboardStats>(
+      "GET",
+      `/api/dashboard/stats?user_id=${encodeURIComponent(userId)}`
+    )
+  },
+
+  /** Statistiche di performance sulle operazioni chiuse (P&L, win rate, ecc.). */
+  getTradeStats(userId: string) {
+    return call<TradeStats>(
+      "GET",
+      `/api/dashboard/trade-stats?user_id=${encodeURIComponent(userId)}`
+    )
+  },
+}
+
+// ── Trade Stats types ─────────────────────────────────────────────────────────
+
+export interface ReasonStats {
+  reason:       string
+  count:        number
+  total_profit: number
+  avg_profit:   number
+}
+
+export interface DailyPnl {
+  day:    string
+  trades: number
+  pnl:    number
+  wins:   number
+  losses: number
+}
+
+export interface WeeklyPnl {
+  week:   string
+  trades: number
+  pnl:    number
+  wins:   number
+  losses: number
+}
+
+export interface SymbolTradeStats {
+  symbol:       string
+  total:        number
+  wins:         number
+  losses:       number
+  win_rate:     number
+  avg_profit:   number
+  total_profit: number
+  best_trade:   number
+  worst_trade:  number
+  tp_count:     number
+  sl_count:     number
+}
+
+export interface CumulativePnlPoint {
+  index:      number
+  ts:         string
+  profit:     number
+  cumulative: number
+}
+
+export interface TradeStats {
+  total_trades:            number
+  wins:                    number
+  losses:                  number
+  win_rate:                number
+  avg_profit:              number
+  median_profit:           number
+  total_profit:            number
+  gross_profit:            number
+  gross_loss:              number
+  profit_factor:           number | null
+  best_trade:              number
+  worst_trade:             number
+  avg_win:                 number
+  avg_loss:                number
+  avg_tp_profit:           number
+  avg_sl_loss:             number
+  max_consecutive_wins:    number
+  max_consecutive_losses:  number
+  avg_trades_per_day:      number
+  active_trading_days:     number
+  by_reason:               ReasonStats[]
+  daily_pnl:               DailyPnl[]
+  weekly_pnl:              WeeklyPnl[]
+  by_symbol:               SymbolTradeStats[]
+  cumulative_pnl:          CumulativePnlPoint[]
 }

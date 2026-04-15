@@ -41,6 +41,7 @@ from vps.services.mt5_position_watcher import PositionWatcher
 from vps.services.signal_log_store import SignalLogStore
 from vps.services.strategy_executor import StrategyExecutor, PreTradeDecision
 from vps.services.strategy_log_store import StrategyLogStore
+from vps.services.closed_trade_store import ClosedTradeStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,11 @@ async def lifespan(app: FastAPI):
     await strategy_log_store.init()
     app.state.strategy_log_store = strategy_log_store
 
+    # Storico operazioni chiuse su MT5 (stessa users.db)
+    closed_trade_store = ClosedTradeStore(_db_path)
+    await closed_trade_store.init()
+    app.state.closed_trade_store = closed_trade_store
+
     # Gemini signal processor (opzionale: se la chiave non è configurata
     # i messaggi vengono loggati ma non processati)
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
@@ -132,8 +138,16 @@ async def lifespan(app: FastAPI):
     async def on_position_event(user_id: str, event_type: str, event_data: dict) -> None:
         """
         Callback invocato dal PositionWatcher quando rileva un cambiamento di posizione.
-        Delega al StrategyExecutor se l'utente ha una management_strategy configurata.
+        Salva SEMPRE le posizioni chiuse nel DB (per le statistiche di performance),
+        poi delega al StrategyExecutor se l'utente ha una management_strategy configurata.
         """
+        # ── Salva sempre ogni chiusura per le statistiche ─────────────────────
+        if event_type == "position_closed":
+            try:
+                await closed_trade_store.insert(user_id=user_id, event_data=event_data)
+            except Exception as exc:
+                logger.warning("closed_trade_store.insert utente %s: %s", user_id, exc)
+
         if strategy_executor is None:
             return
 

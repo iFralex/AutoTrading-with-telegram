@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { StatsSection } from "@/components/dashboard/StatsSection"
 
 // ── Utilità ───────────────────────────────────────────────────────────────────
 
@@ -1097,14 +1098,14 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
             )}
           />
 
+          {/* Statistiche dettagliate */}
+          <StatsSection userId={data.user.user_id} />
+
           {/* Simulatore messaggio Telegram */}
           <MessageSimulatorPanel userId={data.user.user_id} />
 
           {/* Test ordine diretto */}
           <TestOrderPanel userId={data.user.user_id} />
-
-          {/* Stats */}
-          <StatsBar logs={data.logs} total={data.total_logs} />
 
           {/* Filtri */}
           <div className="flex items-center gap-2 flex-wrap">

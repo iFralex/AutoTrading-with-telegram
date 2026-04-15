@@ -300,6 +300,48 @@ async def simulate_message(
         }
 
 
+@router.get("/trade-stats")
+async def get_trade_stats(
+    user_id: str  = Query(..., description="Telegram user_id"),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Statistiche di performance sulle operazioni MT5 chiuse:
+    - Win rate, P&L medio/mediano/totale
+    - Guadagno medio per TP, perdita media per SL
+    - Profit factor, best/worst trade
+    - Breakdown per motivo chiusura (TP / SL / CLIENT / ...)
+    - P&L giornaliero e settimanale
+    - Per simbolo: win rate, P&L totale/medio
+    - P&L cumulativo (per grafico)
+    - Consecutivi massimi vincite/perdite
+    """
+    closed_trade_store = request.app.state.closed_trade_store
+    stats = await closed_trade_store.get_trade_stats(user_id)
+    return stats
+
+
+@router.get("/stats")
+async def get_dashboard_stats(
+    user_id: str  = Query(..., description="Telegram user_id"),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Calcola statistiche aggregate complete per un utente:
+    - Contatori base (messaggi, segnali, ordini, errori)
+    - Trend giornaliero (ultimi 90 giorni)
+    - Distribuzione oraria dei segnali
+    - Analisi per simbolo (successi, fallimenti, BUY/SELL, lotto medio)
+    - Distribuzione BUY vs SELL e modalità ordine
+    - Top mittenti Telegram
+    - Errori per step della pipeline
+    - Andamento balance/equity nel tempo
+    """
+    log_store = request.app.state.signal_log_store
+    stats = await log_store.get_stats_by_user_id(user_id)
+    return stats
+
+
 @router.get("/logs")
 async def get_dashboard_logs(
     user_id: str  = Query(..., description="Telegram user_id"),
