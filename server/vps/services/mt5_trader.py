@@ -163,8 +163,12 @@ def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:
 
 def _enable_autotrading_via_gui(mt5_dir: Path) -> bool:
     """
-    Trova il processo MT5 in esecuzione dalla directory e invia Ctrl+E
-    per abilitare l'autotrading (risolutivo per retcode 10027).
+    Invia Ctrl+E alla finestra MT5 per abilitare l'autotrading (retcode 10027).
+
+    Cerca prima il PID tramite wmic; se non trovato (es. processo avviato
+    internamente da mt5.initialize()) usa AppActivate per titolo finestra.
+    MT5_LOCK garantisce che giri un solo MT5 alla volta, quindi l'attivazione
+    per titolo è sicura come fallback.
 
     Ritorna True se il comando è stato inviato senza errori.
     """
@@ -172,18 +176,29 @@ def _enable_autotrading_via_gui(mt5_dir: Path) -> bool:
         return False
 
     pid = _get_mt5_pid_for_dir(mt5_dir)
-    if pid is None:
-        logger.warning("_enable_autotrading_via_gui: nessun processo MT5 trovato in %s", mt5_dir)
-        return False
 
-    ps = f"""
-Add-Type -AssemblyName Microsoft.VisualBasic
+    if pid:
+        activate_block = f"""
 try {{
     [Microsoft.VisualBasic.Interaction]::AppActivate({pid})
 }} catch {{
-    $s = New-Object -ComObject WScript.Shell
-    $s.AppActivate("MetaTrader 5") | Out-Null
-}}
+    $s2 = New-Object -ComObject WScript.Shell
+    $s2.AppActivate("MetaTrader 5") | Out-Null
+}}"""
+        log_target = f"PID {pid}"
+    else:
+        logger.warning(
+            "_enable_autotrading_via_gui: PID non trovato per %s — attivo per titolo finestra",
+            mt5_dir,
+        )
+        activate_block = """
+$s2 = New-Object -ComObject WScript.Shell
+$s2.AppActivate("MetaTrader 5") | Out-Null"""
+        log_target = "titolo 'MetaTrader 5'"
+
+    ps = f"""
+Add-Type -AssemblyName Microsoft.VisualBasic
+{activate_block}
 Start-Sleep -Milliseconds 600
 $shell = New-Object -ComObject WScript.Shell
 $shell.SendKeys("^e")
@@ -195,12 +210,12 @@ Start-Sleep -Milliseconds 1000
     )
     if result.returncode != 0:
         logger.warning(
-            "_enable_autotrading_via_gui: SendKeys Ctrl+E fallito (PID %s): %s",
-            pid, result.stderr,
+            "_enable_autotrading_via_gui: SendKeys Ctrl+E fallito (%s): %s",
+            log_target, result.stderr,
         )
         return False
 
-    logger.info("_enable_autotrading_via_gui: Ctrl+E inviato a MT5 PID %s", pid)
+    logger.info("_enable_autotrading_via_gui: Ctrl+E inviato a MT5 (%s)", log_target)
     return True
 
 
