@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import {
-  CheckCircle2, Bot, Hash, TrendingUp, BarChart2, ArrowRight, RotateCcw, Loader2,
+  CheckCircle2, Bot, Hash, TrendingUp, BarChart2, Settings2, ArrowRight, RotateCcw, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -41,6 +41,13 @@ export function CompleteStep({ data, onBack }: StepProps) {
         ? data.sizingStrategy.slice(0, 57) + "…"
         : data.sizingStrategy,
     },
+    ...(data.managementStrategy ? [{
+      icon: Settings2,
+      label: "Strategia di gestione",
+      value: data.managementStrategy.length > 60
+        ? data.managementStrategy.slice(0, 57) + "…"
+        : data.managementStrategy,
+    }] : []),
   ]
 
   async function handleStart() {
@@ -57,8 +64,9 @@ export function CompleteStep({ data, onBack }: StepProps) {
         group_name:      data.groupName,
         mt5_login:       data.mt5Login ? Number(data.mt5Login) : undefined,
         mt5_password:    data.mt5Password || undefined,
-        mt5_server:      data.mt5Server || undefined,
-        sizing_strategy: data.sizingStrategy || undefined,
+        mt5_server:          data.mt5Server || undefined,
+        sizing_strategy:     data.sizingStrategy || undefined,
+        management_strategy: data.managementStrategy || undefined,
       })
       setDone(true)
     } catch (err) {

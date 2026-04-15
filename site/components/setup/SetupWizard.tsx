@@ -9,6 +9,7 @@ import { TelegramAuthStep } from "./steps/TelegramAuthStep"
 import { GroupSelectStep } from "./steps/GroupSelectStep"
 import { MT5Step } from "./steps/MT5Step"
 import { SizingStrategyStep } from "./steps/SizingStrategyStep"
+import { ManagementStrategyStep } from "./steps/ManagementStrategyStep"
 import { CompleteStep } from "./steps/CompleteStep"
 import { api, type SetupSession } from "@/lib/api"
 
@@ -33,6 +34,8 @@ export interface SetupData {
   mt5AccountName: string  // da verify_mt5 (per il riepilogo finale)
   // Step 6 — strategia di sizing
   sizingStrategy: string
+  // Step 7 — strategia di gestione
+  managementStrategy: string
 }
 
 export interface StepProps {
@@ -52,6 +55,7 @@ const INDICATOR_STEPS = [
   { label: "Gruppo" },
   { label: "MetaTrader" },
   { label: "Sizing" },
+  { label: "Gestione" },
 ]
 
 /**
@@ -65,7 +69,8 @@ const INDICATOR_STEPS = [
  *   4 — GroupSelectStep
  *   5 — MT5Step
  *   6 — SizingStrategyStep
- *   7 — CompleteStep
+ *   7 — ManagementStrategyStep
+ *   8 — CompleteStep
  */
 export function SetupWizard() {
   const [step, setStep] = useState(0)
@@ -83,6 +88,7 @@ export function SetupWizard() {
     mt5Server: "",
     mt5AccountName: "",
     sizingStrategy: "",
+    managementStrategy: "",
   })
 
   const updateData = (partial: Partial<SetupData>) =>
@@ -124,11 +130,18 @@ export function SetupWizard() {
             sizing_strategy: data.sizingStrategy,
           })
           break
+        case 7:
+          // Strategia di gestione
+          await api.saveSession({
+            phone: data.phone,
+            management_strategy: data.managementStrategy,
+          })
+          break
       }
     } catch {
       // Fallimento del salvataggio sessione non blocca il wizard
     }
-    setStep(s => Math.min(s + 1, 7))
+    setStep(s => Math.min(s + 1, 8))
   }
 
   /**
@@ -158,8 +171,13 @@ export function SetupWizard() {
           await api.clearSessionFields(data.phone, ["sizing_strategy"])
           updateData({ sizingStrategy: "" })
           break
+        case 7:
+          // Lascia la gestione (torna al sizing)
+          await api.clearSessionFields(data.phone, ["management_strategy"])
+          updateData({ managementStrategy: "" })
+          break
         // step 4 (Group → Auth): nessuna pulizia, Auth mostrerà "già autenticato"
-        // step 7 (Complete → Sizing): nessuna pulizia
+        // step 8 (Complete → Gestione): nessuna pulizia
       }
     } catch {
       // Errore di pulizia sessione: procedi comunque
@@ -181,7 +199,8 @@ export function SetupWizard() {
       groupName:      session.group_name ?? "",
       mt5Login:       String(session.mt5_login ?? ""),
       mt5Server:      session.mt5_server ?? "",
-      sizingStrategy: session.sizing_strategy ?? "",
+      sizingStrategy:     session.sizing_strategy ?? "",
+      managementStrategy: session.management_strategy ?? "",
       // mt5Password resta vuoto: viene recuperato dal server in completeSetup
     })
     setStep(targetStep)
@@ -191,7 +210,7 @@ export function SetupWizard() {
 
   return (
     <div className="w-full">
-      {step >= 2 && step <= 6 && (
+      {step >= 2 && step <= 7 && (
         <StepIndicator steps={INDICATOR_STEPS} currentStep={step - 2} />
       )}
       <div key={step} className="step-enter">
@@ -204,7 +223,8 @@ export function SetupWizard() {
         {step === 4 && <GroupSelectStep {...props} />}
         {step === 5 && <MT5Step {...props} />}
         {step === 6 && <SizingStrategyStep {...props} />}
-        {step === 7 && <CompleteStep {...props} />}
+        {step === 7 && <ManagementStrategyStep {...props} />}
+        {step === 8 && <CompleteStep {...props} />}
       </div>
     </div>
   )

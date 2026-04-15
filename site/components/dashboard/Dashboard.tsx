@@ -9,6 +9,7 @@ import {
   type TradeResultLog,
   type TestSignalInput,
   type TestOrderResponse,
+  type SimulateMessageResponse,
 } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -44,6 +45,7 @@ function UserCard({ data }: { data: DashboardUserResponse["user"] }) {
     { label: "MT5 Login", value: data.mt5_login ?? "—" },
     { label: "MT5 Server", value: data.mt5_server ?? "—" },
     { label: "Sizing strategy", value: data.sizing_strategy ?? "—" },
+    { label: "Management strategy", value: data.management_strategy ?? "—" },
     { label: "Account attivo", value: data.active ? "Sì" : "No" },
     { label: "Registrato il", value: formatTs(data.created_at) },
   ]
@@ -262,6 +264,98 @@ function SizingStrategyEditor({
   )
 }
 
+// ── Editor management strategy ───────────────────────────────────────────────
+
+function ManagementStrategyEditor({
+  userId,
+  current,
+  onSaved,
+}: {
+  userId: string
+  current: string | null
+  onSaved: (value: string | null) => void
+}) {
+  const [editing, setEditing]   = useState(false)
+  const [value, setValue]       = useState(current ?? "")
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+
+  function startEdit() {
+    setValue(current ?? "")
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancel() {
+    setEditing(false)
+    setError(null)
+  }
+
+  async function save() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.updateManagementStrategy(userId, value.trim() || null)
+      onSaved(value.trim() || null)
+      setEditing(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="border-white/10">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Management Strategy</CardTitle>
+            <CardDescription className="mt-0.5">
+              Descrizione della strategia di gestione delle posizioni (eseguita dall&apos;AI agent)
+            </CardDescription>
+          </div>
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={startEdit} className="text-xs">
+              Modifica
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!editing ? (
+          <p className="text-sm font-mono text-foreground/80 bg-black/20 rounded-lg border border-white/8 px-3 py-2 min-h-[2.5rem] whitespace-pre-wrap break-words">
+            {current ?? <span className="text-muted-foreground italic">Nessuna strategia configurata</span>}
+          </p>
+        ) : (
+          <>
+            <textarea
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              rows={4}
+              placeholder="Es: Sposta lo stop loss al break-even quando il prezzo raggiunge il 50% del target. Chiudi metà posizione al primo TP."
+              className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50"
+            />
+            {error && (
+              <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={save} disabled={loading} size="sm" className="text-xs">
+                {loading ? "Salvataggio…" : "Salva"}
+              </Button>
+              <Button onClick={cancel} disabled={loading} variant="outline" size="sm" className="text-xs">
+                Annulla
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Editor range entry pct ────────────────────────────────────────────────────
 
 function RangeEntryPctEditor({
@@ -368,6 +462,188 @@ function RangeEntryPctEditor({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ── Simulatore messaggio Telegram ────────────────────────────────────────────
+
+const EXAMPLE_MESSAGES = [
+  "🟢 BUY XAUUSD\nEntry: 2320 - 2325\nSL: 2305\nTP1: 2345\nTP2: 2365",
+  "EURUSD SELL NOW\nEntry: 1.0850\nStop Loss: 1.0890\nTake Profit: 1.0800",
+  "Buongiorno a tutti! Il mercato oggi è molto volatile, fate attenzione.",
+]
+
+function SimulatedSignalRow({ sig, idx }: { sig: TradeSignalLog; idx: number }) {
+  return (
+    <div className="rounded-lg border border-white/8 bg-white/[0.02] p-3 text-xs font-mono">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] text-muted-foreground">#{idx + 1}</span>
+        <Badge className={`text-[10px] px-1.5 py-0 ${sig.order_type === "BUY" ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30" : "bg-red-600/20 text-red-400 border-red-500/30"}`}>
+          {sig.order_type}
+        </Badge>
+        <span className="font-bold text-foreground">{sig.symbol}</span>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-white/10">{sig.order_mode}</Badge>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-muted-foreground">
+        <div><span className="text-foreground/60">Entry: </span><span className="text-foreground">{entryPriceLabel(sig.entry_price)}</span></div>
+        <div><span className="text-foreground/60">SL: </span><span className="text-red-400">{sig.stop_loss ?? "—"}</span></div>
+        <div><span className="text-foreground/60">TP: </span><span className="text-emerald-400">{sig.take_profit ?? "—"}</span></div>
+        <div><span className="text-foreground/60">Lotto: </span><span className="text-foreground">{sig.lot_size ?? "auto"}</span></div>
+      </div>
+    </div>
+  )
+}
+
+function MessageSimulatorPanel({ userId }: { userId: string }) {
+  const [open, setOpen]       = useState(false)
+  const [message, setMessage] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [result, setResult]   = useState<SimulateMessageResponse | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+
+  const run = useCallback(async () => {
+    if (!message.trim()) return
+    setError(null)
+    setResult(null)
+    setLoading(true)
+    try {
+      const res = await api.simulateMessage(userId, message.trim())
+      setResult(res)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore sconosciuto")
+    } finally {
+      setLoading(false)
+    }
+  }, [userId, message])
+
+  const reset = () => { setMessage(""); setResult(null); setError(null) }
+
+  return (
+    <div className="rounded-xl border border-violet-500/20 bg-violet-600/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-violet-600/10 transition-colors"
+      >
+        <span className="text-violet-400 font-mono text-sm">💬</span>
+        <span className="text-sm font-medium text-violet-300">Simulatore messaggio Telegram</span>
+        <span className="text-xs text-muted-foreground ml-1">
+          — testa la pipeline Flash + Pro senza eseguire ordini
+        </span>
+        <span className="ml-auto text-muted-foreground text-sm">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3 border-t border-violet-500/15 pt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Incolla o digita un messaggio Telegram. Il server eseguirà{" "}
+            <span className="text-violet-300">Gemini Flash</span> (rilevamento segnale) e, se positivo,{" "}
+            <span className="text-violet-300">Gemini Pro</span> (estrazione strutturata).
+            La sizing strategy dell&apos;utente viene applicata. Nessun ordine MT5 viene eseguito.
+          </p>
+
+          {/* Esempi rapidi */}
+          <div className="flex flex-wrap gap-1.5">
+            {EXAMPLE_MESSAGES.map((ex, i) => (
+              <button
+                key={i}
+                onClick={() => { setMessage(ex); setResult(null); setError(null) }}
+                className="rounded-md border border-violet-500/20 px-2 py-1 text-[10px] text-violet-400/80 hover:border-violet-400/40 hover:text-violet-300 hover:bg-violet-600/10 transition-all"
+              >
+                Esempio {i + 1}
+              </button>
+            ))}
+          </div>
+
+          <textarea
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            rows={6}
+            placeholder="Incolla qui il testo del messaggio Telegram..."
+            spellCheck={false}
+            className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-violet-500/50"
+          />
+
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={run}
+              disabled={loading || !message.trim()}
+              className="bg-violet-600 hover:bg-violet-500 text-white"
+            >
+              {loading ? "Elaborazione…" : "Simula pipeline"}
+            </Button>
+            {(result || message) && (
+              <button
+                onClick={reset}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Resetta
+              </button>
+            )}
+          </div>
+
+          {/* Errore HTTP */}
+          {error && (
+            <div className="rounded-lg border border-red-500/20 bg-red-600/5 p-3 text-xs font-mono text-red-400">
+              {error}
+            </div>
+          )}
+
+          {/* Risultati */}
+          {result && (
+            <div className="space-y-3">
+              {/* Flash */}
+              <div className="rounded-lg border border-white/8 bg-black/20 p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Step 1 — Gemini Flash (rilevamento)</p>
+                <div className="flex items-center gap-2">
+                  <Badge
+                    className={`text-xs ${result.flash_raw === "YES"
+                      ? "bg-amber-600/20 text-amber-400 border-amber-500/30"
+                      : result.flash_raw === "NO"
+                        ? "bg-white/5 text-muted-foreground border-white/10"
+                        : "bg-red-600/20 text-red-400 border-red-500/30"}`}
+                  >
+                    {result.flash_raw ?? "errore"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {result.flash_raw === "YES"
+                      ? "→ classificato come segnale di trading"
+                      : result.flash_raw === "NO"
+                        ? "→ messaggio ignorato (non è un segnale)"
+                        : "→ errore nel rilevamento"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Pro extraction o motivo skip */}
+              {result.is_signal && (
+                <div className="rounded-lg border border-white/8 bg-black/20 p-3 space-y-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Step 2 — Gemini Pro (estrazione)</p>
+
+                  {result.sizing_strategy && (
+                    <p className="text-[10px] text-muted-foreground italic">
+                      Sizing strategy applicata: &quot;{result.sizing_strategy}&quot;
+                    </p>
+                  )}
+
+                  {result.error_step === "extraction" ? (
+                    <div className="rounded border border-red-500/20 bg-red-600/5 px-3 py-2 text-xs font-mono text-red-400">
+                      {result.error}
+                    </div>
+                  ) : result.signals.length > 0 ? (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-[10px] text-muted-foreground">{result.signals.length} segnali estratti:</p>
+                      {result.signals.map((sig, i) => (
+                        <SimulatedSignalRow key={i} sig={sig} idx={i} />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -801,6 +1077,16 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
             )}
           />
 
+          {/* Management strategy */}
+          <ManagementStrategyEditor
+            userId={data.user.user_id}
+            current={data.user.management_strategy}
+            onSaved={value => setData(prev => prev
+              ? { ...prev, user: { ...prev.user, management_strategy: value } }
+              : prev
+            )}
+          />
+
           {/* Range entry pct */}
           <RangeEntryPctEditor
             userId={data.user.user_id}
@@ -810,6 +1096,9 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
               : prev
             )}
           />
+
+          {/* Simulatore messaggio Telegram */}
+          <MessageSimulatorPanel userId={data.user.user_id} />
 
           {/* Test ordine diretto */}
           <TestOrderPanel userId={data.user.user_id} />

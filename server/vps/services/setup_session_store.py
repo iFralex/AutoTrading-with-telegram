@@ -40,16 +40,18 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     group_name       TEXT,
     mt5_login        INTEGER,
     mt5_password_enc TEXT,
-    mt5_server       TEXT,
-    sizing_strategy  TEXT,
-    updated_at       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    mt5_server          TEXT,
+    sizing_strategy     TEXT,
+    management_strategy TEXT,
+    updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
 # Campi che il frontend può leggere/scrivere (senza la password cifrata)
 _ALLOWED_FIELDS = {
     "api_id", "api_hash", "login_key", "user_id",
-    "group_id", "group_name", "mt5_login", "mt5_server", "sizing_strategy",
+    "group_id", "group_name", "mt5_login", "mt5_server",
+    "sizing_strategy", "management_strategy",
 }
 
 # Mappatura nomi frontend → colonne DB
@@ -93,11 +95,17 @@ class SetupSessionStore:
         self._db_path = db_path
 
     async def init(self) -> None:
-        """Crea la tabella se non esiste."""
+        """Crea la tabella se non esiste; applica le migration."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
             await db.commit()
+            # Migration incrementale: ignora errore se la colonna esiste già
+            try:
+                await db.execute("ALTER TABLE setup_sessions ADD COLUMN management_strategy TEXT")
+                await db.commit()
+            except Exception:
+                pass
 
     # ── Read ─────────────────────────────────────────────────────────────────
 
@@ -118,17 +126,18 @@ class SetupSessionStore:
             return None
 
         return {
-            "phone":            row["phone"],
-            "api_id":           row["api_id"],
-            "api_hash":         row["api_hash"],
-            "login_key":        row["login_key"],
-            "user_id":          row["user_id"],
-            "group_id":         row["group_id"],
-            "group_name":       row["group_name"],
-            "mt5_login":        row["mt5_login"],
-            "has_mt5_password": bool(row["mt5_password_enc"]),
-            "mt5_server":       row["mt5_server"],
-            "sizing_strategy":  row["sizing_strategy"],
+            "phone":               row["phone"],
+            "api_id":              row["api_id"],
+            "api_hash":            row["api_hash"],
+            "login_key":           row["login_key"],
+            "user_id":             row["user_id"],
+            "group_id":            row["group_id"],
+            "group_name":          row["group_name"],
+            "mt5_login":           row["mt5_login"],
+            "has_mt5_password":    bool(row["mt5_password_enc"]),
+            "mt5_server":          row["mt5_server"],
+            "sizing_strategy":     row["sizing_strategy"],
+            "management_strategy": row["management_strategy"],
         }
 
     async def get_mt5_password(self, phone: str) -> str | None:

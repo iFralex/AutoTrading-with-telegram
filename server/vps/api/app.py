@@ -105,6 +105,7 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "GEMINI_API_KEY non configurata — i segnali non verranno processati"
         )
+    app.state.signal_processor = signal_processor
 
     # MT5 trader
     default_lot = float(os.environ.get("DEFAULT_LOT_SIZE", "0.01"))

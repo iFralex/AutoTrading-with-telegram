@@ -49,6 +49,7 @@ export interface CompleteSetupPayload {
   mt5_password?: string
   mt5_server?: string
   sizing_strategy?: string
+  management_strategy?: string
 }
 
 export interface SetupSession {
@@ -66,6 +67,7 @@ export interface SetupSession {
   has_mt5_password?: boolean
   mt5_server?: string | null
   sizing_strategy?: string | null
+  management_strategy?: string | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
@@ -82,6 +84,7 @@ export interface SaveSessionPayload {
   mt5_password?: string
   mt5_server?: string
   sizing_strategy?: string
+  management_strategy?: string
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────
@@ -144,6 +147,7 @@ export interface DashboardUser {
   mt5_login: number | null
   mt5_server: string | null
   sizing_strategy: string | null
+  management_strategy: string | null
   range_entry_pct: number
   active: boolean
   created_at: string
@@ -215,6 +219,15 @@ export interface TestSignalInput {
 
 export interface TestOrderResponse {
   results: TradeResultLog[]
+}
+
+export interface SimulateMessageResponse {
+  flash_raw:        "YES" | "NO" | null
+  is_signal:        boolean
+  signals:          TradeSignalLog[]
+  sizing_strategy:  string | null
+  error_step:       string | null
+  error:            string | null
 }
 
 export const api = {
@@ -341,6 +354,23 @@ export const api = {
       user_id: userId,
       signals,
     })
+  },
+
+  /** Simula la pipeline Flash+Pro su un messaggio senza eseguire ordini MT5. */
+  simulateMessage(userId: string, message: string) {
+    return call<SimulateMessageResponse>("POST", "/api/dashboard/simulate-message", {
+      user_id: userId,
+      message,
+    })
+  },
+
+  /** Aggiorna la management strategy dell'utente. */
+  updateManagementStrategy(userId: string, managementStrategy: string | null) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/management-strategy`,
+      { management_strategy: managementStrategy || null }
+    )
   },
 
   /** Aggiorna la sizing strategy dell'utente. */

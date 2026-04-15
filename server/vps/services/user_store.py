@@ -165,6 +165,15 @@ class UserStore:
             )
             await db.commit()
 
+    async def update_management_strategy(self, user_id: str, management_strategy: str | None) -> None:
+        """Aggiorna solo il campo management_strategy per l'utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET management_strategy = ? WHERE user_id = ?",
+                (management_strategy or None, user_id),
+            )
+            await db.commit()
+
     async def update_range_entry_pct(self, user_id: str, range_entry_pct: int) -> None:
         """Aggiorna solo il campo range_entry_pct per l'utente (0–100)."""
         pct = max(0, min(100, int(range_entry_pct)))

@@ -104,6 +104,25 @@ async def update_sizing_strategy(
     return {"ok": True}
 
 
+class UpdateManagementStrategyBody(BaseModel):
+    management_strategy: str | None = None
+
+
+@router.patch("/user/{user_id}/management-strategy")
+async def update_management_strategy(
+    user_id: str,
+    body: UpdateManagementStrategyBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la management_strategy dell'utente."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_management_strategy(user_id, body.management_strategy)
+    return {"ok": True}
+
+
 class UpdateRangeEntryPctBody(BaseModel):
     range_entry_pct: int = Field(..., ge=0, le=100)
 
@@ -188,6 +207,97 @@ async def test_order(
             for r in results
         ]
     }
+
+
+class SimulateMessageBody(BaseModel):
+    user_id: str
+    message: str = Field(..., min_length=1)
+
+
+@router.post("/simulate-message")
+async def simulate_message(
+    body: SimulateMessageBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Simula la pipeline di elaborazione di un messaggio Telegram per un utente:
+      1. Flash (Gemini): classifica il messaggio (segnale sì/no)
+      2. Pro (Gemini):   estrae i segnali strutturati, usando la sizing_strategy dell'utente
+
+    Non esegue ordini MT5 e non scrive nulla nel log.
+    """
+    signal_processor = getattr(request.app.state, "signal_processor", None)
+    if signal_processor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="SignalProcessor non disponibile (GEMINI_API_KEY non configurata sul server)",
+        )
+
+    store = request.app.state.user_store
+    user = await store.get_user(body.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
+
+    sizing_strategy: str | None = user.get("sizing_strategy") or None
+
+    # ── Step 1: Flash detection ───────────────────────────────────────────────
+    try:
+        is_signal = await signal_processor._detect(body.message)
+        flash_raw = "YES" if is_signal else "NO"
+    except Exception as exc:
+        return {
+            "flash_raw":  None,
+            "is_signal":  False,
+            "signals":    [],
+            "sizing_strategy": sizing_strategy,
+            "error_step": "flash",
+            "error":      str(exc),
+        }
+
+    if not is_signal:
+        return {
+            "flash_raw":  "NO",
+            "is_signal":  False,
+            "signals":    [],
+            "sizing_strategy": sizing_strategy,
+            "error_step": None,
+            "error":      None,
+        }
+
+    # ── Step 2: Pro extraction ────────────────────────────────────────────────
+    from dataclasses import asdict
+    try:
+        signals = await signal_processor.extract_signals(
+            body.message,
+            sizing_strategy=sizing_strategy,
+            account_info=None,   # non apriamo MT5 durante la simulazione
+        )
+        if not signals:
+            return {
+                "flash_raw":  "YES",
+                "is_signal":  True,
+                "signals":    [],
+                "sizing_strategy": sizing_strategy,
+                "error_step": "extraction",
+                "error":      "Gemini Pro non ha estratto segnali validi dal messaggio",
+            }
+        return {
+            "flash_raw":  "YES",
+            "is_signal":  True,
+            "signals":    [asdict(s) for s in signals],
+            "sizing_strategy": sizing_strategy,
+            "error_step": None,
+            "error":      None,
+        }
+    except Exception as exc:
+        return {
+            "flash_raw":  "YES",
+            "is_signal":  True,
+            "signals":    [],
+            "sizing_strategy": sizing_strategy,
+            "error_step": "extraction",
+            "error":      str(exc),
+        }
 
 
 @router.get("/logs")
