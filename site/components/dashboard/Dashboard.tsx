@@ -170,6 +170,98 @@ const EXAMPLE_SIGNALS: TestSignalInput[] = [
   },
 ]
 
+// ── Editor sizing strategy ────────────────────────────────────────────────────
+
+function SizingStrategyEditor({
+  userId,
+  current,
+  onSaved,
+}: {
+  userId: string
+  current: string | null
+  onSaved: (value: string | null) => void
+}) {
+  const [editing, setEditing]   = useState(false)
+  const [value, setValue]       = useState(current ?? "")
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+
+  function startEdit() {
+    setValue(current ?? "")
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancel() {
+    setEditing(false)
+    setError(null)
+  }
+
+  async function save() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.updateSizingStrategy(userId, value.trim() || null)
+      onSaved(value.trim() || null)
+      setEditing(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="border-white/10">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Sizing Strategy</CardTitle>
+            <CardDescription className="mt-0.5">
+              Istruzione iniettata nel prompt AI per il calcolo del lotto
+            </CardDescription>
+          </div>
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={startEdit} className="text-xs">
+              Modifica
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!editing ? (
+          <p className="text-sm font-mono text-foreground/80 bg-black/20 rounded-lg border border-white/8 px-3 py-2 min-h-[2.5rem] whitespace-pre-wrap break-words">
+            {current ?? <span className="text-muted-foreground italic">Nessuna strategia configurata</span>}
+          </p>
+        ) : (
+          <>
+            <textarea
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              rows={4}
+              placeholder="Es: Usa sempre il 2% del balance come rischio per trade, con SL in pips dal segnale."
+              className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50"
+            />
+            {error && (
+              <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={save} disabled={loading} size="sm" className="text-xs">
+                {loading ? "Salvataggio…" : "Salva"}
+              </Button>
+              <Button onClick={cancel} disabled={loading} variant="outline" size="sm" className="text-xs">
+                Annulla
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Pannello test ordine diretto ──────────────────────────────────────────────
 
 function TestOrderPanel({ userId }: { userId: string }) {
@@ -589,6 +681,16 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
         <div className="space-y-5">
           {/* Profilo utente */}
           <UserCard data={data.user} />
+
+          {/* Sizing strategy */}
+          <SizingStrategyEditor
+            userId={data.user.user_id}
+            current={data.user.sizing_strategy}
+            onSaved={value => setData(prev => prev
+              ? { ...prev, user: { ...prev.user, sizing_strategy: value } }
+              : prev
+            )}
+          />
 
           {/* Test ordine diretto */}
           <TestOrderPanel userId={data.user.user_id} />

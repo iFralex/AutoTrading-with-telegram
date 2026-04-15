@@ -341,4 +341,13 @@ export const api = {
       signals,
     })
   },
+
+  /** Aggiorna la sizing strategy dell'utente. */
+  updateSizingStrategy(userId: string, sizingStrategy: string | null) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/sizing-strategy`,
+      { sizing_strategy: sizingStrategy || null }
+    )
+  },
 }

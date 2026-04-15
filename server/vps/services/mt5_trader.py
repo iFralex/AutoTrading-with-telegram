@@ -598,6 +598,7 @@ class MT5Trader:
 
             finally:
                 mt5.shutdown()
+                _kill_mt5_for_dir(user_dir)
 
         return results
 

@@ -2,15 +2,18 @@
 Dashboard API — dati di debug per utente (ricerca per numero di telefono).
 
 Endpoints:
-  GET  /api/dashboard/user?phone={phone}
-       Ritorna le info dell'utente registrato + i log segnali più recenti.
+  GET   /api/dashboard/user?phone={phone}
+        Ritorna le info dell'utente registrato + i log segnali più recenti.
 
-  GET  /api/dashboard/logs?user_id={user_id}&limit=50&offset=0
-       Paginazione dei log segnali (per infinite-scroll nel frontend).
+  GET   /api/dashboard/logs?user_id={user_id}&limit=50&offset=0
+        Paginazione dei log segnali (per infinite-scroll nel frontend).
 
-  POST /api/dashboard/test-order
-       Esegue direttamente un array di segnali (formato JSON AI) su MT5
-       e ritorna i TradeResult. Utile per testare la connettività MT5.
+  PATCH /api/dashboard/user/{user_id}/sizing-strategy
+        Aggiorna la sizing_strategy dell'utente.
+
+  POST  /api/dashboard/test-order
+        Esegue direttamente un array di segnali (formato JSON AI) su MT5
+        e ritorna i TradeResult. Utile per testare la connettività MT5.
 """
 
 from __future__ import annotations
@@ -80,6 +83,25 @@ async def get_dashboard_user(
         "logs":        logs,
         "total_logs":  total,
     }
+
+
+class UpdateSizingStrategyBody(BaseModel):
+    sizing_strategy: str | None = None
+
+
+@router.patch("/user/{user_id}/sizing-strategy")
+async def update_sizing_strategy(
+    user_id: str,
+    body: UpdateSizingStrategyBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la sizing_strategy dell'utente."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_sizing_strategy(user_id, body.sizing_strategy)
+    return {"ok": True}
 
 
 @router.post("/test-order")

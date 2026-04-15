@@ -153,6 +153,15 @@ class UserStore:
             )
             await db.commit()
 
+    async def update_sizing_strategy(self, user_id: str, sizing_strategy: str | None) -> None:
+        """Aggiorna solo il campo sizing_strategy per l'utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET sizing_strategy = ? WHERE user_id = ?",
+                (sizing_strategy or None, user_id),
+            )
+            await db.commit()
+
     async def set_active(self, user_id: str, active: bool) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
