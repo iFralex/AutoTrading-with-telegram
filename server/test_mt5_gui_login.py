@@ -361,9 +361,18 @@ if sym_info is None:
     shutil.rmtree(test_user_dir, ignore_errors=True)
     sys.exit(1)
 
-tick = mt5.symbol_info_tick(ORDER_SYMBOL)
-if tick is None:
-    fail(f"Impossibile ottenere il tick per {ORDER_SYMBOL}.")
+# Attende un tick valido (bid > 0) — il simbolo appena aggiunto al Market Watch
+# può impiegare qualche secondo prima che il broker invii il primo prezzo.
+tick = None
+for _ in range(20):
+    t = mt5.symbol_info_tick(ORDER_SYMBOL)
+    if t is not None and t.bid > 0:
+        tick = t
+        break
+    time.sleep(0.5)
+
+if tick is None or tick.bid == 0:
+    fail(f"Tick non disponibile per {ORDER_SYMBOL} (bid=0 dopo 10s).")
     mt5.shutdown()
     shutil.rmtree(test_user_dir, ignore_errors=True)
     sys.exit(1)
