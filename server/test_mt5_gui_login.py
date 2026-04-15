@@ -350,7 +350,7 @@ digits = sym_info.digits
 entry_price = round(tick.bid * 0.90, digits)
 info(f"Bid corrente: {tick.bid}  Entry BUY LIMIT: {entry_price} (-10%)")
 
-result_order = mt5.order_send({
+ORDER_REQUEST = {
     "action":       mt5.TRADE_ACTION_PENDING,
     "symbol":       ORDER_SYMBOL,
     "volume":       ORDER_LOT,
@@ -360,7 +360,31 @@ result_order = mt5.order_send({
     "comment":      "diag_test",
     "type_time":    mt5.ORDER_TIME_GTC,
     "type_filling": mt5.ORDER_FILLING_RETURN,
-})
+}
+
+result_order = mt5.order_send(ORDER_REQUEST)
+
+# retcode 10027 = autotrading disabilitato dal client terminal.
+# Riattiva Ctrl+E sulla finestra MT5 e riprova.
+if result_order and result_order.retcode == 10027:
+    warn("Autotrading disabilitato (10027) — invio Ctrl+E alla finestra MT5 e riprovo...")
+    ps_enable = f"""
+Add-Type -AssemblyName Microsoft.VisualBasic
+try {{
+    [Microsoft.VisualBasic.Interaction]::AppActivate({mt5_pid})
+}} catch {{
+    $s = New-Object -ComObject WScript.Shell
+    $s.AppActivate("MetaTrader 5") | Out-Null
+}}
+Start-Sleep -Milliseconds 600
+$shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("^e")
+Start-Sleep -Milliseconds 1000
+"""
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps_enable],
+                   capture_output=True, timeout=15)
+    time.sleep(1.0)
+    result_order = mt5.order_send(ORDER_REQUEST)
 
 if result_order and result_order.retcode == mt5.TRADE_RETCODE_DONE:
     ticket = result_order.order
