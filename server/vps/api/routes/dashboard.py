@@ -140,9 +140,10 @@ async def test_order(
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
 
-    mt5_login    = user.get("mt5_login")
-    mt5_password = user.get("mt5_password")
-    mt5_server   = user.get("mt5_server")
+    mt5_login       = user.get("mt5_login")
+    mt5_password    = user.get("mt5_password")
+    mt5_server      = user.get("mt5_server")
+    range_entry_pct = int(user.get("range_entry_pct") or 0)
 
     if not (mt5_login and mt5_password and mt5_server):
         raise HTTPException(
@@ -167,11 +168,12 @@ async def test_order(
     ]
 
     results = await mt5_trader.execute_signals(
-        user_id      = body.user_id,
-        signals      = signals,
-        mt5_login    = int(mt5_login),
-        mt5_password = mt5_password,
-        mt5_server   = mt5_server,
+        user_id         = body.user_id,
+        signals         = signals,
+        mt5_login       = int(mt5_login),
+        mt5_password    = mt5_password,
+        mt5_server      = mt5_server,
+        range_entry_pct = range_entry_pct,
     )
 
     from dataclasses import asdict
