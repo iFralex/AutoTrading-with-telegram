@@ -138,38 +138,44 @@ def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
 
 
 def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:
-    """Ritorna il PID del processo terminal64.exe in esecuzione dalla directory."""
+    """Ritorna il PID del processo terminal64.exe in esecuzione dalla directory.
+
+    Confronta il path esatto dell'eseguibile (case-insensitive) con
+    <mt5_dir>\\terminal64.exe, senza usare startswith per evitare falsi positivi.
+    """
     if _sys.platform != "win32":
         return None
+    expected = str(mt5_dir / "terminal64.exe").lower()
     try:
         result = _subprocess.run(
             ["wmic", "process", "where", "name='terminal64.exe'",
              "get", "ProcessId,ExecutablePath", "/format:csv"],
             capture_output=True, text=True, timeout=10,
         )
-        target = str(mt5_dir).lower().rstrip("\\")
         for line in result.stdout.splitlines():
             parts = line.strip().split(",")
+            # formato CSV: Node,ExecutablePath,ProcessId
             if len(parts) < 3:
                 continue
-            exe_path = parts[1].strip().lower().rstrip("\\")
+            exe_path = parts[1].strip().lower()
             pid_str  = parts[2].strip()
-            if exe_path.startswith(target) and pid_str.isdigit():
+            if exe_path == expected and pid_str.isdigit():
                 return int(pid_str)
     except Exception:
         pass
     return None
 
 
-def _enable_autotrading_via_gui(mt5_dir: Path) -> bool:
+def _enable_autotrading_via_gui(mt5_dir: Path, mt5_login: int | None = None) -> bool:
     """
     Invia Ctrl+E alla finestra MT5 per abilitare l'autotrading (retcode 10027).
 
-    Cerca prima il PID tramite wmic; se non trovato (es. processo avviato
-    internamente da mt5.initialize()) usa AppActivate per titolo finestra.
-    MT5_LOCK garantisce che giri un solo MT5 alla volta, quindi l'attivazione
-    per titolo è sicura come fallback.
+    Strategia di attivazione (in ordine di priorità):
+      1. PID trovato via wmic → AppActivate(pid)
+      2. Fallback: AppActivate sul numero di conto (es. "837285355") — il titolo
+         della finestra MT5 contiene sempre il numero di conto dell'utente.
 
+    MT5_LOCK garantisce un solo MT5 attivo alla volta.
     Ritorna True se il comando è stato inviato senza errori.
     """
     if _sys.platform != "win32":
@@ -183,18 +189,24 @@ try {{
     [Microsoft.VisualBasic.Interaction]::AppActivate({pid})
 }} catch {{
     $s2 = New-Object -ComObject WScript.Shell
-    $s2.AppActivate("MetaTrader 5") | Out-Null
+    $s2.AppActivate({pid}) | Out-Null
 }}"""
         log_target = f"PID {pid}"
+    elif mt5_login:
+        logger.warning(
+            "_enable_autotrading_via_gui: PID non trovato per %s — attivo per numero conto %s",
+            mt5_dir, mt5_login,
+        )
+        activate_block = f"""
+$s2 = New-Object -ComObject WScript.Shell
+$s2.AppActivate("{mt5_login}") | Out-Null"""
+        log_target = f"numero conto {mt5_login}"
     else:
         logger.warning(
-            "_enable_autotrading_via_gui: PID non trovato per %s — attivo per titolo finestra",
+            "_enable_autotrading_via_gui: PID non trovato e login non disponibile per %s",
             mt5_dir,
         )
-        activate_block = """
-$s2 = New-Object -ComObject WScript.Shell
-$s2.AppActivate("MetaTrader 5") | Out-Null"""
-        log_target = "titolo 'MetaTrader 5'"
+        return False
 
     ps = f"""
 Add-Type -AssemblyName Microsoft.VisualBasic
@@ -581,7 +593,7 @@ class MT5Trader:
                 # ── Ordini ────────────────────────────────────────────────────
                 for sig in signals:
                     results.append(
-                        self._send_order(mt5, sig, user_id, signal_group_id, user_dir)
+                        self._send_order(mt5, sig, user_id, signal_group_id, user_dir, login)
                     )
 
             finally:
@@ -596,6 +608,7 @@ class MT5Trader:
         user_id: str,
         signal_group_id: str | None = None,
         user_dir: Path | None = None,
+        mt5_login: int | None = None,
     ) -> TradeResult:
         """Costruisce e invia un singolo ordine MT5.
 
@@ -692,7 +705,7 @@ class MT5Trader:
                 "Utente %s | %s %s | retcode 10027 — invio Ctrl+E e retry...",
                 user_id, sig.order_type, sig.symbol,
             )
-            _enable_autotrading_via_gui(user_dir)
+            _enable_autotrading_via_gui(user_dir, mt5_login)
             time.sleep(1.0)
 
             sym2 = mt5.symbol_info(sig.symbol)
