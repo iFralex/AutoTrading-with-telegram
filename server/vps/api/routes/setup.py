@@ -28,7 +28,7 @@ from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
 from vps.services.mt5_trader import (
     MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS,
-    _ensure_experts_enabled, _kill_mt5_for_dir,
+    _ensure_experts_enabled, _kill_mt5_for_dir, _configure_server_via_gui,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,7 @@ class MT5VerifyBody(BaseModel):
     login: int = Field(..., gt=0)
     password: str = Field(..., min_length=1)
     server: str = Field(..., min_length=1)
+    phone: str | None = None  # Se fornito, usa la dir personale dell'utente invece del template
 
 
 class CompleteSetupBody(BaseModel):
@@ -244,12 +245,21 @@ async def get_groups(
 # ── MT5 endpoint ─────────────────────────────────────────────────────────────
 
 @router.post("/mt5/verify")
-async def verify_mt5(body: MT5VerifyBody):
+async def verify_mt5(
+    body: MT5VerifyBody,
+    ss: SetupSessionStore = Depends(get_session_store),
+):
     """
     Tenta il login a MetaTrader 5 con le credenziali fornite.
 
-    La chiamata è bloccante (libreria MT5 sincrona) quindi viene
-    eseguita in un thread pool separato.
+    Se il body include phone, recupera user_id dalla sessione di setup e usa
+    la directory MT5 personale dell'utente (creata dal template se non esiste):
+      1. Copia template → <mt5_users>/<user_id>/
+      2. Avvia MT5 + invia il server tramite SendKeys (configura la GUI di login)
+      3. mt5.initialize() si aggancia all'MT5 in esecuzione e fa login
+      4. Ritorna le info del conto; chiude API e termina MT5
+
+    Senza phone (fallback): usa il template direttamente con kill+restart.
 
     Returns:
         {"valid": true, "account": {"name", "server", "balance", "currency"}}
@@ -258,6 +268,13 @@ async def verify_mt5(body: MT5VerifyBody):
         503 — libreria MT5 non disponibile (non si è su Windows)
         400 — credenziali errate o MT5 non in esecuzione
     """
+    # Recupera user_id dalla sessione se il telefono è fornito
+    user_id: str | None = None
+    if body.phone:
+        session = await ss.get(body.phone)
+        if session:
+            user_id = session.get("user_id")
+
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
@@ -266,6 +283,7 @@ async def verify_mt5(body: MT5VerifyBody):
             body.login,
             body.password,
             body.server,
+            user_id,
         )
         return result
     except RuntimeError as exc:
@@ -277,19 +295,24 @@ async def verify_mt5(body: MT5VerifyBody):
         raise HTTPException(400, detail=str(exc))
 
 
-def _mt5_login_sync(login: int, password: str, server: str) -> dict:
+def _mt5_login_sync(
+    login: int, password: str, server: str, user_id: str | None = None
+) -> dict:
     """Eseguita in ThreadPoolExecutor — può bloccare senza problemi.
 
-    Usa il one-shot approach: credenziali passate direttamente a initialize()
-    insieme al path del template. Questo evita l'IPC timeout che si verifica
-    quando initialize() si aggancia a un MT5 già in esecuzione e poi login()
-    tenta di cambiare server/account.
+    Se user_id è fornito (flusso utente reale):
+      1. Copia template → <mt5_users>/<user_id>/ (se la dir non esiste ancora)
+      2. Avvia MT5 + invia il server tramite SendKeys (configura la GUI di login)
+         Lascia MT5 in esecuzione (senza chiuderlo)
+      3. mt5.initialize() si aggancia all'istanza MT5 in esecuzione e fa login
+      4. Ritorna le info del conto
+      5. mt5.shutdown() + kill del processo MT5
 
-    Pre-flight: fix ExpertsEnabled=1 in common.ini + kill di eventuali processi
-    MT5 residui dal template, in modo che MT5 parta da zero con le credenziali
-    corrette in un'unica chiamata atomica.
+    Se user_id è None (fallback al template):
+      Kill + restart del template con credenziali passate direttamente a initialize().
     """
     import os
+    import shutil
     import time
     from pathlib import Path
 
@@ -301,68 +324,129 @@ def _mt5_login_sync(login: int, password: str, server: str) -> dict:
             "(richiede Windows con MT5 installato)"
         )
 
-    # Percorso template letto dalla variabile d'ambiente impostata da setup.ps1.
     bot_dir = Path(os.environ.get("TRADING_BOT_DIR", r"C:\TradingBot"))
     template_dir = bot_dir / "mt5_template"
-    terminal_exe = template_dir / "terminal64.exe"
 
-    if not terminal_exe.exists():
+    if not (template_dir / "terminal64.exe").exists():
         raise RuntimeError(
             f"MT5 template non trovato in {template_dir}. "
             "Eseguire setup.ps1 prima di usare il bot."
         )
 
-    with MT5_LOCK:
-        # Pre-flight: garantisce ExpertsEnabled=1 e nessun processo bloccante.
-        # Il kill è necessario perché initialize() senza processi in esecuzione
-        # avvia MT5 da zero (con le credenziali corrette), mentre se MT5 è già
-        # in esecuzione si aggancia all'istanza esistente ignorando le credenziali.
-        _ensure_experts_enabled(template_dir)
-        _kill_mt5_for_dir(template_dir)
+    if user_id:
+        # ── Flusso utente reale ───────────────────────────────────────────────
+        user_dir = bot_dir / "mt5_users" / user_id
 
-        init_ok = False
-        last_err = ""
-        for attempt in range(1, MT5_INIT_RETRIES + 1):
-            if attempt > 1:
-                mt5.shutdown()
-                _kill_mt5_for_dir(template_dir)
-                _ensure_experts_enabled(template_dir)
-                time.sleep(MT5_INIT_RETRY_DELAY)
-            if mt5.initialize(
+        # STEP 2 (diagnostica): copia template → directory utente se non esiste
+        if not (user_dir / "terminal64.exe").exists():
+            logger.info("verify_mt5 — copia template → %s", user_dir)
+            shutil.copytree(str(template_dir), str(user_dir), dirs_exist_ok=True)
+
+        terminal_exe = user_dir / "terminal64.exe"
+
+        with MT5_LOCK:
+            # Fix ExpertsEnabled=1 prima che MT5 parta
+            _ensure_experts_enabled(user_dir)
+            # Kill eventuali residui dalla dir utente
+            _kill_mt5_for_dir(user_dir)
+
+            # STEP 3 (diagnostica): avvia MT5 + invia server via SendKeys
+            # MT5 rimane in esecuzione (senza chiuderlo)
+            logger.info(
+                "verify_mt5 — avvio MT5 utente %s + configurazione server '%s' via GUI...",
+                user_id, server,
+            )
+            _configure_server_via_gui(user_dir, server)
+            time.sleep(3.0)  # Breve attesa dopo SendKeys
+
+            # STEP 4 (diagnostica): mt5.initialize() si aggancia all'MT5 in esecuzione
+            init_ok = mt5.initialize(
                 path=str(terminal_exe),
                 portable=True,
                 login=login,
                 password=password,
                 server=server,
                 timeout=MT5_INIT_TIMEOUT_MS,
-            ):
-                init_ok = True
-                break
-            code, msg = mt5.last_error()
-            last_err = f"MT5 non avviabile: {msg} (codice {code})"
-            logger.warning(
-                "verify_mt5 tentativo %d/%d: %s", attempt, MT5_INIT_RETRIES, last_err
             )
+            if not init_ok:
+                code, msg = mt5.last_error()
+                mt5.shutdown()
+                _kill_mt5_for_dir(user_dir)
+                raise RuntimeError(f"MT5 non avviabile: {msg} (codice {code})")
 
-        if not init_ok:
-            raise RuntimeError(last_err)
+            try:
+                info = mt5.account_info()
+                if info is None:
+                    raise RuntimeError(
+                        "initialize() OK ma login non riuscito (account_info None)"
+                    )
+                return {
+                    "valid": True,
+                    "account": {
+                        "name":     info.name,
+                        "server":   info.server,
+                        "balance":  round(info.balance, 2),
+                        "currency": info.currency,
+                    },
+                }
+            finally:
+                mt5.shutdown()
+                # Termina MT5 dopo la verifica; la dir utente rimane configurata
+                # e sarà pronta per l'esecuzione degli ordini.
+                _kill_mt5_for_dir(user_dir)
 
-        try:
-            info = mt5.account_info()
-            if info is None:
-                raise RuntimeError("initialize() OK ma login non riuscito (account_info None)")
+    else:
+        # ── Fallback: usa il template direttamente ────────────────────────────
+        terminal_exe = template_dir / "terminal64.exe"
 
-            return {
-                "valid": True,
-                "account": {
-                    "name":     info.name,
-                    "server":   info.server,
-                    "balance":  round(info.balance, 2),
-                    "currency": info.currency,
-                },
-            }
-        finally:
-            mt5.shutdown()
+        with MT5_LOCK:
+            _ensure_experts_enabled(template_dir)
+            _kill_mt5_for_dir(template_dir)
+
+            init_ok = False
+            last_err = ""
+            for attempt in range(1, MT5_INIT_RETRIES + 1):
+                if attempt > 1:
+                    mt5.shutdown()
+                    _kill_mt5_for_dir(template_dir)
+                    _ensure_experts_enabled(template_dir)
+                    time.sleep(MT5_INIT_RETRY_DELAY)
+                if mt5.initialize(
+                    path=str(terminal_exe),
+                    portable=True,
+                    login=login,
+                    password=password,
+                    server=server,
+                    timeout=MT5_INIT_TIMEOUT_MS,
+                ):
+                    init_ok = True
+                    break
+                code, msg = mt5.last_error()
+                last_err = f"MT5 non avviabile: {msg} (codice {code})"
+                logger.warning(
+                    "verify_mt5 tentativo %d/%d: %s", attempt, MT5_INIT_RETRIES, last_err
+                )
+
+            if not init_ok:
+                raise RuntimeError(last_err)
+
+            try:
+                info = mt5.account_info()
+                if info is None:
+                    raise RuntimeError(
+                        "initialize() OK ma login non riuscito (account_info None)"
+                    )
+                return {
+                    "valid": True,
+                    "account": {
+                        "name":     info.name,
+                        "server":   info.server,
+                        "balance":  round(info.balance, 2),
+                        "currency": info.currency,
+                    },
+                }
+            finally:
+                mt5.shutdown()
 
 
 # ── Complete endpoint ─────────────────────────────────────────────────────────

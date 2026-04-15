@@ -46,7 +46,8 @@ export function MT5Step({ data, onDataChange, onNext, onBack }: StepProps) {
       const res = await api.verifyMt5(
         Number(data.mt5Login),
         data.mt5Password,
-        data.mt5Server
+        data.mt5Server,
+        data.phone || undefined
       )
       setVerified(res.account)
       onDataChange({ mt5AccountName: res.account.name })

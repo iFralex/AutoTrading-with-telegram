@@ -264,11 +264,11 @@ export const api = {
    * Ritorna le info del conto se il login ha successo.
    * Lancia ApiError (503) se MT5 non è disponibile sul server.
    */
-  verifyMt5(login: number, password: string, server: string) {
+  verifyMt5(login: number, password: string, server: string, phone?: string) {
     return call<{ valid: true; account: MT5Account }>(
       "POST",
       "/api/setup/mt5/verify",
-      { login, password, server }
+      { login, password, server, ...(phone ? { phone } : {}) }
     )
   },
 

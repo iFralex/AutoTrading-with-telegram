@@ -137,6 +137,97 @@ def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
         return False
 
 
+def _sendkeys_escape(s: str) -> str:
+    """Escapa i caratteri speciali di WScript.Shell SendKeys."""
+    special = {
+        "+": "{+}", "^": "{^}", "%": "{%}", "~": "{~}",
+        "{": "{{",  "}": "}}", "(": "{(}", ")": "{)}",
+        "[": "{[}", "]": "{]}",
+    }
+    return "".join(special.get(c, c) for c in s)
+
+
+def _configure_server_via_gui(mt5_dir: Path, server: str) -> int | None:
+    """
+    Avvia MT5 in modalità portable da mt5_dir, invia il nome del server
+    tramite WScript.Shell SendKeys e lascia MT5 in esecuzione.
+
+    Da chiamare prima di mt5.initialize() al primo avvio di un utente:
+    MT5 riceve il server nella finestra di login tramite GUI, poi
+    initialize() si aggancia all'istanza già in esecuzione.
+
+    Ritorna il PID del processo MT5, oppure None su errore o non-Windows.
+    """
+    if _sys.platform != "win32":
+        return None
+
+    terminal_exe = str(mt5_dir / "terminal64.exe")
+    try:
+        proc = _subprocess.Popen([terminal_exe, "/portable"])
+        mt5_pid = proc.pid
+        logger.info(
+            "_configure_server_via_gui: MT5 avviato PID %s (dir: %s)", mt5_pid, mt5_dir
+        )
+    except Exception as exc:
+        logger.warning("_configure_server_via_gui: avvio MT5 fallito: %s", exc)
+        return None
+
+    # Attende startup MT5 prima di inviare i tasti
+    time.sleep(4.0)
+
+    server_str = _sendkeys_escape(server)
+    ps = f"""
+Add-Type -AssemblyName Microsoft.VisualBasic
+
+$proc = Get-Process -Id {mt5_pid} -ErrorAction SilentlyContinue
+if (-not $proc) {{ exit 1 }}
+
+$found = $false
+for ($i = 0; $i -lt 30; $i++) {{
+    $proc.Refresh()
+    if ($proc.MainWindowHandle -ne 0) {{
+        $found = $true
+        break
+    }}
+    Start-Sleep 1
+}}
+if (-not $found) {{ Write-Host "Nessuna finestra trovata"; exit 1 }}
+
+try {{
+    [Microsoft.VisualBasic.Interaction]::AppActivate({mt5_pid})
+}} catch {{
+    $s2 = New-Object -ComObject WScript.Shell
+    $s2.AppActivate("MetaTrader 5") | Out-Null
+}}
+Start-Sleep -Milliseconds 600
+
+$shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("+{{TAB}}")
+Start-Sleep -Milliseconds 150
+$shell.SendKeys("+{{TAB}}")
+Start-Sleep -Milliseconds 150
+$shell.SendKeys("{server_str}")
+Start-Sleep -Milliseconds 300
+$shell.SendKeys("{{ENTER}}")
+exit 0
+"""
+    result = _subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "_configure_server_via_gui: SendKeys stderr: %s",
+            result.stderr.strip()[:200],
+        )
+    else:
+        logger.info(
+            "_configure_server_via_gui: server '%s' inviato a MT5 PID %s", server, mt5_pid
+        )
+
+    return mt5_pid
+
+
 # ── Risultato di ogni ordine ──────────────────────────────────────────────────
 
 @dataclass
@@ -217,8 +308,13 @@ class MT5Trader:
         _ensure_experts_enabled(user_dir)
 
         if is_first_boot:
-            _kill_mt5_for_dir(user_dir)
-            time.sleep(MT5_FIRST_BOOT_DELAY)
+            logger.info(
+                "Utente %s — primo avvio MT5 (account_info): configurazione server '%s' via GUI...",
+                user_id, server,
+            )
+            _kill_mt5_for_dir(user_dir)   # Kill eventuali residui dal template
+            _configure_server_via_gui(user_dir, server)
+            time.sleep(3.0)  # Attesa dopo SendKeys prima di agganciare con initialize()
 
         with MT5_LOCK:
             init_ok = False
@@ -344,15 +440,16 @@ class MT5Trader:
         # Pre-flight: garantisce ExpertsEnabled=1 prima di avviare MT5.
         _ensure_experts_enabled(user_dir)
 
-        # Al primo avvio: kill di eventuali processi residui dal template/dir,
-        # poi attesa che MT5 inizializzi la configurazione e si connetta al broker.
+        # Al primo avvio: configura il server nella finestra di login MT5 tramite
+        # SendKeys, poi lascia MT5 in esecuzione per l'attach di mt5.initialize().
         if is_first_boot:
             logger.info(
-                "Utente %s — primo avvio MT5, attesa %ss per inizializzazione...",
-                user_id, MT5_FIRST_BOOT_DELAY,
+                "Utente %s — primo avvio MT5: configurazione server '%s' via GUI...",
+                user_id, server,
             )
-            _kill_mt5_for_dir(user_dir)
-            time.sleep(MT5_FIRST_BOOT_DELAY)
+            _kill_mt5_for_dir(user_dir)   # Kill eventuali residui dal template
+            _configure_server_via_gui(user_dir, server)
+            time.sleep(3.0)  # Attesa dopo SendKeys prima di agganciare con initialize()
 
         with MT5_LOCK:
             try:
