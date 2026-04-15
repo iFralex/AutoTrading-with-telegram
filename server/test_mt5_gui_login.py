@@ -16,6 +16,7 @@ Flusso:
 Configura le variabili qui sotto prima di eseguire.
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,37 @@ def info(msg: str) -> None:
 
 def warn(msg: str) -> None:
     print(f"  [!!]  {msg}")
+
+
+def _ensure_experts_enabled(mt5_dir: Path) -> None:
+    """Scrive ExpertsEnabled=1 in config/common.ini.
+
+    MT5 killato con taskkill /F non salva le modifiche in-memory al common.ini,
+    quindi Ctrl+E non persiste su disco. Questa funzione lo scrive direttamente.
+    """
+    common_ini = mt5_dir / "config" / "common.ini"
+    try:
+        common_ini.parent.mkdir(parents=True, exist_ok=True)
+        if common_ini.exists():
+            text = common_ini.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"ExpertsEnabled\s*=\s*0", text):
+                text = re.sub(r"ExpertsEnabled\s*=\s*0", "ExpertsEnabled=1", text)
+                common_ini.write_text(text, encoding="utf-8")
+                ok("ExpertsEnabled corretto a 1 in common.ini")
+            elif "ExpertsEnabled" not in text:
+                if "[Common]" in text:
+                    text = text.replace("[Common]", "[Common]\r\nExpertsEnabled=1", 1)
+                else:
+                    text = "[Common]\r\nExpertsEnabled=1\r\n" + text
+                common_ini.write_text(text, encoding="utf-8")
+                ok("ExpertsEnabled=1 aggiunto a common.ini")
+            else:
+                ok("ExpertsEnabled=1 già presente in common.ini")
+        else:
+            common_ini.write_text("[Common]\r\nExpertsEnabled=1\r\n", encoding="utf-8")
+            ok("common.ini creato con ExpertsEnabled=1")
+    except Exception as e:
+        warn(f"_ensure_experts_enabled: {e}")
 
 
 def _kill_pid(pid: int) -> None:
@@ -234,6 +266,10 @@ time.sleep(3.0)
 _kill_pid(mt5_pid)
 time.sleep(2.0)
 ok("MT5 chiuso")
+
+# taskkill /F non salva le modifiche in-memory: scriviamo ExpertsEnabled=1
+# direttamente su disco prima di rilanciare MT5 via API.
+_ensure_experts_enabled(test_user_dir)
 
 
 # ── Step 4: login via API Python ─────────────────────────────────────────────
