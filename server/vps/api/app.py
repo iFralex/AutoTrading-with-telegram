@@ -272,6 +272,7 @@ async def lifespan(app: FastAPI):
         log_sizing_strategy = user.get("sizing_strategy") or None
         management_strategy = user.get("management_strategy") or None
         range_entry_pct     = int(user.get("range_entry_pct") or 0)
+        logger.info("Utente %s: range_entry_pct=%d%%", user_id, range_entry_pct)
 
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
