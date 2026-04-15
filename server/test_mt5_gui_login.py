@@ -36,7 +36,7 @@ MT5_SERVER   = ""       # es. "ICMarkets-Demo"
 MT5_TEMPLATE_PATH: str | None = None
 
 # Simbolo e lotto per il test ordine (STEP 5).
-ORDER_SYMBOL = "EURUSD"
+ORDER_SYMBOL = "EURUSD.s"
 ORDER_LOT    = 0.01
 
 # ─────────────────────────────────────────────────────────────────────────────
