@@ -114,7 +114,7 @@ async def test_order(
 
     signals = [
         TradeSignal(
-            symbol      = s.symbol.upper().strip(),
+            symbol      = s.symbol.strip(),
             order_type  = s.order_type.upper().strip(),
             entry_price = s.entry_price,
             stop_loss   = s.stop_loss,

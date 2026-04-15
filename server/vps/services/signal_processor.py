@@ -216,7 +216,7 @@ class SignalProcessor:
         for item in raw:
             try:
                 sig = TradeSignal(
-                    symbol      = str(item["symbol"]).upper().strip(),
+                    symbol      = str(item["symbol"]).strip(),
                     order_type  = str(item["order_type"]).upper().strip(),
                     entry_price = _parse_entry(item.get("entry_price")),
                     stop_loss   = _to_float(item.get("stop_loss")),
