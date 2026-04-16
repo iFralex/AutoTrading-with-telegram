@@ -103,14 +103,20 @@ class SignalLogStore:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
             await db.execute(_CREATE_INDEX)
-            await db.execute(_CREATE_INDEX_MSG_ID)
             await db.commit()
+            # Migration prima degli indici sulle nuove colonne
             for sql in _MIGRATIONS:
                 try:
                     await db.execute(sql)
                     await db.commit()
                 except Exception:
                     pass
+            # L'indice su telegram_message_id richiede che la colonna esista già
+            try:
+                await db.execute(_CREATE_INDEX_MSG_ID)
+                await db.commit()
+            except Exception:
+                pass
 
     async def insert(
         self,
