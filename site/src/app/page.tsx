@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 
 export default function Home() {
-  redirect("/setup")
+  //redirect("/setup")
+  return <div>ciao</div>
 }
