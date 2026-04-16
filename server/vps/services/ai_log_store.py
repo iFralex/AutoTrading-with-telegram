@@ -40,21 +40,33 @@ from typing import Any
 import aiosqlite
 
 # ── Pricing table (USD per milione di token) ──────────────────────────────────
-# Chiavi: prefisso del model-id (match parziale, prima corrispondenza vince)
+# Ogni entry: (substring_da_cercare, input_per_M, output_per_M).
+# La prima corrispondenza trovata vince.
+# I modelli più specifici vanno prima di quelli più generici.
 _PRICING: list[tuple[str, float, float]] = [
-    # (prefix,            input_per_M, output_per_M)
-    ("gemini-2.5-flash",  0.15,        0.60),
-    ("gemini-2.5-pro",    1.25,       10.00),
-    ("gemini-1.5-flash",  0.075,       0.30),
-    ("gemini-1.5-pro",    1.25,        5.00),
+    # Gemini 2.5
+    ("gemini-2.5-flash",        0.15,   0.60),
+    ("gemini-2.5-pro",          1.25,  10.00),
+    # Gemini 2.0
+    ("gemini-2.0-flash",        0.10,   0.40),
+    ("gemini-2.0-pro",          1.25,  10.00),
+    # Gemini 1.5
+    ("gemini-1.5-flash",        0.075,  0.30),
+    ("gemini-1.5-pro",          1.25,   5.00),
+    # Gemini 3.x preview (prezzi non pubblici → stessa fascia 2.5)
+    ("gemini-3",                0.15,   0.60),
+    # Fallback generici: qualsiasi modello con "flash" o "pro" nel nome
+    ("flash-lite",              0.075,  0.30),
+    ("flash",                   0.15,   0.60),
+    ("pro",                     1.25,  10.00),
 ]
 
 
 def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
-    """Stima il costo in USD della chiamata. Ritorna None se il modello non è noto."""
+    """Stima il costo in USD della chiamata. Ritorna None se il modello non è riconosciuto."""
     model_lower = model.lower()
-    for prefix, input_rate, output_rate in _PRICING:
-        if prefix in model_lower:
+    for substring, input_rate, output_rate in _PRICING:
+        if substring in model_lower:
             cost = (prompt_tokens / 1_000_000) * input_rate + (completion_tokens / 1_000_000) * output_rate
             return round(cost, 8)
     return None

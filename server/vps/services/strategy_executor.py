@@ -554,13 +554,13 @@ class StrategyExecutor:
             for i, s in enumerate(signals)
         )
         event_prompt = (
-            "EVENTO: Nuovi segnali di trading ricevuti. Devi valutarli TUTTI.\n\n"
-            f"Messaggio sorgente:\n{signal_message}\n\n"
-            f"Segnali da valutare:\n{signals_text}\n\n"
-            "Per ogni segnale chiama approve_signal, reject_signal o modify_signal.\n"
-            "Se non chiami nessun tool per un segnale, verrà approvato di default.\n"
-            "Usa i tool di lettura (get_account_info, get_daily_pnl, ecc.) se la tua "
-            "strategia richiede informazioni aggiuntive per decidere."
+            "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
+            f"Source message:\n{signal_message}\n\n"
+            f"Signals to evaluate:\n{signals_text}\n\n"
+            "For each signal call approve_signal, reject_signal or modify_signal.\n"
+            "If you call no tool for a signal, it will be approved by default.\n"
+            "Use read tools (get_account_info, get_daily_pnl, etc.) if your "
+            "strategy requires additional information to decide."
         )
 
         ctx       = _ExecCtx(self._trader, user_id, mt5_login, mt5_password, mt5_server)
@@ -996,71 +996,71 @@ class StrategyExecutor:
 
 def _build_system_prompt(management_strategy: str) -> str:
     return (
-        "Sei un assistente professionale per la gestione di posizioni su MetaTrader 5.\n\n"
-        "La tua unica responsabilità è eseguire la seguente strategia dell'utente, "
-        "né più né meno:\n\n"
-        f"STRATEGIA:\n{management_strategy}\n\n"
-        "ISTRUZIONI OPERATIVE:\n"
-        "- Usa i tool disponibili per raccogliere le informazioni necessarie prima di agire.\n"
-        "- Esegui TUTTE le azioni richieste dalla strategia per l'evento corrente.\n"
-        "- Non intraprendere azioni non previste dalla strategia.\n"
-        "- Se un tool fallisce, segnalalo nel tuo ragionamento e decidi se riprovare o procedere.\n"
-        "- Alla fine, fornisci un breve riepilogo in italiano di ciò che hai fatto o deciso.\n"
-        "- Sii preciso, metodico e conciso."
+        "You are a professional MetaTrader 5 position management assistant.\n\n"
+        "Your sole responsibility is to execute the following user strategy, "
+        "nothing more and nothing less:\n\n"
+        f"STRATEGY:\n{management_strategy}\n\n"
+        "OPERATING INSTRUCTIONS:\n"
+        "- Use the available tools to gather any information needed before acting.\n"
+        "- Execute ALL actions required by the strategy for the current event.\n"
+        "- Do not take any action not prescribed by the strategy.\n"
+        "- If a tool fails, note it in your reasoning and decide whether to retry or proceed.\n"
+        "- At the end, provide a brief summary of what you did or decided.\n"
+        "- Be precise, methodical, and concise."
     )
 
 
 def _format_event_prompt(event_type: str, event_data: dict) -> str:
-    """Formatta il contesto dell'evento in linguaggio naturale per l'AI."""
+    """Formats the event context as natural language for the AI."""
 
     if event_type == "position_closed":
         p       = event_data
         profit  = p.get("profit") or 0
-        reason  = p.get("reason", "SCONOSCIUTO")
-        outcome = "IN PROFITTO" if profit >= 0 else "IN PERDITA"
+        reason  = p.get("reason", "UNKNOWN")
+        outcome = "IN PROFIT" if profit >= 0 else "IN LOSS"
         return (
-            f"EVENTO: Posizione chiusa.\n\n"
-            f"Dettagli:\n"
-            f"  Ticket:           #{p.get('ticket')}\n"
-            f"  Simbolo:          {p.get('symbol')}\n"
-            f"  Direzione:        {p.get('order_type')}\n"
-            f"  Prezzo apertura:  {p.get('entry_price')}\n"
-            f"  Prezzo chiusura:  {p.get('close_price')}\n"
-            f"  Lotti:            {p.get('lots')}\n"
-            f"  Profitto:         {profit} {p.get('currency', '')}\n"
-            f"  Motivo chiusura:  {reason}  ({outcome})\n"
-            f"  Signal group ID:  {p.get('signal_group_id', 'N/D')}\n"
-            f"  Ora chiusura:     {p.get('close_time')}\n\n"
-            "Esegui la strategia in risposta a questo evento. "
-            "Usa get_open_positions per vedere le posizioni ancora aperte."
+            f"EVENT: Position closed.\n\n"
+            f"Details:\n"
+            f"  Ticket:        #{p.get('ticket')}\n"
+            f"  Symbol:        {p.get('symbol')}\n"
+            f"  Direction:     {p.get('order_type')}\n"
+            f"  Entry price:   {p.get('entry_price')}\n"
+            f"  Close price:   {p.get('close_price')}\n"
+            f"  Lots:          {p.get('lots')}\n"
+            f"  Profit:        {profit} {p.get('currency', '')}\n"
+            f"  Close reason:  {reason}  ({outcome})\n"
+            f"  Signal group:  {p.get('signal_group_id', 'N/A')}\n"
+            f"  Close time:    {p.get('close_time')}\n\n"
+            "Execute the strategy in response to this event. "
+            "Use get_open_positions to see remaining open positions."
         )
 
     if event_type == "position_opened":
         p = event_data
         return (
-            f"EVENTO: Nuova posizione aperta.\n\n"
-            f"Dettagli:\n"
-            f"  Ticket:           #{p.get('ticket')}\n"
-            f"  Simbolo:          {p.get('symbol')}\n"
-            f"  Direzione:        {p.get('order_type')}\n"
-            f"  Prezzo apertura:  {p.get('entry_price')}\n"
-            f"  Lotti:            {p.get('lots')}\n"
-            f"  Stop Loss:        {p.get('sl')}\n"
-            f"  Take Profit:      {p.get('tp')}\n"
-            f"  Signal group ID:  {p.get('signal_group_id', 'N/D')}\n\n"
-            "Esegui la strategia in risposta a questo evento."
+            f"EVENT: New position opened.\n\n"
+            f"Details:\n"
+            f"  Ticket:       #{p.get('ticket')}\n"
+            f"  Symbol:       {p.get('symbol')}\n"
+            f"  Direction:    {p.get('order_type')}\n"
+            f"  Entry price:  {p.get('entry_price')}\n"
+            f"  Lots:         {p.get('lots')}\n"
+            f"  Stop Loss:    {p.get('sl')}\n"
+            f"  Take Profit:  {p.get('tp')}\n"
+            f"  Signal group: {p.get('signal_group_id', 'N/A')}\n\n"
+            "Execute the strategy in response to this event."
         )
 
     if event_type == "position_modified":
         p = event_data
         return (
-            f"EVENTO: Posizione modificata esternamente.\n\n"
-            f"Dettagli:\n"
-            f"  Ticket:     #{p.get('ticket')}\n"
-            f"  Simbolo:    {p.get('symbol')}\n"
-            f"  Vecchio SL: {p.get('old_sl')} → Nuovo SL: {p.get('new_sl')}\n"
-            f"  Vecchio TP: {p.get('old_tp')} → Nuovo TP: {p.get('new_tp')}\n\n"
-            "Esegui la strategia in risposta a questo evento."
+            f"EVENT: Position modified externally.\n\n"
+            f"Details:\n"
+            f"  Ticket:   #{p.get('ticket')}\n"
+            f"  Symbol:   {p.get('symbol')}\n"
+            f"  Old SL:   {p.get('old_sl')} → New SL: {p.get('new_sl')}\n"
+            f"  Old TP:   {p.get('old_tp')} → New TP: {p.get('new_tp')}\n\n"
+            "Execute the strategy in response to this event."
         )
 
     if event_type == "message_deleted":
@@ -1081,22 +1081,22 @@ def _format_event_prompt(event_type: str, event_data: dict) -> str:
                 signals_summary = str(signals_raw)
 
         return (
-            f"EVENTO: Messaggio di segnale eliminato dalla sala.\n\n"
-            f"Il canale/gruppo ha eliminato un messaggio che aveva generato dei segnali di trading.\n"
-            f"Questo accade spesso per nascondere operazioni sbagliate o segnali errati.\n\n"
-            f"Dettagli del messaggio eliminato:\n"
-            f"  Telegram message ID: {p.get('telegram_message_id', 'N/D')}\n"
-            f"  Signal group ID:     {p.get('signal_group_id', 'N/D')}\n"
-            f"  Testo originale:     {p.get('message_text', 'N/D')}\n\n"
-            f"Segnali che aveva generato:\n"
-            f"{signals_summary if signals_summary else '  (nessun dettaglio disponibile)'}\n\n"
-            "Usa get_open_positions per verificare se ci sono posizioni aperte correlate "
-            "(filtra per signal_group_id se disponibile) ed esegui la strategia configurata."
+            f"EVENT: Signal message deleted by the channel.\n\n"
+            f"The Telegram channel/group deleted a message that had generated trading signals.\n"
+            f"This often happens to hide bad trades or incorrect signals.\n\n"
+            f"Deleted message details:\n"
+            f"  Telegram message ID: {p.get('telegram_message_id', 'N/A')}\n"
+            f"  Signal group ID:     {p.get('signal_group_id', 'N/A')}\n"
+            f"  Original text:       {p.get('message_text', 'N/A')}\n\n"
+            f"Signals it generated:\n"
+            f"{signals_summary if signals_summary else '  (no details available)'}\n\n"
+            "Use get_open_positions to check for any open positions correlated to this signal "
+            "(filter by signal_group_id if available) and execute the configured strategy."
         )
 
-    # Evento generico
+    # Generic event
     return (
-        f"EVENTO: {event_type}\n\n"
-        f"Dati evento:\n{json.dumps(event_data, indent=2, default=str)}\n\n"
-        "Esegui la strategia in risposta a questo evento."
+        f"EVENT: {event_type}\n\n"
+        f"Event data:\n{json.dumps(event_data, indent=2, default=str)}\n\n"
+        "Execute the strategy in response to this event."
     )
