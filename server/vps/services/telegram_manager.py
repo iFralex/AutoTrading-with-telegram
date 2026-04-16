@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 # Tipo del callback chiamato su ogni nuovo messaggio
 MessageCallback = Callable[..., Awaitable[None]]
 
+# Tipo del callback chiamato quando uno o più messaggi vengono eliminati
+# firma: on_delete(user_id, deleted_ids) → None
+DeleteCallback = Callable[[str, list[int]], Awaitable[None]]
+
 
 class PasswordRequiredError(Exception):
     """Sollevata quando verify_code incontra un account con 2FA abilitato."""
@@ -70,10 +74,12 @@ class TelegramManager:
         self,
         sessions_dir: Path,
         on_message: MessageCallback | None = None,
+        on_delete: DeleteCallback | None = None,
     ):
         self._sessions_dir = sessions_dir
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
         self._on_message = on_message
+        self._on_delete  = on_delete
 
         # Sessioni attive: user_id → TelegramClient
         self._clients: dict[str, TelegramClient] = {}
@@ -417,7 +423,7 @@ class TelegramManager:
         self, client: TelegramClient, user_id: str, group_id: int
     ) -> None:
         """
-        Registra il NewMessage handler sul client.
+        Registra il NewMessage e il MessageDeleted handler sul client.
         Viene chiamata sia per utenti nuovi che per quelli ripristinati al boot.
         """
 
@@ -436,6 +442,23 @@ class TelegramManager:
             except Exception as exc:
                 logger.error(
                     "Errore nel callback messaggio (utente %s): %s",
+                    user_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        @client.on(events.MessageDeleted(chats=group_id))
+        async def _delete_handler(event: events.MessageDeleted.Event) -> None:
+            if self._on_delete is None:
+                return
+            deleted_ids: list[int] = list(event.deleted_ids or [])
+            if not deleted_ids:
+                return
+            try:
+                await self._on_delete(user_id, deleted_ids)
+            except Exception as exc:
+                logger.error(
+                    "Errore nel callback eliminazione messaggi (utente %s): %s",
                     user_id,
                     exc,
                     exc_info=True,

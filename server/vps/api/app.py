@@ -230,6 +230,13 @@ async def lifespan(app: FastAPI):
         logger.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
         signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
 
+        # Estrai il message_id Telegram per poter rilevare eliminazioni future
+        telegram_message_id: int | None = None
+        try:
+            telegram_message_id = raw_event.message.id
+        except Exception:
+            pass
+
         # Variabili log — costruite step by step e salvate alla fine
         log_is_signal       = False
         log_flash_raw:       str | None  = None
@@ -243,18 +250,20 @@ async def lifespan(app: FastAPI):
 
         async def _save_log() -> None:
             await signal_log_store.insert(
-                user_id         = user_id,
-                sender_name     = sender_name,
-                message_text    = message,
-                is_signal       = log_is_signal,
-                flash_raw       = log_flash_raw,
-                has_mt5_creds   = log_has_mt5_creds,
-                sizing_strategy = log_sizing_strategy,
-                account_info    = log_account_info,
-                signals         = log_signals,
-                results         = log_results,
-                error_step      = log_error_step,
-                error_msg       = log_error_msg,
+                user_id              = user_id,
+                sender_name          = sender_name,
+                message_text         = message,
+                is_signal            = log_is_signal,
+                flash_raw            = log_flash_raw,
+                has_mt5_creds        = log_has_mt5_creds,
+                sizing_strategy      = log_sizing_strategy,
+                account_info         = log_account_info,
+                signals              = log_signals,
+                results              = log_results,
+                error_step           = log_error_step,
+                error_msg            = log_error_msg,
+                telegram_message_id  = telegram_message_id,
+                signal_group_id      = signal_group_id if log_is_signal else None,
             )
 
         if signal_processor is None:
@@ -478,7 +487,101 @@ async def lifespan(app: FastAPI):
                     mt5_server   = mt5_server,
                 ))
 
-    tm = TelegramManager(sessions_dir=_sessions_dir, on_message=on_message)
+    async def on_message_deleted(user_id: str, deleted_ids: list[int]) -> None:
+        """
+        Callback invocato quando uno o più messaggi vengono eliminati dal gruppo.
+        Per ogni message_id eliminato: verifica se era un segnale, recupera le
+        posizioni correlate e delega all'AI tramite deletion_strategy.
+        """
+        if strategy_executor is None:
+            return
+
+        for msg_id in deleted_ids:
+            # Cerca il log del messaggio eliminato
+            log_entry = await signal_log_store.get_by_telegram_message_id(user_id, msg_id)
+            if log_entry is None or not log_entry.get("is_signal"):
+                continue  # Non era un segnale tracciato
+
+            sig_group_id = log_entry.get("signal_group_id")
+            logger.info(
+                "Messaggio #%d eliminato per utente %s — era un segnale (group=%s)",
+                msg_id, user_id, sig_group_id,
+            )
+
+            # Recupera la deletion_strategy dell'utente
+            user = await store.get_user(user_id)
+            if user is None:
+                continue
+
+            deletion_strategy = user.get("deletion_strategy") or ""
+            if not deletion_strategy.strip():
+                logger.debug(
+                    "Utente %s: deletion_strategy non configurata — skip messaggio eliminato #%d",
+                    user_id, msg_id,
+                )
+                continue
+
+            mt5_login    = user.get("mt5_login")
+            mt5_password = user.get("mt5_password")
+            mt5_server   = user.get("mt5_server")
+            if not (mt5_login and mt5_password and mt5_server):
+                continue
+
+            event_data = {
+                "telegram_message_id": msg_id,
+                "signal_group_id":     sig_group_id,
+                "message_text":        log_entry.get("message_text"),
+                "signals_json":        log_entry.get("signals_json"),
+            }
+
+            logger.info(
+                "StrategyExecutor utente %s: evento message_deleted (msg #%d) — avvio agent...",
+                user_id, msg_id,
+            )
+
+            try:
+                result = await strategy_executor.on_event(
+                    user_id             = user_id,
+                    event_type          = "message_deleted",
+                    event_data          = event_data,
+                    management_strategy = deletion_strategy,
+                    mt5_login           = int(mt5_login),
+                    mt5_password        = mt5_password,
+                    mt5_server          = mt5_server,
+                )
+            except Exception as exc:
+                logger.error(
+                    "StrategyExecutor on_event message_deleted errore: %s", exc, exc_info=True
+                )
+                await strategy_log_store.insert(
+                    user_id             = user_id,
+                    event_type          = "message_deleted",
+                    event_data          = event_data,
+                    management_strategy = deletion_strategy,
+                    error_msg           = str(exc),
+                )
+                continue
+
+            logger.info(
+                "StrategyExecutor utente %s: message_deleted completato — %d tool call",
+                user_id, len(result.tool_calls),
+            )
+
+            await strategy_log_store.insert(
+                user_id             = user_id,
+                event_type          = "message_deleted",
+                event_data          = event_data,
+                management_strategy = deletion_strategy,
+                tool_calls          = result.tool_calls,
+                final_response      = result.final_response,
+                error_msg           = result.error,
+            )
+
+    tm = TelegramManager(
+        sessions_dir = _sessions_dir,
+        on_message   = on_message,
+        on_delete    = on_message_deleted,
+    )
     tm.start()
     app.state.telegram_manager = tm
 

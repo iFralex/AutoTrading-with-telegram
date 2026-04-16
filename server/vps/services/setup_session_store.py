@@ -16,8 +16,10 @@ Schema:
     mt5_login        INTEGER,
     mt5_password_enc TEXT,   -- cifrata con Fernet
     mt5_server       TEXT,
-    sizing_strategy  TEXT,
-    updated_at       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sizing_strategy     TEXT,
+    management_strategy TEXT,
+    deletion_strategy   TEXT,
+    updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 """
 
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     mt5_server          TEXT,
     sizing_strategy     TEXT,
     management_strategy TEXT,
+    deletion_strategy   TEXT,
     updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -51,7 +54,7 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
 _ALLOWED_FIELDS = {
     "api_id", "api_hash", "login_key", "user_id",
     "group_id", "group_name", "mt5_login", "mt5_server",
-    "sizing_strategy", "management_strategy",
+    "sizing_strategy", "management_strategy", "deletion_strategy",
 }
 
 # Mappatura nomi frontend → colonne DB
@@ -101,11 +104,15 @@ class SetupSessionStore:
             await db.execute(_CREATE_TABLE)
             await db.commit()
             # Migration incrementale: ignora errore se la colonna esiste già
-            try:
-                await db.execute("ALTER TABLE setup_sessions ADD COLUMN management_strategy TEXT")
-                await db.commit()
-            except Exception:
-                pass
+            for _sql in [
+                "ALTER TABLE setup_sessions ADD COLUMN management_strategy TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN deletion_strategy TEXT",
+            ]:
+                try:
+                    await db.execute(_sql)
+                    await db.commit()
+                except Exception:
+                    pass
 
     # ── Read ─────────────────────────────────────────────────────────────────
 
@@ -138,6 +145,7 @@ class SetupSessionStore:
             "mt5_server":          row["mt5_server"],
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
+            "deletion_strategy":   row["deletion_strategy"],
         }
 
     async def get_mt5_password(self, phone: str) -> str | None:

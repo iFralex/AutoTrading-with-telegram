@@ -142,6 +142,25 @@ async def update_range_entry_pct(
     return {"ok": True}
 
 
+class UpdateDeletionStrategyBody(BaseModel):
+    deletion_strategy: str | None = None
+
+
+@router.patch("/user/{user_id}/deletion-strategy")
+async def update_deletion_strategy(
+    user_id: str,
+    body: UpdateDeletionStrategyBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la strategia AI da eseguire quando un messaggio segnale viene eliminato."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_deletion_strategy(user_id, body.deletion_strategy)
+    return {"ok": True}
+
+
 class UpdateEntryIfFavorableBody(BaseModel):
     entry_if_favorable: bool
 

@@ -1063,6 +1063,37 @@ def _format_event_prompt(event_type: str, event_data: dict) -> str:
             "Esegui la strategia in risposta a questo evento."
         )
 
+    if event_type == "message_deleted":
+        p = event_data
+        signals_summary = ""
+        signals_raw = p.get("signals_json")
+        if signals_raw:
+            try:
+                sigs = signals_raw if isinstance(signals_raw, list) else json.loads(signals_raw)
+                lines = []
+                for s in sigs:
+                    lines.append(
+                        f"  - {s.get('order_type')} {s.get('symbol')} "
+                        f"entry={s.get('entry_price')} SL={s.get('stop_loss')} TP={s.get('take_profit')}"
+                    )
+                signals_summary = "\n".join(lines)
+            except Exception:
+                signals_summary = str(signals_raw)
+
+        return (
+            f"EVENTO: Messaggio di segnale eliminato dalla sala.\n\n"
+            f"Il canale/gruppo ha eliminato un messaggio che aveva generato dei segnali di trading.\n"
+            f"Questo accade spesso per nascondere operazioni sbagliate o segnali errati.\n\n"
+            f"Dettagli del messaggio eliminato:\n"
+            f"  Telegram message ID: {p.get('telegram_message_id', 'N/D')}\n"
+            f"  Signal group ID:     {p.get('signal_group_id', 'N/D')}\n"
+            f"  Testo originale:     {p.get('message_text', 'N/D')}\n\n"
+            f"Segnali che aveva generato:\n"
+            f"{signals_summary if signals_summary else '  (nessun dettaglio disponibile)'}\n\n"
+            "Usa get_open_positions per verificare se ci sono posizioni aperte correlate "
+            "(filtra per signal_group_id se disponibile) ed esegui la strategia configurata."
+        )
+
     # Evento generico
     return (
         f"EVENTO: {event_type}\n\n"

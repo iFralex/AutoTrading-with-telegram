@@ -467,6 +467,118 @@ function RangeEntryPctEditor({
   )
 }
 
+// ── Editor: strategia messaggi eliminati ─────────────────────────────────────
+
+const DELETION_STRATEGY_EXAMPLES = [
+  "Chiudi immediatamente tutte le posizioni aperte correlate al segnale eliminato.",
+  "Chiudi le posizioni solo se sono in profitto. Se in perdita, sposta lo stop loss al break-even e attendi.",
+  "Analizza il P&L giornaliero: se positivo chiudi tutto, se negativo lascia aperto e sposta SL a break-even.",
+  "Riduci di metà il volume delle posizioni aperte correlate e sposta lo SL al break-even.",
+]
+
+function DeletionStrategyEditor({
+  userId,
+  current,
+  onSaved,
+}: {
+  userId: string
+  current: string | null
+  onSaved: (value: string | null) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue]     = useState(current ?? "")
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  function startEdit() {
+    setValue(current ?? "")
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancel() {
+    setEditing(false)
+    setError(null)
+  }
+
+  async function save() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.updateDeletionStrategy(userId, value.trim() || null)
+      onSaved(value.trim() || null)
+      setEditing(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="border-white/10">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Strategia messaggi eliminati</CardTitle>
+            <CardDescription className="mt-0.5">
+              Cosa deve fare l&apos;AI quando il canale elimina un messaggio che aveva generato segnali
+            </CardDescription>
+          </div>
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={startEdit} className="text-xs">
+              Modifica
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!editing ? (
+          <p className="text-sm font-mono text-foreground/80 bg-black/20 rounded-lg border border-white/8 px-3 py-2 min-h-[2.5rem] whitespace-pre-wrap break-words">
+            {current ?? <span className="text-muted-foreground italic">Nessuna strategia configurata — le eliminazioni verranno ignorate</span>}
+          </p>
+        ) : (
+          <>
+            <textarea
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              rows={5}
+              placeholder={"Esempio:\n" + DELETION_STRATEGY_EXAMPLES[0]}
+              className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50"
+            />
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Esempi</p>
+              {DELETION_STRATEGY_EXAMPLES.map(ex => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => setValue(ex)}
+                  className="w-full text-left rounded-lg border border-white/[0.07] px-3 py-2 text-xs text-muted-foreground hover:border-indigo-500/30 hover:text-foreground hover:bg-indigo-500/5 transition-all"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+            {error && (
+              <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={save} disabled={loading} size="sm" className="text-xs">
+                {loading ? "Salvataggio…" : "Salva"}
+              </Button>
+              <Button onClick={cancel} disabled={loading} variant="outline" size="sm" className="text-xs">
+                Annulla
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Toggle: ingresso a mercato se prezzo favorevole ──────────────────────────
 
 function EntryIfFavorableToggle({
@@ -1154,6 +1266,16 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
             current={data.user.management_strategy}
             onSaved={value => setData(prev => prev
               ? { ...prev, user: { ...prev.user, management_strategy: value } }
+              : prev
+            )}
+          />
+
+          {/* Deletion strategy */}
+          <DeletionStrategyEditor
+            userId={data.user.user_id}
+            current={data.user.deletion_strategy}
+            onSaved={value => setData(prev => prev
+              ? { ...prev, user: { ...prev.user, deletion_strategy: value } }
               : prev
             )}
           />

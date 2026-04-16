@@ -112,6 +112,7 @@ class CompleteSetupBody(BaseModel):
     mt5_server: str | None = None
     sizing_strategy: str | None = None
     management_strategy: str | None = None
+    deletion_strategy: str | None = None
 
 
 # ── Session endpoints ────────────────────────────────────────────────────────
@@ -484,6 +485,7 @@ async def complete_setup(
             "mt5_server":          body.mt5_server,
             "sizing_strategy":     body.sizing_strategy,
             "management_strategy": body.management_strategy,
+            "deletion_strategy":   body.deletion_strategy,
         })
 
         tm.add_user(

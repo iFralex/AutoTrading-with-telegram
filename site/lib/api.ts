@@ -50,6 +50,7 @@ export interface CompleteSetupPayload {
   mt5_server?: string
   sizing_strategy?: string
   management_strategy?: string
+  deletion_strategy?: string
 }
 
 export interface SetupSession {
@@ -68,6 +69,7 @@ export interface SetupSession {
   mt5_server?: string | null
   sizing_strategy?: string | null
   management_strategy?: string | null
+  deletion_strategy?: string | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
@@ -85,6 +87,7 @@ export interface SaveSessionPayload {
   mt5_server?: string
   sizing_strategy?: string
   management_strategy?: string
+  deletion_strategy?: string
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────
@@ -150,6 +153,7 @@ export interface DashboardUser {
   management_strategy: string | null
   range_entry_pct: number
   entry_if_favorable: boolean
+  deletion_strategy: string | null
   active: boolean
   created_at: string
 }
@@ -461,6 +465,15 @@ export const api = {
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/range-entry-pct`,
       { range_entry_pct: rangeEntryPct }
+    )
+  },
+
+  /** Aggiorna la strategia da eseguire quando un messaggio segnale viene eliminato. */
+  updateDeletionStrategy(userId: string, deletionStrategy: string | null) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/deletion-strategy`,
+      { deletion_strategy: deletionStrategy || null }
     )
   },
 

@@ -33,26 +33,38 @@ import aiosqlite
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS signal_logs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         TEXT    NOT NULL,
-    ts              TEXT    NOT NULL,
-    sender_name     TEXT,
-    message_text    TEXT    NOT NULL,
-    is_signal       INTEGER NOT NULL DEFAULT 0,
-    flash_raw       TEXT,
-    has_mt5_creds   INTEGER NOT NULL DEFAULT 0,
-    sizing_strategy TEXT,
-    account_info    TEXT,
-    signals_json    TEXT,
-    results_json    TEXT,
-    error_step      TEXT,
-    error_msg       TEXT
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id              TEXT    NOT NULL,
+    ts                   TEXT    NOT NULL,
+    sender_name          TEXT,
+    message_text         TEXT    NOT NULL,
+    is_signal            INTEGER NOT NULL DEFAULT 0,
+    flash_raw            TEXT,
+    has_mt5_creds        INTEGER NOT NULL DEFAULT 0,
+    sizing_strategy      TEXT,
+    account_info         TEXT,
+    signals_json         TEXT,
+    results_json         TEXT,
+    error_step           TEXT,
+    error_msg            TEXT,
+    telegram_message_id  INTEGER,
+    signal_group_id      TEXT
 )
 """
 
 _CREATE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_signal_logs_user_id ON signal_logs(user_id)
 """
+
+_CREATE_INDEX_MSG_ID = """
+CREATE INDEX IF NOT EXISTS idx_signal_logs_tg_msg_id
+    ON signal_logs(user_id, telegram_message_id)
+"""
+
+_MIGRATIONS = [
+    "ALTER TABLE signal_logs ADD COLUMN telegram_message_id INTEGER",
+    "ALTER TABLE signal_logs ADD COLUMN signal_group_id TEXT",
+]
 
 
 def _now_iso() -> str:
@@ -87,11 +99,18 @@ class SignalLogStore:
         self._db_path = db_path
 
     async def init(self) -> None:
-        """Crea la tabella e l'indice se non esistono."""
+        """Crea la tabella, gli indici e applica le migration se non esistono."""
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
             await db.execute(_CREATE_INDEX)
+            await db.execute(_CREATE_INDEX_MSG_ID)
             await db.commit()
+            for sql in _MIGRATIONS:
+                try:
+                    await db.execute(sql)
+                    await db.commit()
+                except Exception:
+                    pass
 
     async def insert(
         self,
@@ -109,6 +128,8 @@ class SignalLogStore:
         error_step: str | None = None,
         error_msg: str | None = None,
         ts: str | None = None,
+        telegram_message_id: int | None = None,
+        signal_group_id: str | None = None,
     ) -> int:
         """
         Inserisce un log di elaborazione.
@@ -128,8 +149,9 @@ class SignalLogStore:
                      is_signal, flash_raw,
                      has_mt5_creds, sizing_strategy, account_info,
                      signals_json, results_json,
-                     error_step, error_msg)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     error_step, error_msg,
+                     telegram_message_id, signal_group_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -145,10 +167,36 @@ class SignalLogStore:
                     results_json,
                     error_step,
                     error_msg,
+                    telegram_message_id,
+                    signal_group_id,
                 ),
             )
             await db.commit()
             return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_by_telegram_message_id(
+        self, user_id: str, telegram_message_id: int
+    ) -> dict | None:
+        """
+        Cerca un log per message_id Telegram.
+        Ritorna il record se era un segnale, None altrimenti.
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT * FROM signal_logs
+                WHERE user_id = ? AND telegram_message_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, telegram_message_id),
+            )
+            row = await cursor.fetchone()
+
+        if row is None:
+            return None
+        return _row_to_dict(row)
 
     async def get_by_user_id(
         self,

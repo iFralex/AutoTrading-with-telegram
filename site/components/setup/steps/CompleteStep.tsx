@@ -48,6 +48,13 @@ export function CompleteStep({ data, onBack }: StepProps) {
         ? data.managementStrategy.slice(0, 57) + "…"
         : data.managementStrategy,
     }] : []),
+    ...(data.deletionStrategy ? [{
+      icon: Settings2,
+      label: "Strategia messaggi eliminati",
+      value: data.deletionStrategy.length > 60
+        ? data.deletionStrategy.slice(0, 57) + "…"
+        : data.deletionStrategy,
+    }] : []),
   ]
 
   async function handleStart() {
@@ -67,6 +74,7 @@ export function CompleteStep({ data, onBack }: StepProps) {
         mt5_server:          data.mt5Server || undefined,
         sizing_strategy:     data.sizingStrategy || undefined,
         management_strategy: data.managementStrategy || undefined,
+        deletion_strategy:   data.deletionStrategy || undefined,
       })
       setDone(true)
     } catch (err) {

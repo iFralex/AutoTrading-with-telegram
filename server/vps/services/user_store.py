@@ -14,6 +14,7 @@ Schema:
     mt5_server          TEXT,
     sizing_strategy     TEXT,               -- strategia di sizing (iniettata nel prompt Pro)
     management_strategy TEXT,               -- strategia di gestione (eseguita dal StrategyExecutor)
+    deletion_strategy   TEXT,               -- strategia da eseguire quando un messaggio segnale viene eliminato
     active              INTEGER DEFAULT 1,
     entry_if_favorable  INTEGER DEFAULT 0,  -- 1 = entra a mercato se prezzo già favorevole
     created_at          TEXT    DEFAULT CURRENT_TIMESTAMP
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS users (
     management_strategy TEXT,
     range_entry_pct     INTEGER NOT NULL DEFAULT 0,
     entry_if_favorable  INTEGER NOT NULL DEFAULT 0,
+    deletion_strategy   TEXT,
     active              INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
@@ -54,6 +56,7 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN management_strategy TEXT",
     "ALTER TABLE users ADD COLUMN range_entry_pct INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN entry_if_favorable INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN deletion_strategy TEXT",
 ]
 
 
@@ -127,9 +130,9 @@ class UserStore:
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
                      sizing_strategy, management_strategy, range_entry_pct,
-                     entry_if_favorable, active)
+                     entry_if_favorable, deletion_strategy, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     api_id              = excluded.api_id,
                     api_hash            = excluded.api_hash,
@@ -157,6 +160,7 @@ class UserStore:
                     user.get("management_strategy"),
                     int(user.get("range_entry_pct") or 0),
                     int(bool(user.get("entry_if_favorable"))),
+                    user.get("deletion_strategy"),
                 ),
             )
             await db.commit()
@@ -195,6 +199,15 @@ class UserStore:
             await db.execute(
                 "UPDATE users SET entry_if_favorable = ? WHERE user_id = ?",
                 (1 if entry_if_favorable else 0, user_id),
+            )
+            await db.commit()
+
+    async def update_deletion_strategy(self, user_id: str, deletion_strategy: str | None) -> None:
+        """Aggiorna la strategia da eseguire quando un messaggio segnale viene eliminato."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET deletion_strategy = ? WHERE user_id = ?",
+                (deletion_strategy or None, user_id),
             )
             await db.commit()
 
@@ -247,6 +260,7 @@ class UserStore:
                     "mt5_server":          row["mt5_server"],
                     "sizing_strategy":      row["sizing_strategy"],
                     "management_strategy":  row["management_strategy"],
+                    "deletion_strategy":    row["deletion_strategy"],
                     "range_entry_pct":      int(row["range_entry_pct"] or 0),
                     "entry_if_favorable":   bool(row["entry_if_favorable"]),
                 }
@@ -284,6 +298,7 @@ class UserStore:
             "mt5_server":          row["mt5_server"],
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
+            "deletion_strategy":   row["deletion_strategy"],
             "range_entry_pct":     int(row["range_entry_pct"] or 0),
             "entry_if_favorable":  bool(row["entry_if_favorable"]),
             "active":              bool(row["active"]),
@@ -320,6 +335,7 @@ class UserStore:
             "mt5_server":          row["mt5_server"],
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
+            "deletion_strategy":   row["deletion_strategy"],
             "range_entry_pct":     int(row["range_entry_pct"] or 0),
             "entry_if_favorable":  bool(row["entry_if_favorable"]),
             "active":              bool(row["active"]),
