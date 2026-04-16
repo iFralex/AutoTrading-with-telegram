@@ -581,7 +581,7 @@ function DeletionStrategyEditor({
 
 // ── Toggle: ingresso a mercato se prezzo favorevole ──────────────────────────
 
-function EntryIfFavorableToggle({
+function EntryIfFavorableEditor({
   userId,
   current,
   onSaved,
@@ -590,15 +590,29 @@ function EntryIfFavorableToggle({
   current: boolean
   onSaved: (value: boolean) => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue]     = useState(current)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
-  async function toggle() {
+  function startEdit() {
+    setValue(current)
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancel() {
+    setEditing(false)
+    setError(null)
+  }
+
+  async function save() {
     setLoading(true)
     setError(null)
     try {
-      await api.updateEntryIfFavorable(userId, !current)
-      onSaved(!current)
+      await api.updateEntryIfFavorable(userId, value)
+      onSaved(value)
+      setEditing(false)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Errore nel salvataggio")
     } finally {
@@ -616,32 +630,56 @@ function EntryIfFavorableToggle({
               Se il prezzo corrente è già più favorevole del target calcolato, entra subito a mercato invece di piazzare un ordine pendente più sfavorevole
             </CardDescription>
           </div>
-          <button
-            onClick={toggle}
-            disabled={loading}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-              current ? "bg-indigo-500" : "bg-slate-600"
-            }`}
-            aria-pressed={current}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                current ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
+          {!editing && (
+            <Button variant="outline" size="sm" onClick={startEdit} className="text-xs">
+              Modifica
+            </Button>
+          )}
         </div>
       </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground">
-          {current
-            ? "Attivo — se ask (BUY) o bid (SELL) è già dentro/oltre il target, ordine a mercato immediato"
-            : "Disattivo — viene sempre piazzato l'ordine pendente al prezzo target (comportamento precedente)"}
-        </p>
-        {error && (
-          <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2 mt-2">
-            {error}
+      <CardContent className="space-y-3">
+        {!editing ? (
+          <p className="text-sm font-mono text-foreground/80 bg-black/20 rounded-lg border border-white/8 px-3 py-2">
+            {current
+              ? "Attivo — entra a mercato se il prezzo è già favorevole"
+              : "Disattivo — piazza sempre l'ordine pendente al prezzo target"}
           </p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2">
+              {([
+                { val: true,  label: "Attivo",   desc: "Se ask (BUY) o bid (SELL) è già dentro/oltre il target, entra a mercato immediatamente" },
+                { val: false, label: "Disattivo", desc: "Piazza sempre l'ordine pendente al prezzo target calcolato (comportamento predefinito)" },
+              ] as const).map(opt => (
+                <button
+                  key={String(opt.val)}
+                  type="button"
+                  onClick={() => setValue(opt.val)}
+                  className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+                    value === opt.val
+                      ? "border-indigo-500/50 bg-indigo-500/10 text-foreground"
+                      : "border-white/[0.07] text-muted-foreground hover:border-white/20 hover:text-foreground"
+                  }`}
+                >
+                  <span className="text-xs font-semibold">{opt.label}</span>
+                  <span className="block text-xs mt-0.5 opacity-70">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+            {error && (
+              <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={save} disabled={loading} size="sm" className="text-xs">
+                {loading ? "Salvataggio…" : "Salva"}
+              </Button>
+              <Button onClick={cancel} disabled={loading} variant="outline" size="sm" className="text-xs">
+                Annulla
+              </Button>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -1291,7 +1329,7 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
           />
 
           {/* Ingresso a mercato se prezzo favorevole */}
-          <EntryIfFavorableToggle
+          <EntryIfFavorableEditor
             userId={data.user.user_id}
             current={data.user.entry_if_favorable ?? false}
             onSaved={value => setData(prev => prev
