@@ -36,9 +36,10 @@ export function TelegramAuthStep({ data, onDataChange, onNext, onBack }: StepPro
         return
       }
 
-      onDataChange({ userId: res.user_id })
+      const verified = res as import("@/lib/api").VerifyCodeResponse
+      onDataChange({ userId: verified.user_id })
       // Salva subito in sessione con il valore fresco (non aspetta il re-render React)
-      await api.saveSession({ phone: data.phone, user_id: res.user_id })
+      await api.saveSession({ phone: data.phone, user_id: verified.user_id })
       onNext()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Errore imprevisto")
