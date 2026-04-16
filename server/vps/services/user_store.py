@@ -15,6 +15,7 @@ Schema:
     sizing_strategy     TEXT,               -- strategia di sizing (iniettata nel prompt Pro)
     management_strategy TEXT,               -- strategia di gestione (eseguita dal StrategyExecutor)
     active              INTEGER DEFAULT 1,
+    entry_if_favorable  INTEGER DEFAULT 0,  -- 1 = entra a mercato se prezzo già favorevole
     created_at          TEXT    DEFAULT CURRENT_TIMESTAMP
   )
 """
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
     sizing_strategy     TEXT,
     management_strategy TEXT,
     range_entry_pct     INTEGER NOT NULL DEFAULT 0,
+    entry_if_favorable  INTEGER NOT NULL DEFAULT 0,
     active              INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
@@ -51,6 +53,7 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN sizing_strategy TEXT",
     "ALTER TABLE users ADD COLUMN management_strategy TEXT",
     "ALTER TABLE users ADD COLUMN range_entry_pct INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN entry_if_favorable INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -123,9 +126,10 @@ class UserStore:
                     (user_id, api_id, api_hash, phone,
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
-                     sizing_strategy, management_strategy, range_entry_pct, active)
+                     sizing_strategy, management_strategy, range_entry_pct,
+                     entry_if_favorable, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     api_id              = excluded.api_id,
                     api_hash            = excluded.api_hash,
@@ -152,6 +156,7 @@ class UserStore:
                     user.get("sizing_strategy"),
                     user.get("management_strategy"),
                     int(user.get("range_entry_pct") or 0),
+                    int(bool(user.get("entry_if_favorable"))),
                 ),
             )
             await db.commit()
@@ -181,6 +186,15 @@ class UserStore:
             await db.execute(
                 "UPDATE users SET range_entry_pct = ? WHERE user_id = ?",
                 (pct, user_id),
+            )
+            await db.commit()
+
+    async def update_entry_if_favorable(self, user_id: str, entry_if_favorable: bool) -> None:
+        """Aggiorna la modalità di ingresso quando il prezzo è già favorevole."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET entry_if_favorable = ? WHERE user_id = ?",
+                (1 if entry_if_favorable else 0, user_id),
             )
             await db.commit()
 
@@ -231,9 +245,10 @@ class UserStore:
                     "mt5_login":           row["mt5_login"],
                     "mt5_password":        mt5_password,
                     "mt5_server":          row["mt5_server"],
-                    "sizing_strategy":     row["sizing_strategy"],
-                    "management_strategy": row["management_strategy"],
-                    "range_entry_pct":     int(row["range_entry_pct"] or 0),
+                    "sizing_strategy":      row["sizing_strategy"],
+                    "management_strategy":  row["management_strategy"],
+                    "range_entry_pct":      int(row["range_entry_pct"] or 0),
+                    "entry_if_favorable":   bool(row["entry_if_favorable"]),
                 }
             )
         return result
@@ -270,6 +285,7 @@ class UserStore:
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
             "range_entry_pct":     int(row["range_entry_pct"] or 0),
+            "entry_if_favorable":  bool(row["entry_if_favorable"]),
             "active":              bool(row["active"]),
             "created_at":          row["created_at"],
         }
@@ -305,6 +321,7 @@ class UserStore:
             "sizing_strategy":     row["sizing_strategy"],
             "management_strategy": row["management_strategy"],
             "range_entry_pct":     int(row["range_entry_pct"] or 0),
+            "entry_if_favorable":  bool(row["entry_if_favorable"]),
             "active":              bool(row["active"]),
             "created_at":          row["created_at"],
         }

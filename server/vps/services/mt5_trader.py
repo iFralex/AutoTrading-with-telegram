@@ -461,6 +461,7 @@ class MT5Trader:
         mt5_server: str,
         signal_group_id: str | None = None,
         range_entry_pct: int = 0,
+        entry_if_favorable: bool = False,
     ) -> list[TradeResult]:
         """
         Esegue tutti i segnali per l'utente in un unico blocco MT5
@@ -475,6 +476,11 @@ class MT5Trader:
             0   = estremo favorevole (BUY→minimo, SELL→massimo) — default
             50  = punto medio del range
             100 = estremo opposto (BUY→massimo, SELL→minimo)
+
+        entry_if_favorable: se True e il prezzo corrente è già più favorevole
+            del livello calcolato (es. BUY e ask < prezzo target), entra
+            immediatamente a mercato invece di piazzare un ordine pendente
+            più sfavorevole.
         """
         if not signals:
             return []
@@ -484,7 +490,7 @@ class MT5Trader:
             _executor,
             self._execute_block,
             user_id, signals, mt5_login, mt5_password, mt5_server,
-            signal_group_id, range_entry_pct,
+            signal_group_id, range_entry_pct, entry_if_favorable,
         )
 
     # ── Sync — gira in ThreadPoolExecutor ─────────────────────────────────────
@@ -520,6 +526,7 @@ class MT5Trader:
         server: str,
         signal_group_id: str | None = None,
         range_entry_pct: int = 0,
+        entry_if_favorable: bool = False,
     ) -> list[TradeResult]:
         """Apre MT5, esegue tutti gli ordini, chiude MT5."""
         try:
@@ -604,7 +611,7 @@ class MT5Trader:
                     results.append(
                         self._send_order(
                             mt5, sig, user_id, signal_group_id,
-                            user_dir, login, range_entry_pct,
+                            user_dir, login, range_entry_pct, entry_if_favorable,
                         )
                     )
 
@@ -623,6 +630,7 @@ class MT5Trader:
         user_dir: Path | None = None,
         mt5_login: int | None = None,
         range_entry_pct: int = 0,
+        entry_if_favorable: bool = False,
     ) -> TradeResult:
         """Costruisce e invia un singolo ordine MT5.
 
@@ -680,15 +688,29 @@ class MT5Trader:
                 price = sig.entry_price
 
             if sig.order_type == "BUY":
-                order_type = (
-                    mt5.ORDER_TYPE_BUY_LIMIT if price < tick.ask
-                    else mt5.ORDER_TYPE_BUY_STOP
-                )
+                if price < tick.ask:
+                    # Prezzo target sotto l'ask corrente → BUY LIMIT (attesa ribasso)
+                    order_type = mt5.ORDER_TYPE_BUY_LIMIT
+                elif entry_if_favorable:
+                    # Ask già sotto il target → mercato è favorevole → entra subito
+                    action     = mt5.TRADE_ACTION_DEAL
+                    price      = tick.ask
+                    order_type = mt5.ORDER_TYPE_BUY
+                else:
+                    # Ask già sotto il target → BUY STOP (attende rialzo al target)
+                    order_type = mt5.ORDER_TYPE_BUY_STOP
             else:
-                order_type = (
-                    mt5.ORDER_TYPE_SELL_LIMIT if price > tick.bid
-                    else mt5.ORDER_TYPE_SELL_STOP
-                )
+                if price > tick.bid:
+                    # Prezzo target sopra il bid corrente → SELL LIMIT (attesa rialzo)
+                    order_type = mt5.ORDER_TYPE_SELL_LIMIT
+                elif entry_if_favorable:
+                    # Bid già sopra il target → mercato è favorevole → entra subito
+                    action     = mt5.TRADE_ACTION_DEAL
+                    price      = tick.bid
+                    order_type = mt5.ORDER_TYPE_SELL
+                else:
+                    # Bid già sopra il target → SELL STOP (attende ribasso al target)
+                    order_type = mt5.ORDER_TYPE_SELL_STOP
 
         # ── Volume: arrotonda al passo minimo del broker ──────────────────────
         lot = sig.lot_size or self._default_lot

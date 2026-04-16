@@ -467,6 +467,75 @@ function RangeEntryPctEditor({
   )
 }
 
+// ── Toggle: ingresso a mercato se prezzo favorevole ──────────────────────────
+
+function EntryIfFavorableToggle({
+  userId,
+  current,
+  onSaved,
+}: {
+  userId: string
+  current: boolean
+  onSaved: (value: boolean) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  async function toggle() {
+    setLoading(true)
+    setError(null)
+    try {
+      await api.updateEntryIfFavorable(userId, !current)
+      onSaved(!current)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="border-white/10">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Ingresso a mercato se prezzo favorevole</CardTitle>
+            <CardDescription className="mt-0.5">
+              Se il prezzo corrente è già più favorevole del target calcolato, entra subito a mercato invece di piazzare un ordine pendente più sfavorevole
+            </CardDescription>
+          </div>
+          <button
+            onClick={toggle}
+            disabled={loading}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+              current ? "bg-indigo-500" : "bg-slate-600"
+            }`}
+            aria-pressed={current}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                current ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground">
+          {current
+            ? "Attivo — se ask (BUY) o bid (SELL) è già dentro/oltre il target, ordine a mercato immediato"
+            : "Disattivo — viene sempre piazzato l'ordine pendente al prezzo target (comportamento precedente)"}
+        </p>
+        {error && (
+          <p className="text-xs text-red-400 bg-red-600/10 border border-red-500/20 rounded-lg px-3 py-2 mt-2">
+            {error}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Simulatore messaggio Telegram ────────────────────────────────────────────
 
 const EXAMPLE_MESSAGES = [
@@ -1095,6 +1164,16 @@ export function Dashboard({ initialPhone = "" }: { initialPhone?: string }) {
             current={data.user.range_entry_pct ?? 0}
             onSaved={value => setData(prev => prev
               ? { ...prev, user: { ...prev.user, range_entry_pct: value } }
+              : prev
+            )}
+          />
+
+          {/* Ingresso a mercato se prezzo favorevole */}
+          <EntryIfFavorableToggle
+            userId={data.user.user_id}
+            current={data.user.entry_if_favorable ?? false}
+            onSaved={value => setData(prev => prev
+              ? { ...prev, user: { ...prev.user, entry_if_favorable: value } }
               : prev
             )}
           />

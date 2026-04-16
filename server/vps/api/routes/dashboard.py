@@ -142,6 +142,25 @@ async def update_range_entry_pct(
     return {"ok": True}
 
 
+class UpdateEntryIfFavorableBody(BaseModel):
+    entry_if_favorable: bool
+
+
+@router.patch("/user/{user_id}/entry-if-favorable")
+async def update_entry_if_favorable(
+    user_id: str,
+    body: UpdateEntryIfFavorableBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la modalità di ingresso quando il prezzo corrente è già più favorevole del target."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_entry_if_favorable(user_id, body.entry_if_favorable)
+    return {"ok": True}
+
+
 @router.post("/test-order")
 async def test_order(
     body: TestOrderRequest,
@@ -159,10 +178,11 @@ async def test_order(
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
 
-    mt5_login       = user.get("mt5_login")
-    mt5_password    = user.get("mt5_password")
-    mt5_server      = user.get("mt5_server")
-    range_entry_pct = int(user.get("range_entry_pct") or 0)
+    mt5_login          = user.get("mt5_login")
+    mt5_password       = user.get("mt5_password")
+    mt5_server         = user.get("mt5_server")
+    range_entry_pct    = int(user.get("range_entry_pct") or 0)
+    entry_if_favorable = bool(user.get("entry_if_favorable"))
 
     if not (mt5_login and mt5_password and mt5_server):
         raise HTTPException(
@@ -187,12 +207,13 @@ async def test_order(
     ]
 
     results = await mt5_trader.execute_signals(
-        user_id         = body.user_id,
-        signals         = signals,
-        mt5_login       = int(mt5_login),
-        mt5_password    = mt5_password,
-        mt5_server      = mt5_server,
-        range_entry_pct = range_entry_pct,
+        user_id            = body.user_id,
+        signals            = signals,
+        mt5_login          = int(mt5_login),
+        mt5_password       = mt5_password,
+        mt5_server         = mt5_server,
+        range_entry_pct    = range_entry_pct,
+        entry_if_favorable = entry_if_favorable,
     )
 
     from dataclasses import asdict

@@ -295,7 +295,8 @@ async def lifespan(app: FastAPI):
         log_sizing_strategy = user.get("sizing_strategy") or None
         management_strategy = user.get("management_strategy") or None
         range_entry_pct     = int(user.get("range_entry_pct") or 0)
-        logger.info("Utente %s: range_entry_pct=%d%%", user_id, range_entry_pct)
+        entry_if_favorable  = bool(user.get("entry_if_favorable"))
+        logger.info("Utente %s: range_entry_pct=%d%%, entry_if_favorable=%s", user_id, range_entry_pct, entry_if_favorable)
 
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
@@ -426,7 +427,8 @@ async def lifespan(app: FastAPI):
                 mt5_password    = mt5_password,
                 mt5_server      = mt5_server,
                 signal_group_id = signal_group_id,
-                range_entry_pct = range_entry_pct,
+                range_entry_pct    = range_entry_pct,
+                entry_if_favorable = entry_if_favorable,
             )
         except Exception as exc:
             logger.error("MT5 execute_signals errore: %s", exc)

@@ -149,6 +149,7 @@ export interface DashboardUser {
   sizing_strategy: string | null
   management_strategy: string | null
   range_entry_pct: number
+  entry_if_favorable: boolean
   active: boolean
   created_at: string
 }
@@ -460,6 +461,15 @@ export const api = {
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/range-entry-pct`,
       { range_entry_pct: rangeEntryPct }
+    )
+  },
+
+  /** Aggiorna la modalità di ingresso quando il prezzo è già favorevole. */
+  updateEntryIfFavorable(userId: string, entryIfFavorable: boolean) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/entry-if-favorable`,
+      { entry_if_favorable: entryIfFavorable }
     )
   },
 
