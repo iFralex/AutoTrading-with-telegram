@@ -1015,7 +1015,7 @@ def _format_event_prompt(event_type: str, event_data: dict) -> str:
 
     if event_type == "position_closed":
         p       = event_data
-        profit  = p.get("profit", 0)
+        profit  = p.get("profit") or 0
         reason  = p.get("reason", "SCONOSCIUTO")
         outcome = "IN PROFITTO" if profit >= 0 else "IN PERDITA"
         return (
