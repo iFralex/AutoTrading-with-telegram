@@ -113,6 +113,7 @@ class CompleteSetupBody(BaseModel):
     sizing_strategy: str | None = None
     management_strategy: str | None = None
     deletion_strategy: str | None = None
+    extraction_instructions: str | None = None
 
 
 # ── Session endpoints ────────────────────────────────────────────────────────
@@ -483,9 +484,10 @@ async def complete_setup(
             "mt5_login":           body.mt5_login,
             "mt5_password":        mt5_password,
             "mt5_server":          body.mt5_server,
-            "sizing_strategy":     body.sizing_strategy,
-            "management_strategy": body.management_strategy,
-            "deletion_strategy":   body.deletion_strategy,
+            "sizing_strategy":          body.sizing_strategy,
+            "management_strategy":      body.management_strategy,
+            "deletion_strategy":        body.deletion_strategy,
+            "extraction_instructions":  body.extraction_instructions,
         })
 
         tm.add_user(

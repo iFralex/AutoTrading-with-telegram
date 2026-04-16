@@ -226,6 +226,15 @@ class SignalLogStore:
 
         return [_row_to_dict(row) for row in rows]
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Elimina tutti i log segnali dell'utente. Ritorna il numero di righe eliminate."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM signal_logs WHERE user_id = ?", (user_id,)
+            )
+            await db.commit()
+            return cursor.rowcount
+
     async def count_by_user_id(self, user_id: str) -> int:
         """Conta i log totali per un utente."""
         async with aiosqlite.connect(self._db_path) as db:

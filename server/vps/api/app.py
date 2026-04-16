@@ -301,8 +301,9 @@ async def lifespan(app: FastAPI):
         mt5_login           = user.get("mt5_login")
         mt5_password        = user.get("mt5_password")   # già decifrata da UserStore
         mt5_server          = user.get("mt5_server")
-        log_sizing_strategy = user.get("sizing_strategy") or None
-        management_strategy = user.get("management_strategy") or None
+        log_sizing_strategy     = user.get("sizing_strategy") or None
+        management_strategy     = user.get("management_strategy") or None
+        extraction_instructions = user.get("extraction_instructions") or None
         range_entry_pct     = int(user.get("range_entry_pct") or 0)
         entry_if_favorable  = bool(user.get("entry_if_favorable"))
         logger.info("Utente %s: range_entry_pct=%d%%, entry_if_favorable=%s", user_id, range_entry_pct, entry_if_favorable)
@@ -343,6 +344,7 @@ async def lifespan(app: FastAPI):
                 sizing_strategy=log_sizing_strategy,
                 account_info=log_account_info,
                 user_id=user_id,
+                extraction_instructions=extraction_instructions,
             )
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)

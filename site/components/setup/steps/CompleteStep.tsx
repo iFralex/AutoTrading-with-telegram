@@ -72,9 +72,10 @@ export function CompleteStep({ data, onBack }: StepProps) {
         mt5_login:       data.mt5Login ? Number(data.mt5Login) : undefined,
         mt5_password:    data.mt5Password || undefined,
         mt5_server:          data.mt5Server || undefined,
-        sizing_strategy:     data.sizingStrategy || undefined,
-        management_strategy: data.managementStrategy || undefined,
-        deletion_strategy:   data.deletionStrategy || undefined,
+        sizing_strategy:         data.sizingStrategy || undefined,
+        extraction_instructions: data.extractionInstructions || undefined,
+        management_strategy:     data.managementStrategy || undefined,
+        deletion_strategy:       data.deletionStrategy || undefined,
       })
       setDone(true)
     } catch (err) {

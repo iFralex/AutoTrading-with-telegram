@@ -1,6 +1,8 @@
 "use client"
 
-import { type DashboardUserResponse, type SignalLog } from "@/lib/api"
+import { useState } from "react"
+import { Trash2, AlertTriangle, Loader2 } from "lucide-react"
+import { type DashboardUserResponse, type SignalLog, api } from "@/lib/api"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,21 @@ export function OverviewPage({
   onUserUpdate: (d: DashboardUserResponse) => void
 }) {
   const { user, logs, total_logs } = data
+  const [resetConfirm, setResetConfirm] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+
+  async function handleReset() {
+    setResetLoading(true)
+    setResetError(null)
+    try {
+      await api.resetUserStats(user.user_id)
+      window.location.reload()
+    } catch {
+      setResetError("Errore durante il reset. Riprova.")
+      setResetLoading(false)
+    }
+  }
 
   const signals    = logs.filter(l => l.is_signal).length
   const allResults = logs.flatMap(l => l.results_json ?? [])
@@ -121,6 +138,61 @@ export function OverviewPage({
           ))}
           {logs.length === 0 && (
             <EmptyTableRow>Nessuna attività registrata</EmptyTableRow>
+          )}
+        </div>
+      </div>
+
+      {/* Danger zone */}
+      <div>
+        <SectionHeading>Zona pericolosa</SectionHeading>
+        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 px-5 py-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="size-4 text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">Reimposta statistiche</p>
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                Elimina tutti i log segnali, i log AI e le operazioni chiuse. Le impostazioni,
+                le strategie e le credenziali non vengono modificate.
+              </p>
+            </div>
+          </div>
+
+          {resetError && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              {resetError}
+            </p>
+          )}
+
+          {!resetConfirm ? (
+            <button
+              type="button"
+              onClick={() => setResetConfirm(true)}
+              className="flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded-lg px-3 py-1.5 transition-colors"
+            >
+              <Trash2 className="size-3.5" />
+              Reimposta statistiche
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-red-300 font-medium">Sei sicuro? Questa azione è irreversibile.</p>
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={resetLoading}
+                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-60 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                {resetLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                {resetLoading ? "Reset…" : "Conferma reset"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setResetConfirm(false); setResetError(null) }}
+                disabled={resetLoading}
+                className="text-xs text-muted-foreground hover:text-foreground border border-white/[0.07] hover:border-white/[0.15] rounded-lg px-3 py-1.5 transition-colors"
+              >
+                Annulla
+              </button>
+            </div>
           )}
         </div>
       </div>

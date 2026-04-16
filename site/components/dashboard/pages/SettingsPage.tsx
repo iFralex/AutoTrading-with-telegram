@@ -28,6 +28,23 @@ export function SettingsPage({
         </p>
       </div>
 
+      {/* ── Extraction instructions ──────────────────────────────────────── */}
+      <SettingsSection
+        title="Istruzioni di estrazione"
+        description="Regole custom iniettate nel prompt Pro per modificare il comportamento di estrazione dei segnali. Es: aggiungi .s a tutti i simboli (EURUSD → EURUSD.s)"
+        badge="AI prompt"
+      >
+        <TextareaField
+          value={user.extraction_instructions}
+          placeholder={"Es: Per tutti i simboli, aggiungi il suffisso .s alla fine (es: EURUSD → EURUSD.s, XAUUSD → XAUUSD.s)."}
+          rows={3}
+          onSave={async v => {
+            await api.updateExtractionInstructions(user.user_id, v)
+            patch({ extraction_instructions: v })
+          }}
+        />
+      </SettingsSection>
+
       {/* ── Sizing strategy ──────────────────────────────────────────────── */}
       <SettingsSection
         title="Sizing Strategy"

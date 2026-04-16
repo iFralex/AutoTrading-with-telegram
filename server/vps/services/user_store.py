@@ -3,21 +3,22 @@ UserStore — persistenza utenti su SQLite con aiosqlite.
 
 Schema:
   users(
-    user_id             TEXT PRIMARY KEY,   -- Telegram user ID
-    api_id              INTEGER NOT NULL,
-    api_hash            TEXT    NOT NULL,
-    phone               TEXT    NOT NULL,
-    group_id            INTEGER NOT NULL,
-    group_name          TEXT    NOT NULL,
-    mt5_login           INTEGER,
-    mt5_password_enc    TEXT,               -- cifrato con Fernet
-    mt5_server          TEXT,
-    sizing_strategy     TEXT,               -- strategia di sizing (iniettata nel prompt Pro)
-    management_strategy TEXT,               -- strategia di gestione (eseguita dal StrategyExecutor)
-    deletion_strategy   TEXT,               -- strategia da eseguire quando un messaggio segnale viene eliminato
-    active              INTEGER DEFAULT 1,
-    entry_if_favorable  INTEGER DEFAULT 0,  -- 1 = entra a mercato se prezzo già favorevole
-    created_at          TEXT    DEFAULT CURRENT_TIMESTAMP
+    user_id                 TEXT PRIMARY KEY,   -- Telegram user ID
+    api_id                  INTEGER NOT NULL,
+    api_hash                TEXT    NOT NULL,
+    phone                   TEXT    NOT NULL,
+    group_id                INTEGER NOT NULL,
+    group_name              TEXT    NOT NULL,
+    mt5_login               INTEGER,
+    mt5_password_enc        TEXT,               -- cifrato con Fernet
+    mt5_server              TEXT,
+    sizing_strategy         TEXT,               -- strategia di sizing (iniettata nel prompt Pro)
+    management_strategy     TEXT,               -- strategia di gestione (eseguita dal StrategyExecutor)
+    deletion_strategy       TEXT,               -- strategia da eseguire quando un messaggio segnale viene eliminato
+    extraction_instructions TEXT,               -- istruzioni custom per il prompt di estrazione Pro
+    active                  INTEGER DEFAULT 1,
+    entry_if_favorable      INTEGER DEFAULT 0,  -- 1 = entra a mercato se prezzo già favorevole
+    created_at              TEXT    DEFAULT CURRENT_TIMESTAMP
   )
 """
 
@@ -40,12 +41,13 @@ CREATE TABLE IF NOT EXISTS users (
     mt5_login           INTEGER,
     mt5_password_enc    TEXT,
     mt5_server          TEXT,
-    sizing_strategy     TEXT,
-    management_strategy TEXT,
-    range_entry_pct     INTEGER NOT NULL DEFAULT 0,
-    entry_if_favorable  INTEGER NOT NULL DEFAULT 0,
-    deletion_strategy   TEXT,
-    active              INTEGER NOT NULL DEFAULT 1,
+    sizing_strategy         TEXT,
+    management_strategy     TEXT,
+    range_entry_pct         INTEGER NOT NULL DEFAULT 0,
+    entry_if_favorable      INTEGER NOT NULL DEFAULT 0,
+    deletion_strategy       TEXT,
+    extraction_instructions TEXT,
+    active                  INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -57,6 +59,7 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN range_entry_pct INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN entry_if_favorable INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN deletion_strategy TEXT",
+    "ALTER TABLE users ADD COLUMN extraction_instructions TEXT",
 ]
 
 
@@ -130,21 +133,22 @@ class UserStore:
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
                      sizing_strategy, management_strategy, range_entry_pct,
-                     entry_if_favorable, deletion_strategy, active)
+                     entry_if_favorable, deletion_strategy, extraction_instructions, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    api_id              = excluded.api_id,
-                    api_hash            = excluded.api_hash,
-                    phone               = excluded.phone,
-                    group_id            = excluded.group_id,
-                    group_name          = excluded.group_name,
-                    mt5_login           = excluded.mt5_login,
-                    mt5_password_enc    = excluded.mt5_password_enc,
-                    mt5_server          = excluded.mt5_server,
-                    sizing_strategy     = excluded.sizing_strategy,
-                    management_strategy = excluded.management_strategy,
-                    active              = 1
+                    api_id                  = excluded.api_id,
+                    api_hash                = excluded.api_hash,
+                    phone                   = excluded.phone,
+                    group_id                = excluded.group_id,
+                    group_name              = excluded.group_name,
+                    mt5_login               = excluded.mt5_login,
+                    mt5_password_enc        = excluded.mt5_password_enc,
+                    mt5_server              = excluded.mt5_server,
+                    sizing_strategy         = excluded.sizing_strategy,
+                    management_strategy     = excluded.management_strategy,
+                    extraction_instructions = excluded.extraction_instructions,
+                    active                  = 1
                 """,
                 (
                     user["user_id"],
@@ -161,6 +165,7 @@ class UserStore:
                     int(user.get("range_entry_pct") or 0),
                     int(bool(user.get("entry_if_favorable"))),
                     user.get("deletion_strategy"),
+                    user.get("extraction_instructions"),
                 ),
             )
             await db.commit()
@@ -211,6 +216,15 @@ class UserStore:
             )
             await db.commit()
 
+    async def update_extraction_instructions(self, user_id: str, extraction_instructions: str | None) -> None:
+        """Aggiorna le istruzioni custom iniettate nel prompt Pro di estrazione."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET extraction_instructions = ? WHERE user_id = ?",
+                (extraction_instructions or None, user_id),
+            )
+            await db.commit()
+
     async def set_active(self, user_id: str, active: bool) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
@@ -249,20 +263,21 @@ class UserStore:
 
             result.append(
                 {
-                    "user_id":             row["user_id"],
-                    "api_id":              row["api_id"],
-                    "api_hash":            row["api_hash"],
-                    "phone":               row["phone"],
-                    "group_id":            row["group_id"],
-                    "group_name":          row["group_name"],
-                    "mt5_login":           row["mt5_login"],
-                    "mt5_password":        mt5_password,
-                    "mt5_server":          row["mt5_server"],
-                    "sizing_strategy":      row["sizing_strategy"],
-                    "management_strategy":  row["management_strategy"],
-                    "deletion_strategy":    row["deletion_strategy"],
-                    "range_entry_pct":      int(row["range_entry_pct"] or 0),
-                    "entry_if_favorable":   bool(row["entry_if_favorable"]),
+                    "user_id":                  row["user_id"],
+                    "api_id":                   row["api_id"],
+                    "api_hash":                 row["api_hash"],
+                    "phone":                    row["phone"],
+                    "group_id":                 row["group_id"],
+                    "group_name":               row["group_name"],
+                    "mt5_login":                row["mt5_login"],
+                    "mt5_password":             mt5_password,
+                    "mt5_server":               row["mt5_server"],
+                    "sizing_strategy":          row["sizing_strategy"],
+                    "management_strategy":      row["management_strategy"],
+                    "deletion_strategy":        row["deletion_strategy"],
+                    "extraction_instructions":  row["extraction_instructions"],
+                    "range_entry_pct":          int(row["range_entry_pct"] or 0),
+                    "entry_if_favorable":       bool(row["entry_if_favorable"]),
                 }
             )
         return result
@@ -287,22 +302,23 @@ class UserStore:
                 pass
 
         return {
-            "user_id":             row["user_id"],
-            "api_id":              row["api_id"],
-            "api_hash":            row["api_hash"],
-            "phone":               row["phone"],
-            "group_id":            row["group_id"],
-            "group_name":          row["group_name"],
-            "mt5_login":           row["mt5_login"],
-            "mt5_password":        mt5_password,
-            "mt5_server":          row["mt5_server"],
-            "sizing_strategy":     row["sizing_strategy"],
-            "management_strategy": row["management_strategy"],
-            "deletion_strategy":   row["deletion_strategy"],
-            "range_entry_pct":     int(row["range_entry_pct"] or 0),
-            "entry_if_favorable":  bool(row["entry_if_favorable"]),
-            "active":              bool(row["active"]),
-            "created_at":          row["created_at"],
+            "user_id":                  row["user_id"],
+            "api_id":                   row["api_id"],
+            "api_hash":                 row["api_hash"],
+            "phone":                    row["phone"],
+            "group_id":                 row["group_id"],
+            "group_name":               row["group_name"],
+            "mt5_login":                row["mt5_login"],
+            "mt5_password":             mt5_password,
+            "mt5_server":               row["mt5_server"],
+            "sizing_strategy":          row["sizing_strategy"],
+            "management_strategy":      row["management_strategy"],
+            "deletion_strategy":        row["deletion_strategy"],
+            "extraction_instructions":  row["extraction_instructions"],
+            "range_entry_pct":          int(row["range_entry_pct"] or 0),
+            "entry_if_favorable":       bool(row["entry_if_favorable"]),
+            "active":                   bool(row["active"]),
+            "created_at":               row["created_at"],
         }
 
     async def get_user(self, user_id: str) -> dict | None:
@@ -324,20 +340,21 @@ class UserStore:
                 pass
 
         return {
-            "user_id":             row["user_id"],
-            "api_id":              row["api_id"],
-            "api_hash":            row["api_hash"],
-            "phone":               row["phone"],
-            "group_id":            row["group_id"],
-            "group_name":          row["group_name"],
-            "mt5_login":           row["mt5_login"],
-            "mt5_password":        mt5_password,
-            "mt5_server":          row["mt5_server"],
-            "sizing_strategy":     row["sizing_strategy"],
-            "management_strategy": row["management_strategy"],
-            "deletion_strategy":   row["deletion_strategy"],
-            "range_entry_pct":     int(row["range_entry_pct"] or 0),
-            "entry_if_favorable":  bool(row["entry_if_favorable"]),
-            "active":              bool(row["active"]),
-            "created_at":          row["created_at"],
+            "user_id":                  row["user_id"],
+            "api_id":                   row["api_id"],
+            "api_hash":                 row["api_hash"],
+            "phone":                    row["phone"],
+            "group_id":                 row["group_id"],
+            "group_name":               row["group_name"],
+            "mt5_login":                row["mt5_login"],
+            "mt5_password":             mt5_password,
+            "mt5_server":               row["mt5_server"],
+            "sizing_strategy":          row["sizing_strategy"],
+            "management_strategy":      row["management_strategy"],
+            "deletion_strategy":        row["deletion_strategy"],
+            "extraction_instructions":  row["extraction_instructions"],
+            "range_entry_pct":          int(row["range_entry_pct"] or 0),
+            "entry_if_favorable":       bool(row["entry_if_favorable"]),
+            "active":                   bool(row["active"]),
+            "created_at":               row["created_at"],
         }

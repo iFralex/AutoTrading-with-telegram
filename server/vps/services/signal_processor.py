@@ -76,7 +76,7 @@ Rules:
 - If an entry range is given (e.g. "4652 - 4656"), set entry_price to [4652, 4656]; do NOT average the values.
 - If a single entry price is given, set entry_price to that number (not an array).
 - Preserve all numeric values exactly as written; do not round or convert.
-{sizing_section}
+{sizing_section}{custom_section}
 Message:
 {message}"""
 
@@ -109,6 +109,7 @@ class SignalProcessor:
         sizing_strategy: str | None = None,
         account_info: dict | None = None,
         user_id: str | None = None,
+        extraction_instructions: str | None = None,
     ) -> list[TradeSignal]:
         """
         Punto di ingresso principale.
@@ -138,7 +139,7 @@ class SignalProcessor:
 
         # ── Step 2: estrazione strutturata (Pro) ──────────────────────────────
         try:
-            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id)
+            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
             return []
@@ -165,13 +166,14 @@ class SignalProcessor:
         sizing_strategy: str | None = None,
         account_info: dict | None = None,
         user_id: str | None = None,
+        extraction_instructions: str | None = None,
     ) -> list[TradeSignal]:
         """
         Solo extraction Pro — da usare dopo aver già verificato che il
         messaggio è un segnale (es. con detect_signal()).
         """
         try:
-            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id)
+            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
             return []
@@ -226,12 +228,15 @@ class SignalProcessor:
         sizing_strategy: str | None,
         account_info: dict | None,
         user_id: str | None = None,
+        extraction_instructions: str | None = None,
     ) -> list[TradeSignal]:
         from vps.services.ai_log_store import make_timer
         sizing_section = _build_sizing_section(sizing_strategy, account_info)
+        custom_section = _build_custom_section(extraction_instructions)
         prompt = _EXTRACTION_PROMPT.format(
             message=message,
             sizing_section=sizing_section,
+            custom_section=custom_section,
         )
         timer = make_timer()
         error: str | None = None
@@ -345,6 +350,22 @@ def _build_sizing_section(
     lines += [
         "- Use this information to compute lot_size for each operation.",
         "- If the signal already states an explicit lot/volume, use that value instead.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _build_custom_section(extraction_instructions: str | None) -> str:
+    """
+    Costruisce il blocco di istruzioni custom da iniettare nel prompt Pro.
+    Ritorna una stringa vuota se non ci sono istruzioni.
+    """
+    if not extraction_instructions:
+        return ""
+    lines = [
+        "",
+        "Additional extraction instructions (apply to all signals):",
+        f'- {extraction_instructions.strip()}',
         "",
     ]
     return "\n".join(lines)

@@ -129,6 +129,15 @@ class ClosedTradeStore:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Elimina tutti i trade chiusi dell'utente. Ritorna il numero di righe eliminate."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM closed_trades WHERE user_id = ?", (user_id,)
+            )
+            await db.commit()
+            return cursor.rowcount
+
     async def count_by_user_id(self, user_id: str) -> int:
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(

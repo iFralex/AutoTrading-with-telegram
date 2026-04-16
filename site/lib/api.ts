@@ -51,6 +51,7 @@ export interface CompleteSetupPayload {
   sizing_strategy?: string
   management_strategy?: string
   deletion_strategy?: string
+  extraction_instructions?: string
 }
 
 export interface SetupSession {
@@ -70,6 +71,7 @@ export interface SetupSession {
   sizing_strategy?: string | null
   management_strategy?: string | null
   deletion_strategy?: string | null
+  extraction_instructions?: string | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
@@ -88,6 +90,7 @@ export interface SaveSessionPayload {
   sizing_strategy?: string
   management_strategy?: string
   deletion_strategy?: string
+  extraction_instructions?: string
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────
@@ -154,6 +157,7 @@ export interface DashboardUser {
   range_entry_pct: number
   entry_if_favorable: boolean
   deletion_strategy: string | null
+  extraction_instructions: string | null
   active: boolean
   created_at: string
 }
@@ -474,6 +478,23 @@ export const api = {
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/deletion-strategy`,
       { deletion_strategy: deletionStrategy || null }
+    )
+  },
+
+  /** Aggiorna le istruzioni custom per il prompt di estrazione Pro. */
+  updateExtractionInstructions(userId: string, extractionInstructions: string | null) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/extraction-instructions`,
+      { extraction_instructions: extractionInstructions || null }
+    )
+  },
+
+  /** Azzera tutte le statistiche dell'utente (log segnali, AI, trade chiusi). */
+  resetUserStats(userId: string) {
+    return call<{ ok: boolean; deleted_signal_logs: number; deleted_ai_logs: number; deleted_trades: number }>(
+      "DELETE",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/stats`
     )
   },
 

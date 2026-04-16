@@ -161,6 +161,25 @@ async def update_deletion_strategy(
     return {"ok": True}
 
 
+class UpdateExtractionInstructionsBody(BaseModel):
+    extraction_instructions: str | None = None
+
+
+@router.patch("/user/{user_id}/extraction-instructions")
+async def update_extraction_instructions(
+    user_id: str,
+    body: UpdateExtractionInstructionsBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna le istruzioni custom iniettate nel prompt Pro di estrazione segnali."""
+    store = request.app.state.user_store
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    await store.update_extraction_instructions(user_id, body.extraction_instructions)
+    return {"ok": True}
+
+
 class UpdateEntryIfFavorableBody(BaseModel):
     entry_if_favorable: bool
 
@@ -279,6 +298,7 @@ async def simulate_message(
         raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
 
     sizing_strategy: str | None = user.get("sizing_strategy") or None
+    extraction_instructions: str | None = user.get("extraction_instructions") or None
 
     # ── Step 1: Flash detection ───────────────────────────────────────────────
     try:
@@ -311,6 +331,7 @@ async def simulate_message(
             body.message,
             sizing_strategy=sizing_strategy,
             account_info=None,   # non apriamo MT5 durante la simulazione
+            extraction_instructions=extraction_instructions,
         )
         if not signals:
             return {
@@ -420,3 +441,34 @@ async def get_ai_stats(
     ai_log_store = request.app.state.ai_log_store
     stats = await ai_log_store.get_stats(user_id)
     return stats
+
+
+@router.delete("/user/{user_id}/stats")
+async def reset_user_stats(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Azzera le statistiche di un utente eliminando tutti i log segnali,
+    i log AI e i trade chiusi. Le impostazioni (strategie, credenziali MT5)
+    restano invariate.
+    """
+    store              = request.app.state.user_store
+    log_store          = request.app.state.signal_log_store
+    ai_log_store       = request.app.state.ai_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    deleted_logs   = await log_store.delete_by_user_id(user_id)
+    deleted_ai     = await ai_log_store.delete_by_user_id(user_id)
+    deleted_trades = await closed_trade_store.delete_by_user_id(user_id)
+
+    return {
+        "ok": True,
+        "deleted_signal_logs": deleted_logs,
+        "deleted_ai_logs":     deleted_ai,
+        "deleted_trades":      deleted_trades,
+    }
