@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PRO_MODEL    = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro-preview-03-25")
-MAX_ITERATIONS = 30   # sicurezza: max cicli tool-call per esecuzione
+MAX_ITERATIONS = 8    # sicurezza: max cicli tool-call per esecuzione
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -91,10 +91,52 @@ class StrategyResult:
 # Definizioni dei tool (schema JSON per Gemini)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _make_tools(include_pretrade: bool = False) -> list[dict]:
+_TOOLS_BY_EVENT: dict[str, set[str]] = {
+    "pretrade": {
+        "approve_signal", "reject_signal", "modify_signal",
+        "get_account_info", "get_open_positions", "get_pending_orders",
+        "count_open_positions", "count_pending_orders",
+        "get_daily_pnl", "get_weekly_pnl", "get_monthly_pnl",
+        "calculate_lot_for_risk", "calculate_lot_for_risk_percent",
+        "get_current_price", "get_current_datetime",
+    },
+    "position_opened": {
+        "move_stop_loss", "move_take_profit", "set_breakeven", "close_position",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "get_open_positions", "get_pending_orders", "count_open_positions",
+        "get_current_price", "get_symbol_info",
+        "calculate_lot_for_risk", "calculate_lot_for_risk_percent",
+        "get_account_info", "get_current_datetime",
+    },
+    "position_closed": {
+        "get_open_positions", "get_pending_orders", "get_position_history",
+        "count_open_positions", "count_pending_orders",
+        "close_position", "close_all_positions",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "move_stop_loss", "move_take_profit", "set_breakeven",
+        "open_market_order", "place_pending_order",
+        "get_daily_pnl", "get_weekly_pnl", "get_monthly_pnl",
+        "get_account_info", "get_current_price", "get_current_datetime",
+    },
+    "position_modified": {
+        "get_open_positions", "get_pending_orders",
+        "move_stop_loss", "move_take_profit", "set_breakeven",
+        "close_position", "cancel_pending_order",
+        "get_current_price", "get_account_info", "get_current_datetime",
+    },
+    "message_deleted": {
+        "get_open_positions", "get_pending_orders",
+        "close_position", "close_all_positions",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "get_current_datetime",
+    },
+}
+
+
+def _make_tools(event_type: str) -> list[dict]:
     """
-    Costruisce la lista completa di tool definitions da passare a Gemini.
-    include_pretrade=True aggiunge i tool approve/reject/modify_signal.
+    Costruisce la lista di tool definitions da passare a Gemini,
+    filtrata per il tipo di evento per ridurre i token di input.
     """
     declarations = [
 
@@ -416,58 +458,63 @@ def _make_tools(include_pretrade: bool = False) -> list[dict]:
         },
     ]
 
-    if include_pretrade:
-        declarations += [
-            {
-                "name": "approve_signal",
-                "description": (
-                    "Approva il segnale con l'indice specificato: verrà eseguito normalmente. "
-                    "Se non viene chiamato nessun tool per un segnale, viene approvato di default."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
-                        "reason":       {"type": "string",  "description": "Motivazione (opzionale)"},
-                    },
-                    "required": ["signal_index"],
+    pretrade_declarations = [
+        {
+            "name": "approve_signal",
+            "description": (
+                "Approva il segnale con l'indice specificato: verrà eseguito normalmente. "
+                "Se non viene chiamato nessun tool per un segnale, viene approvato di default."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
+                    "reason":       {"type": "string",  "description": "Motivazione (opzionale)"},
                 },
+                "required": ["signal_index"],
             },
-            {
-                "name": "reject_signal",
-                "description": (
-                    "Rifiuta il segnale con l'indice specificato: NON verrà eseguito."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
-                        "reason":       {"type": "string",  "description": "Motivazione obbligatoria"},
-                    },
-                    "required": ["signal_index", "reason"],
+        },
+        {
+            "name": "reject_signal",
+            "description": (
+                "Rifiuta il segnale con l'indice specificato: NON verrà eseguito."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
+                    "reason":       {"type": "string",  "description": "Motivazione obbligatoria"},
                 },
+                "required": ["signal_index", "reason"],
             },
-            {
-                "name": "modify_signal",
-                "description": (
-                    "Approva il segnale ma modifica uno o più parametri prima dell'esecuzione: "
-                    "lot size, stop loss e/o take profit."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
-                        "new_lots":     {"type": "number",  "description": "Nuovo lot size (opzionale)"},
-                        "new_sl":       {"type": "number",  "description": "Nuovo stop loss (opzionale)"},
-                        "new_tp":       {"type": "number",  "description": "Nuovo take profit (opzionale)"},
-                        "reason":       {"type": "string",  "description": "Motivazione (opzionale)"},
-                    },
-                    "required": ["signal_index"],
+        },
+        {
+            "name": "modify_signal",
+            "description": (
+                "Approva il segnale ma modifica uno o più parametri prima dell'esecuzione: "
+                "lot size, stop loss e/o take profit."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "signal_index": {"type": "integer", "description": "Indice del segnale (0-based)"},
+                    "new_lots":     {"type": "number",  "description": "Nuovo lot size (opzionale)"},
+                    "new_sl":       {"type": "number",  "description": "Nuovo stop loss (opzionale)"},
+                    "new_tp":       {"type": "number",  "description": "Nuovo take profit (opzionale)"},
+                    "reason":       {"type": "string",  "description": "Motivazione (opzionale)"},
                 },
+                "required": ["signal_index"],
             },
-        ]
+        },
+    ]
 
-    return [{"function_declarations": declarations}]
+    all_declarations = declarations + pretrade_declarations
+
+    allowed = _TOOLS_BY_EVENT.get(event_type)
+    if allowed is not None:
+        all_declarations = [d for d in all_declarations if d["name"] in allowed]
+
+    return [{"function_declarations": all_declarations}]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -571,7 +618,7 @@ class StrategyExecutor:
                 management_strategy=management_strategy,
                 event_prompt=event_prompt,
                 ctx=ctx,
-                include_pretrade_tools=True,
+                event_type="pretrade",
                 pretrade_decisions=decisions,
                 call_type="strategy_pretrade",
             )
@@ -619,7 +666,7 @@ class StrategyExecutor:
                 management_strategy=management_strategy,
                 event_prompt=event_prompt,
                 ctx=ctx,
-                include_pretrade_tools=False,
+                event_type=event_type,
                 pretrade_decisions=None,
             )
 
@@ -633,7 +680,7 @@ class StrategyExecutor:
         management_strategy: str,
         event_prompt: str,
         ctx: _ExecCtx,
-        include_pretrade_tools: bool,
+        event_type: str,
         pretrade_decisions: dict[int, PreTradeDecision] | None,
         call_type: str = "strategy_event",
     ) -> StrategyResult:
@@ -642,7 +689,49 @@ class StrategyExecutor:
         finché l'AI non produce una risposta finale (senza function call).
         """
         from vps.services.ai_log_store import make_timer
-        tools     = _make_tools(include_pretrade=include_pretrade_tools)
+
+        # Pre-fetch contesto per eliminare le prime iterazioni "discovery"
+        u, l, p, s = ctx.user_id, ctx.login, ctx.password, ctx.server
+        prefetch_lines: list[str] = []
+
+        if event_type in ("position_opened", "position_closed", "position_modified", "message_deleted"):
+            try:
+                positions = await ctx.trader.get_positions(u, l, p, s)
+                if positions:
+                    pos_parts = [
+                        f"#{pos['ticket']} {pos.get('order_type')} {pos.get('symbol')} "
+                        f"lots={pos.get('lots')} entry={pos.get('entry_price')} "
+                        f"profit={pos.get('profit')} sl={pos.get('sl')} tp={pos.get('tp')}"
+                        + (f" grp={pos['signal_group_id']}" if pos.get('signal_group_id') else "")
+                        for pos in positions
+                    ]
+                    prefetch_lines.append(f"open_positions ({len(positions)}): " + " | ".join(pos_parts))
+                else:
+                    prefetch_lines.append("open_positions: none")
+            except Exception as exc:
+                logger.debug("prefetch positions failed: %s", exc)
+
+        if event_type == "pretrade":
+            try:
+                acct = await ctx.trader.get_full_account_info(u, l, p, s)
+                prefetch_lines.append(
+                    f"account: balance={acct.get('balance')} equity={acct.get('equity')} "
+                    f"free_margin={acct.get('free_margin')} currency={acct.get('currency')} "
+                    f"leverage={acct.get('leverage')}"
+                )
+                positions = await ctx.trader.get_positions(u, l, p, s)
+                prefetch_lines.append(f"open_positions_count: {len(positions)}")
+            except Exception as exc:
+                logger.debug("prefetch account/positions failed: %s", exc)
+
+        if prefetch_lines:
+            event_prompt = (
+                event_prompt
+                + "\n\nPre-fetched context (already up-to-date — do not call tools to retrieve this again):\n"
+                + "\n".join(f"  {line}" for line in prefetch_lines)
+            )
+
+        tools     = _make_tools(event_type)
         tool_log: list[dict] = []
 
         system_prompt = _build_system_prompt(management_strategy)
@@ -708,7 +797,7 @@ class StrategyExecutor:
                     fn_response_parts.append(
                         types.Part.from_function_response(
                             name=name,
-                            response={"result": json.dumps(result_data, default=str)},
+                            response={"result": json.dumps(_compact(result_data), separators=(',', ':'), default=str)},
                         )
                     )
 
@@ -755,7 +844,7 @@ class StrategyExecutor:
                             "iterations":             len(tool_log),
                             "tool_calls_count":       len(tool_log),
                             "final_response_preview": final_text[:300] if final_text else None,
-                            "include_pretrade_tools": include_pretrade_tools,
+                            "event_type": event_type,
                         },
                     )
                 except Exception as log_exc:
@@ -994,6 +1083,18 @@ class StrategyExecutor:
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _compact(data: Any, _max_list: int = 15) -> Any:
+    """Strips None values and truncates long lists to reduce tool-response token usage."""
+    if isinstance(data, dict):
+        return {k: _compact(v, _max_list) for k, v in data.items() if v is not None}
+    if isinstance(data, list):
+        result = [_compact(x, _max_list) for x in data[:_max_list]]
+        if len(data) > _max_list:
+            result.append({"_note": f"...{len(data) - _max_list} more items omitted"})
+        return result
+    return data
+
+
 def _build_system_prompt(management_strategy: str) -> str:
     return (
         "You are a professional MetaTrader 5 position management assistant.\n\n"
@@ -1001,6 +1102,8 @@ def _build_system_prompt(management_strategy: str) -> str:
         "nothing more and nothing less:\n\n"
         f"STRATEGY:\n{management_strategy}\n\n"
         "OPERATING INSTRUCTIONS:\n"
+        f"- You have at most {MAX_ITERATIONS} tool-call rounds total. "
+        "Always batch independent tool calls in the same response to save rounds.\n"
         "- Use the available tools to gather any information needed before acting.\n"
         "- Execute ALL actions required by the strategy for the current event.\n"
         "- Do not take any action not prescribed by the strategy.\n"
