@@ -640,8 +640,10 @@ class MT5Trader:
         """
 
         # ── Abilita il simbolo se non è nel Market Watch ──────────────────────
-        if mt5.symbol_info(sig.symbol) is None:
+        import time as _time
+        if mt5.symbol_info(sig.symbol) is None or not mt5.symbol_info(sig.symbol).visible:
             mt5.symbol_select(sig.symbol, True)
+            _time.sleep(1)  # attende che MT5 carichi i tick per il simbolo appena aggiunto
 
         sym_info = mt5.symbol_info(sig.symbol)
         if sym_info is None:
