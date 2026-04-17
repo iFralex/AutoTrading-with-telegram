@@ -827,33 +827,34 @@ class MT5Trader:
         if is_first_boot:
             time.sleep(MT5_FIRST_BOOT_DELAY)
 
-        init_ok = False
-        last_err = ""
-        for attempt in range(1, MT5_INIT_RETRIES + 1):
-            if attempt > 1:
-                mt5.shutdown()
-                time.sleep(MT5_INIT_RETRY_DELAY)
-            if mt5.initialize(
-                path=terminal_path,
-                portable=True,
-                login=login,
-                password=password,
-                server=server,
-                timeout=MT5_INIT_TIMEOUT_MS,
-            ):
-                init_ok = True
-                break
-            code, msg = mt5.last_error()
-            last_err = f"MT5 init fallito: {msg} (cod.{code})"
-        if not init_ok:
-            raise RuntimeError(last_err)
+        with MT5_LOCK:
+            init_ok = False
+            last_err = ""
+            for attempt in range(1, MT5_INIT_RETRIES + 1):
+                if attempt > 1:
+                    mt5.shutdown()
+                    time.sleep(MT5_INIT_RETRY_DELAY)
+                if mt5.initialize(
+                    path=terminal_path,
+                    portable=True,
+                    login=login,
+                    password=password,
+                    server=server,
+                    timeout=MT5_INIT_TIMEOUT_MS,
+                ):
+                    init_ok = True
+                    break
+                code, msg = mt5.last_error()
+                last_err = f"MT5 init fallito: {msg} (cod.{code})"
+            if not init_ok:
+                raise RuntimeError(last_err)
 
-        try:
-            if mt5.account_info() is None:
-                raise RuntimeError("MT5 avviato ma login non riuscito")
-            return fn(mt5)
-        finally:
-            mt5.shutdown()
+            try:
+                if mt5.account_info() is None:
+                    raise RuntimeError("MT5 avviato ma login non riuscito")
+                return fn(mt5)
+            finally:
+                mt5.shutdown()
 
     async def _run_mt5_async(
         self,
