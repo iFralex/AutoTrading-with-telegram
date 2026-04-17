@@ -3,7 +3,12 @@
  * URL base configurabile via NEXT_PUBLIC_API_URL.
  */
 
-const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "")
+// In production (HTTPS) use relative URLs so the Next.js rewrite proxy is used,
+// avoiding mixed-content blocks. In development fall back to the direct VPS URL.
+const BASE_URL =
+  typeof window !== "undefined" && window.location.protocol === "https:"
+    ? ""
+    : (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "")
 
 // ── Tipi risposta ─────────────────────────────────────────────────────────────
 
