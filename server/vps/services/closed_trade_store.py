@@ -146,6 +146,24 @@ class ClosedTradeStore:
             row = await cursor.fetchone()
         return row[0] if row else 0
 
+    async def get_recent_trades(self, user_id: str, limit: int = 5) -> list[dict]:
+        """Ritorna le ultime N posizioni chiuse con tutti i campi, ordinate dalla più recente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT ticket, symbol, order_type, lots, entry_price, close_price,
+                       sl, tp, profit, reason, open_time, close_time, signal_group_id
+                FROM closed_trades
+                WHERE user_id = ?
+                ORDER BY close_time DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
     async def get_trade_stats(self, user_id: str) -> dict:
         """
         Calcola statistiche complete sulle operazioni chiuse:

@@ -361,6 +361,22 @@ async def simulate_message(
         }
 
 
+@router.get("/recent-trades")
+async def get_recent_trades(
+    user_id: str  = Query(..., description="Telegram user_id"),
+    limit:   int  = Query(5, ge=1, le=50),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Ritorna le ultime N posizioni chiuse con tutti i dati disponibili
+    (ticket, symbol, direction, entry/close price, SL, TP, profit, reason, open/close time).
+    Utile per diagnosticare problemi nel recupero dati da MT5.
+    """
+    closed_trade_store = request.app.state.closed_trade_store
+    trades = await closed_trade_store.get_recent_trades(user_id, limit)
+    return {"trades": trades}
+
+
 @router.get("/trade-stats")
 async def get_trade_stats(
     user_id: str  = Query(..., description="Telegram user_id"),

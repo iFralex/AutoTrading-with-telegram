@@ -543,6 +543,14 @@ export const api = {
       `/api/dashboard/ai-stats?user_id=${encodeURIComponent(userId)}`
     )
   },
+
+  /** Ultime N posizioni chiuse con tutti i dati (per diagnostica). */
+  getRecentTrades(userId: string, limit = 5) {
+    return call<{ trades: ClosedTrade[] }>(
+      "GET",
+      `/api/dashboard/recent-trades?user_id=${encodeURIComponent(userId)}&limit=${limit}`
+    )
+  },
 }
 
 // ── AI Logs types ─────────────────────────────────────────────────────────────
@@ -647,6 +655,22 @@ export interface CumulativePnlPoint {
   ts:         string
   profit:     number
   cumulative: number
+}
+
+export interface ClosedTrade {
+  ticket:          number
+  symbol:          string
+  order_type:      string
+  lots:            number | null
+  entry_price:     number | null
+  close_price:     number | null
+  sl:              number | null
+  tp:              number | null
+  profit:          number | null
+  reason:          string | null
+  open_time:       string | null
+  close_time:      string
+  signal_group_id: string | null
 }
 
 export interface TradeStats {

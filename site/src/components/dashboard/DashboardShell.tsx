@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  History,
 } from "lucide-react"
 import { api, type DashboardUserResponse } from "@/src/lib/api"
 import { OverviewPage }   from "./pages/OverviewPage"
@@ -21,10 +22,11 @@ import { AIPage }         from "./pages/AIPage"
 import { SettingsPage }   from "./pages/SettingsPage"
 import { LogsPage }       from "./pages/LogsPage"
 import { TestPage }       from "./pages/TestPage"
+import { TradesPage }     from "./pages/TradesPage"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test"
+type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades"
 
 const NAV: {
   id: Section
@@ -37,6 +39,7 @@ const NAV: {
   { id: "ai",        label: "AI & Costi",     Icon: Bot },
   { id: "settings",  label: "Configurazione", Icon: Settings2 },
   { id: "logs",      label: "Log Segnali",    Icon: ScrollText },
+  { id: "trades",    label: "Trade Recenti",  Icon: History },
   { id: "test",      label: "Strumenti",      Icon: FlaskConical },
 ]
 
@@ -246,6 +249,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
               {section === "ai"        && <AIPage        userId={data.user.user_id} />}
               {section === "settings"  && <SettingsPage  data={data} onUserUpdate={setData} />}
               {section === "logs"      && <LogsPage      data={data} />}
+              {section === "trades"    && <TradesPage    userId={data.user.user_id} />}
               {section === "test"      && <TestPage      userId={data.user.user_id} />}
             </>
           )}
