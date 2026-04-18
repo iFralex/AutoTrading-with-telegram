@@ -1609,32 +1609,45 @@ class MT5Trader:
         Usato dal PositionWatcher per determinare il motivo della chiusura (TP/SL/manuale).
         """
         def _fn(mt5):
-            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            date_from = now - timedelta(days=7)
-            date_to   = now + timedelta(hours=1)
-            deals = mt5.history_deals_get(date_from, date_to) or []
-            # Cerca deal con entry=OUT (1) appartenente a questa posizione
-            closing = [
-                d for d in deals
-                if d.position_id == position_id and d.entry in (1, 3)  # OUT o INOUT
-            ]
-            if not closing:
-                return None
-            d = closing[-1]  # il più recente
             _reason_map = {
                 0: "CLIENT", 1: "MOBILE", 2: "WEB",
                 3: "EXPERT", 4: "SL",     5: "TP", 6: "SO",
             }
-            return {
-                "ticket":      d.ticket,
-                "position_id": d.position_id,
-                "symbol":      d.symbol,
-                "price":       d.price,
-                "profit":      round(d.profit, 2),
-                "reason":      _reason_map.get(d.reason, str(d.reason)),
-                "close_time":  datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
-            }
+            # Retry dentro la stessa sessione MT5: il deal può comparire
+            # in history qualche secondo dopo la chiusura della posizione.
+            for attempt in range(4):
+                if attempt > 0:
+                    time.sleep(3)
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                date_from = now - timedelta(days=7)
+                date_to   = now + timedelta(hours=1)
+                deals = mt5.history_deals_get(date_from, date_to) or []
+                closing = [
+                    d for d in deals
+                    if d.position_id == position_id and d.entry in (1, 3)
+                ]
+                if closing:
+                    d = closing[-1]
+                    logger.debug(
+                        "get_last_closed_deal_sync pos %d trovato al tentativo %d: "
+                        "entry=%d reason=%d price=%s profit=%s",
+                        position_id, attempt + 1, d.entry, d.reason, d.price, d.profit,
+                    )
+                    return {
+                        "ticket":      d.ticket,
+                        "position_id": d.position_id,
+                        "symbol":      d.symbol,
+                        "price":       d.price,
+                        "profit":      round(d.profit, 2),
+                        "reason":      _reason_map.get(d.reason, str(d.reason)),
+                        "close_time":  datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+                    }
+                logger.warning(
+                    "get_last_closed_deal_sync pos %d: deal non trovato (tentativo %d/4,"
+                    " %d deals totali in history)",
+                    position_id, attempt + 1, len(deals),
+                )
+            return None
 
         try:
             return self._run_mt5(user_id, mt5_login, mt5_password, mt5_server, _fn)

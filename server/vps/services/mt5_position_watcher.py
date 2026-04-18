@@ -286,36 +286,24 @@ class PositionWatcher:
     ) -> dict:
         """
         Costruisce il dizionario dell'evento position_closed.
-        Recupera il deal di chiusura da MT5 per ottenere motivo e prezzo di chiusura.
-        Ritenta fino a 3 volte con backoff per gestire la race condition tra
-        la scomparsa della posizione e la disponibilità del deal nella history MT5.
+        I retry per attendere il deal MT5 sono gestiti internamente da
+        get_last_closed_deal_sync (singola sessione MT5 aperta).
         """
         loop = asyncio.get_event_loop()
 
-        deal = None
-        retry_delays = [2, 4]  # secondi di attesa prima del 2° e 3° tentativo
-        for attempt, delay in enumerate([-1] + retry_delays):
-            if delay >= 0:
-                await asyncio.sleep(delay)
-            deal = await loop.run_in_executor(
-                _executor,
-                self._trader.get_last_closed_deal_sync,
-                creds.user_id,
-                creds.mt5_login,
-                creds.mt5_password,
-                creds.mt5_server,
-                old_pos.ticket,
-            )
-            if deal is not None:
-                break
-            logger.debug(
-                "PositionWatcher utente %s: deal pos #%d non trovato (tentativo %d/3)",
-                creds.user_id, old_pos.ticket, attempt + 1,
-            )
+        deal = await loop.run_in_executor(
+            _executor,
+            self._trader.get_last_closed_deal_sync,
+            creds.user_id,
+            creds.mt5_login,
+            creds.mt5_password,
+            creds.mt5_server,
+            old_pos.ticket,
+        )
 
         if deal is None:
             logger.warning(
-                "PositionWatcher utente %s: deal pos #%d non trovato dopo 3 tentativi — motivo UNKNOWN",
+                "PositionWatcher utente %s: deal pos #%d non trovato — motivo UNKNOWN",
                 creds.user_id, old_pos.ticket,
             )
 
