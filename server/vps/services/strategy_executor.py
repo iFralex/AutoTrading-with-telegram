@@ -274,9 +274,10 @@ def _make_tools(event_type: str) -> list[dict]:
         {
             "name": "get_position_history",
             "description": (
-                "Restituisce lo storico dei deal chiusi degli ultimi N giorni. "
-                "Ogni deal contiene: ticket, position_id, symbol, order_type, lots, price, "
-                "profit, reason (TP/SL/CLIENT/EXPERT), entry (IN/OUT), close_time."
+                "Restituisce lo storico delle posizioni chiuse degli ultimi N giorni. "
+                "Ogni record contiene: ticket, symbol, order_type, lots, entry_price, "
+                "close_price, sl, tp, profit, reason (TP/SL/CLIENT/EXPERT/MOBILE), "
+                "open_time, close_time."
             ),
             "parameters": {
                 "type": "object",
@@ -559,15 +560,20 @@ class StrategyExecutor:
     """
 
     def __init__(self, api_key: str, mt5_trader: MT5Trader) -> None:
-        self._client     = genai.Client(api_key=api_key)
-        self._trader     = mt5_trader
-        self._user_locks: dict[str, asyncio.Lock] = {}
-        self._ai_logs:    AILogStore | None = None
+        self._client            = genai.Client(api_key=api_key)
+        self._trader            = mt5_trader
+        self._user_locks:       dict[str, asyncio.Lock] = {}
+        self._ai_logs:          AILogStore | None = None
+        self._closed_trade_store = None
         logger.info("StrategyExecutor inizializzato (model=%s)", _PRO_MODEL)
 
     def set_ai_log_store(self, store: AILogStore) -> None:
         """Inietta il log store per tracciare ogni chiamata Gemini."""
         self._ai_logs = store
+
+    def set_closed_trade_store(self, store) -> None:
+        """Inietta il ClosedTradeStore per get_position_history."""
+        self._closed_trade_store = store
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         if user_id not in self._user_locks:
@@ -947,6 +953,12 @@ class StrategyExecutor:
                 return await trader.get_pending_orders_list(u, l, p, s, symbol=args.get("symbol"))
 
             if name == "get_position_history":
+                if self._closed_trade_store is not None:
+                    return await self._closed_trade_store.get_position_history(
+                        user_id=u,
+                        days=int(args.get("days", 1)),
+                        symbol=args.get("symbol"),
+                    )
                 return await trader.get_closed_deals(
                     u, l, p, s,
                     days=int(args.get("days", 1)),

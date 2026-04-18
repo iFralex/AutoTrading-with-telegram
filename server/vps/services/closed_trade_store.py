@@ -164,6 +164,32 @@ class ClosedTradeStore:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
+    async def get_position_history(
+        self,
+        user_id: str,
+        days: int = 1,
+        symbol: str | None = None,
+    ) -> list[dict]:
+        """Storico posizioni chiuse per l'agente AI (filtro per giorni e simbolo)."""
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        query = """
+            SELECT ticket, symbol, order_type, lots, entry_price, close_price,
+                   sl, tp, profit, reason, open_time, close_time
+            FROM closed_trades
+            WHERE user_id = ? AND close_time >= ?
+        """
+        params: list = [user_id, cutoff]
+        if symbol:
+            query += " AND symbol = ?"
+            params.append(symbol)
+        query += " ORDER BY close_time DESC"
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
     async def get_trade_stats(self, user_id: str) -> dict:
         """
         Calcola statistiche complete sulle operazioni chiuse:

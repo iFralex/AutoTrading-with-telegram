@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI):
     if gemini_key:
         strategy_executor = StrategyExecutor(api_key=gemini_key, mt5_trader=mt5_trader)
         strategy_executor.set_ai_log_store(ai_log_store)
+        strategy_executor.set_closed_trade_store(closed_trade_store)
         logger.info("StrategyExecutor attivo (Gemini)")
     else:
         strategy_executor = None
