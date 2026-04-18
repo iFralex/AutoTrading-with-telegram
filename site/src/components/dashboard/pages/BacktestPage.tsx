@@ -403,7 +403,10 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
               <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} />
               <Tooltip
                 contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 12 }}
-                formatter={(v: number) => [`${v > 0 ? "+" : ""}${v.toFixed(1)} pip`, "Cumulativo"]}
+                formatter={(v: unknown) => {
+                  const n = typeof v === "number" ? v : parseFloat(String(v))
+                  return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "Cumulativo"] as [string, string]
+                }}
                 labelFormatter={() => ""}
               />
               <Line
@@ -607,9 +610,12 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                     </td>
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDur(t.duration_min)}</td>
                     <td className="px-3 py-2">
-                      {t.ai_approved === null ? <Minus className="w-3 h-3 text-muted-foreground/40" /> :
-                       t.ai_approved === 1 ? <CheckCircle className="w-3 h-3 text-emerald-400" title={t.ai_reason ?? ""} /> :
-                       <XCircle className="w-3 h-3 text-red-400" title={t.ai_reason ?? ""} />}
+                      {t.ai_approved === null
+                        ? <Minus className="w-3 h-3 text-muted-foreground/40" />
+                        : t.ai_approved === 1
+                          ? <span title={t.ai_reason ?? ""}><CheckCircle className="w-3 h-3 text-emerald-400" /></span>
+                          : <span title={t.ai_reason ?? ""}><XCircle className="w-3 h-3 text-red-400" /></span>
+                      }
                     </td>
                   </tr>
                 ))}
