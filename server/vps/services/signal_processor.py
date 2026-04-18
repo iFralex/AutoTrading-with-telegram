@@ -13,9 +13,11 @@ Verifica i model-id esatti su: https://ai.google.dev/gemini-api/docs/models
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -25,6 +27,43 @@ if TYPE_CHECKING:
     from vps.services.ai_log_store import AILogStore
 
 logger = logging.getLogger(__name__)
+
+# ── Flex tier retry ───────────────────────────────────────────────────────────
+
+_FLEX_CONFIG = {
+    "service_tier": "flex",
+    "http_options": {"timeout": 900_000},
+}
+_FLEX_MAX_RETRIES = 8
+_FLEX_BASE_DELAY  = 5.0    # secondi
+_FLEX_MAX_DELAY   = 300.0  # 5 minuti
+
+
+async def flex_retry(coro_factory, max_retries: int = _FLEX_MAX_RETRIES):
+    """Esegue coro_factory() con backoff esponenziale su 429/503 Gemini Flex."""
+    for attempt in range(max_retries):
+        try:
+            return await coro_factory()
+        except Exception as exc:
+            s = str(exc).lower()
+            code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            retryable = (
+                code in (429, 503)
+                or "429" in s or "503" in s
+                or "resource exhausted" in s
+                or "service unavailable" in s
+                or "overloaded" in s
+                or "capacity" in s
+                or "quota" in s
+            )
+            if not retryable or attempt >= max_retries - 1:
+                raise
+            delay = min(_FLEX_BASE_DELAY * (2 ** attempt) + random.uniform(0, 2), _FLEX_MAX_DELAY)
+            logger.warning(
+                "Gemini Flex: %s (tentativo %d/%d) — attesa %.0fs",
+                exc, attempt + 1, max_retries, delay,
+            )
+            await asyncio.sleep(delay)
 
 FLASH_MODEL = os.environ.get("GEMINI_FLASH_MODEL", "gemini-2.5-flash-preview-04-17")
 PRO_MODEL   = os.environ.get("GEMINI_PRO_MODEL",   "gemini-2.5-pro-preview-03-25")
@@ -167,13 +206,19 @@ class SignalProcessor:
         account_info: dict | None = None,
         user_id: str | None = None,
         extraction_instructions: str | None = None,
+        flex: bool = False,
     ) -> list[TradeSignal]:
         """
         Solo extraction Pro — da usare dopo aver già verificato che il
         messaggio è un segnale (es. con detect_signal()).
         """
         try:
-            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
+            signals = await self._extract(
+                message, sizing_strategy, account_info,
+                user_id=user_id,
+                extraction_instructions=extraction_instructions,
+                flex=flex,
+            )
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
             return []
@@ -182,17 +227,21 @@ class SignalProcessor:
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    async def _detect(self, message: str, user_id: str | None = None) -> bool:
+    async def _detect(self, message: str, user_id: str | None = None, flex: bool = False) -> bool:
         from vps.services.ai_log_store import make_timer
         prompt = _DETECTION_PROMPT.format(message=message)
         timer  = make_timer()
         error: str | None = None
         resp   = None
+        kwargs = {"config": _FLEX_CONFIG} if flex else {}
         try:
-            resp = await self._client.aio.models.generate_content(
-                model=FLASH_MODEL,
-                contents=prompt,
-            )
+            async def _call():
+                return await self._client.aio.models.generate_content(
+                    model=FLASH_MODEL,
+                    contents=prompt,
+                    **kwargs,
+                )
+            resp = await (flex_retry(_call) if flex else _call())
         except Exception as exc:
             error = str(exc)
             raise
@@ -229,6 +278,7 @@ class SignalProcessor:
         account_info: dict | None,
         user_id: str | None = None,
         extraction_instructions: str | None = None,
+        flex: bool = False,
     ) -> list[TradeSignal]:
         from vps.services.ai_log_store import make_timer
         sizing_section = _build_sizing_section(sizing_strategy, account_info)
@@ -241,11 +291,15 @@ class SignalProcessor:
         timer = make_timer()
         error: str | None = None
         resp  = None
+        kwargs = {"config": _FLEX_CONFIG} if flex else {}
         try:
-            resp = await self._client.aio.models.generate_content(
-                model=PRO_MODEL,
-                contents=prompt,
-            )
+            async def _call():
+                return await self._client.aio.models.generate_content(
+                    model=PRO_MODEL,
+                    contents=prompt,
+                    **kwargs,
+                )
+            resp = await (flex_retry(_call) if flex else _call())
         except Exception as exc:
             error = str(exc)
             raise

@@ -452,6 +452,152 @@ class MT5Trader:
             finally:
                 mt5.shutdown()
 
+    async def get_historical_bars(
+        self,
+        user_id: str,
+        mt5_login: int,
+        mt5_password: str,
+        mt5_server: str,
+        symbol: str,
+        from_dt: datetime,
+        to_dt: datetime,
+    ) -> dict:
+        """
+        Scarica barre storiche OHLC per un simbolo.
+
+        Tenta i timeframe in ordine M1 → M5 → M15 → H1 e usa il più granulare
+        disponibile. Se il broker non copre l'intero range richiesto, restituisce
+        solo i dati disponibili senza errore.
+
+        Returns:
+            {
+                "bars":      [{"time": unix_ts, "open", "high", "low", "close"}],
+                "timeframe": "M1"|"M5"|"M15"|"H1"|None,
+                "count":     int,
+                "point":     float|None,   # pip minimo del simbolo
+                "period_from": ISO str,
+                "period_to":   ISO str,
+            }
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _executor,
+            self._get_historical_bars_sync,
+            user_id, mt5_login, mt5_password, mt5_server, symbol, from_dt, to_dt,
+        )
+
+    def _get_historical_bars_sync(
+        self,
+        user_id: str,
+        login: int,
+        password: str,
+        server: str,
+        symbol: str,
+        from_dt: datetime,
+        to_dt: datetime,
+    ) -> dict:
+        _empty = {"bars": [], "timeframe": None, "count": 0, "point": None,
+                  "period_from": None, "period_to": None}
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            logger.error("MetaTrader5 non disponibile — impossibile scaricare barre storiche")
+            return _empty
+
+        try:
+            user_dir, is_first_boot = self._ensure_user_dir(user_id)
+        except Exception as exc:
+            logger.error("get_historical_bars: setup dir utente %s: %s", user_id, exc)
+            return _empty
+
+        terminal_path = str(user_dir / "terminal64.exe")
+        _ensure_experts_enabled(user_dir)
+
+        if is_first_boot:
+            _kill_mt5_for_dir(user_dir)
+            _configure_server_via_gui(user_dir, server)
+            time.sleep(3.0)
+
+        # Assicura che le datetime siano naive UTC (MT5 non accetta aware)
+        def _to_naive_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is not None:
+                return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+
+        from_naive = _to_naive_utc(from_dt)
+        to_naive   = _to_naive_utc(to_dt)
+
+        with MT5_LOCK:
+            init_ok = False
+            for attempt in range(1, MT5_INIT_RETRIES + 1):
+                if attempt > 1:
+                    mt5.shutdown()
+                    _kill_mt5_for_dir(user_dir)
+                    _ensure_experts_enabled(user_dir)
+                    time.sleep(MT5_INIT_RETRY_DELAY)
+                if mt5.initialize(
+                    path=terminal_path,
+                    portable=True,
+                    login=login,
+                    password=password,
+                    server=server,
+                    timeout=MT5_INIT_TIMEOUT_MS,
+                ):
+                    init_ok = True
+                    break
+                code, msg = mt5.last_error()
+                logger.warning(
+                    "get_historical_bars utente %s tentativo %d/%d: %s (%s)",
+                    user_id, attempt, MT5_INIT_RETRIES, msg, code,
+                )
+
+            if not init_ok:
+                return _empty
+
+            try:
+                # Recupera punto minimo del simbolo
+                sym_info = mt5.symbol_info(symbol)
+                point = float(sym_info.point) if sym_info else None
+
+                # Prova timeframe dal più granulare al meno
+                tf_order = [
+                    (mt5.TIMEFRAME_M1,  "M1"),
+                    (mt5.TIMEFRAME_M5,  "M5"),
+                    (mt5.TIMEFRAME_M15, "M15"),
+                    (mt5.TIMEFRAME_H1,  "H1"),
+                ]
+                for tf, tf_name in tf_order:
+                    rates = mt5.copy_rates_range(symbol, tf, from_naive, to_naive)
+                    if rates is not None and len(rates) > 0:
+                        bar_list = [
+                            {
+                                "time":  int(b["time"]),
+                                "open":  float(b["open"]),
+                                "high":  float(b["high"]),
+                                "low":   float(b["low"]),
+                                "close": float(b["close"]),
+                            }
+                            for b in rates
+                        ]
+                        logger.info(
+                            "Barre %s %s: %d barre (%s→%s)",
+                            symbol, tf_name, len(bar_list),
+                            bar_list[0]["time"], bar_list[-1]["time"],
+                        )
+                        return {
+                            "bars":        bar_list,
+                            "timeframe":   tf_name,
+                            "count":       len(bar_list),
+                            "point":       point,
+                            "period_from": datetime.fromtimestamp(bar_list[0]["time"],  tz=timezone.utc).isoformat(),
+                            "period_to":   datetime.fromtimestamp(bar_list[-1]["time"], tz=timezone.utc).isoformat(),
+                        }
+
+                logger.warning("Nessuna barra disponibile per %s nel periodo richiesto", symbol)
+                return {**_empty, "point": point}
+            finally:
+                mt5.shutdown()
+
     async def execute_signals(
         self,
         user_id: str,

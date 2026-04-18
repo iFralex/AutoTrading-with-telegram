@@ -1,0 +1,161 @@
+"""
+Route /api/backtest/*
+
+  POST   /api/backtest/run            → avvia un run in background, ritorna run_id
+  GET    /api/backtest/{run_id}       → stato + risultati completi del run
+  GET    /api/backtest/{run_id}/trades → lista dei trade simulati
+  GET    /api/backtest/list           → tutti i run dell'utente (sommario)
+  DELETE /api/backtest/{run_id}       → elimina run e trade associati
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/backtest", tags=["backtest"])
+
+
+# ── Modelli ───────────────────────────────────────────────────────────────────
+
+class RunRequest(BaseModel):
+    user_id:             str
+    group_id:            str
+    group_name:          str | None = None
+
+    mode:                str = Field(..., pattern="^(date_limit|message_count)$")
+    limit_value:         str   # ISO date "2024-01-01" oppure numero "500"
+
+    use_ai:              bool = False
+    sizing_strategy:     str | None = None
+    management_strategy: str | None = None
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post("/run")
+async def start_backtest(body: RunRequest, request: Request):
+    """
+    Avvia un backtest in background.
+    Ritorna immediatamente con { run_id, status: "running" }.
+    """
+    bt_engine = getattr(request.app.state, "backtest_engine", None)
+    bt_store  = getattr(request.app.state, "backtest_store",  None)
+    user_store = request.app.state.user_store
+
+    if bt_engine is None or bt_store is None:
+        raise HTTPException(503, "BacktestEngine non disponibile")
+
+    # Recupera credenziali MT5 dell'utente dal DB
+    user = await user_store.get_user(body.user_id)
+    if user is None:
+        raise HTTPException(404, f"Utente {body.user_id} non trovato")
+
+    mt5_login    = user.get("mt5_login")
+    mt5_password = user.get("mt5_password")
+    mt5_server   = user.get("mt5_server")
+    if not (mt5_login and mt5_password and mt5_server):
+        raise HTTPException(400, "Credenziali MT5 non configurate per questo utente")
+
+    # Blocca il trading live per questo utente durante il backtest
+    backtesting_users: set = request.app.state.backtesting_users
+    if body.user_id in backtesting_users:
+        raise HTTPException(409, "Un backtest è già in corso per questo utente")
+
+    run_id = uuid.uuid4().hex
+
+    # Crea la riga nel DB subito (status=running)
+    await bt_store.create_run(
+        run_id=run_id,
+        user_id=body.user_id,
+        group_id=body.group_id,
+        group_name=body.group_name,
+        mode=body.mode,
+        limit_value=body.limit_value,
+        use_ai=body.use_ai,
+    )
+
+    backtesting_users.add(body.user_id)
+
+    async def _run_and_cleanup():
+        try:
+            await bt_engine.run(
+                run_id=run_id,
+                user_id=body.user_id,
+                group_id=body.group_id,
+                group_name=body.group_name,
+                mode=body.mode,
+                limit_value=body.limit_value,
+                use_ai=body.use_ai,
+                mt5_login=int(mt5_login),
+                mt5_password=mt5_password,
+                mt5_server=mt5_server,
+                sizing_strategy=body.sizing_strategy or user.get("sizing_strategy"),
+                management_strategy=body.management_strategy or user.get("management_strategy"),
+            )
+        finally:
+            backtesting_users.discard(body.user_id)
+
+    asyncio.create_task(_run_and_cleanup())
+
+    return {"run_id": run_id, "status": "running"}
+
+
+@router.get("/list")
+async def list_backtests(user_id: str, request: Request):
+    """Lista di tutti i run per l'utente, dal più recente al più vecchio."""
+    bt_store = getattr(request.app.state, "backtest_store", None)
+    if bt_store is None:
+        raise HTTPException(503, "BacktestStore non disponibile")
+    runs = await bt_store.list_runs(user_id)
+    return {"runs": runs, "total": len(runs)}
+
+
+@router.get("/{run_id}")
+async def get_backtest(run_id: str, request: Request):
+    """Ritorna lo stato e tutti i risultati aggregati di un run."""
+    bt_store = getattr(request.app.state, "backtest_store", None)
+    if bt_store is None:
+        raise HTTPException(503, "BacktestStore non disponibile")
+    run = await bt_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Run {run_id} non trovato")
+    return run
+
+
+@router.get("/{run_id}/trades")
+async def get_backtest_trades(run_id: str, request: Request):
+    """Ritorna tutti i trade simulati del run con dettagli completi."""
+    bt_store = getattr(request.app.state, "backtest_store", None)
+    if bt_store is None:
+        raise HTTPException(503, "BacktestStore non disponibile")
+    run = await bt_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Run {run_id} non trovato")
+    trades = await bt_store.get_trades(run_id)
+    return {"run_id": run_id, "trades": trades, "total": len(trades)}
+
+
+@router.delete("/{run_id}")
+async def delete_backtest(run_id: str, user_id: str, request: Request):
+    """Elimina un run e tutti i suoi trade. Richiede user_id per sicurezza."""
+    bt_store = getattr(request.app.state, "backtest_store", None)
+    if bt_store is None:
+        raise HTTPException(503, "BacktestStore non disponibile")
+    run = await bt_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Run {run_id} non trovato")
+    if run["user_id"] != user_id:
+        raise HTTPException(403, "Non autorizzato")
+    # Non si può eliminare un run ancora in esecuzione
+    backtesting_users: set = request.app.state.backtesting_users
+    if user_id in backtesting_users and run["status"] == "running":
+        raise HTTPException(409, "Impossibile eliminare un backtest in corso")
+    await bt_store.delete_run(run_id)
+    return {"deleted": run_id}

@@ -14,6 +14,7 @@ import {
   ChevronRight,
   AlertCircle,
   History,
+  TrendingUp,
 } from "lucide-react"
 import { api, type DashboardUserResponse } from "@/src/lib/api"
 import { OverviewPage }   from "./pages/OverviewPage"
@@ -23,10 +24,11 @@ import { SettingsPage }   from "./pages/SettingsPage"
 import { LogsPage }       from "./pages/LogsPage"
 import { TestPage }       from "./pages/TestPage"
 import { TradesPage }     from "./pages/TradesPage"
+import { BacktestPage }   from "./pages/BacktestPage"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades"
+type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades" | "backtest"
 
 const NAV: {
   id: Section
@@ -40,6 +42,7 @@ const NAV: {
   { id: "settings",  label: "Configurazione", Icon: Settings2 },
   { id: "logs",      label: "Log Segnali",    Icon: ScrollText },
   { id: "trades",    label: "Trade Recenti",  Icon: History },
+  { id: "backtest",  label: "Backtest",       Icon: TrendingUp },
   { id: "test",      label: "Strumenti",      Icon: FlaskConical },
 ]
 
@@ -250,6 +253,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
               {section === "settings"  && <SettingsPage  data={data} onUserUpdate={setData} />}
               {section === "logs"      && <LogsPage      data={data} />}
               {section === "trades"    && <TradesPage    userId={data.user.user_id} />}
+              {section === "backtest"  && <BacktestPage  userId={data.user.user_id} user={data.user} />}
               {section === "test"      && <TestPage      userId={data.user.user_id} />}
             </>
           )}

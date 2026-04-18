@@ -551,6 +551,42 @@ export const api = {
       `/api/dashboard/recent-trades?user_id=${encodeURIComponent(userId)}&limit=${limit}`
     )
   },
+
+  // ── Backtest ──────────────────────────────────────────────────────────────
+
+  /** Avvia un nuovo run di backtest in background. */
+  startBacktest(payload: BacktestRunRequest) {
+    return call<{ run_id: string; status: string }>("POST", "/api/backtest/run", payload)
+  },
+
+  /** Stato + risultati aggregati di un run (polling). */
+  getBacktest(runId: string) {
+    return call<BacktestRun>("GET", `/api/backtest/${encodeURIComponent(runId)}`)
+  },
+
+  /** Trade simulati di un run. */
+  getBacktestTrades(runId: string) {
+    return call<{ run_id: string; trades: BacktestTrade[]; total: number }>(
+      "GET",
+      `/api/backtest/${encodeURIComponent(runId)}/trades`
+    )
+  },
+
+  /** Lista di tutti i run dell'utente. */
+  listBacktests(userId: string) {
+    return call<{ runs: BacktestRun[]; total: number }>(
+      "GET",
+      `/api/backtest/list?user_id=${encodeURIComponent(userId)}`
+    )
+  },
+
+  /** Elimina un run e i suoi trade. */
+  deleteBacktest(runId: string, userId: string) {
+    return call<{ deleted: string }>(
+      "DELETE",
+      `/api/backtest/${encodeURIComponent(runId)}?user_id=${encodeURIComponent(userId)}`
+    )
+  },
 }
 
 // ── AI Logs types ─────────────────────────────────────────────────────────────
@@ -699,4 +735,132 @@ export interface TradeStats {
   weekly_pnl:              WeeklyPnl[]
   by_symbol:               SymbolTradeStats[]
   cumulative_pnl:          CumulativePnlPoint[]
+}
+
+// ── Backtest types ─────────────────────────────────────────────────────────────
+
+export interface BacktestRunRequest {
+  user_id:              string
+  group_id:             string
+  group_name?:          string | null
+  mode:                 "date_limit" | "message_count"
+  limit_value:          string
+  use_ai:               boolean
+  sizing_strategy?:     string | null
+  management_strategy?: string | null
+}
+
+export interface BacktestSymbolStat {
+  symbol:      string
+  trades:      number
+  wins:        number
+  losses:      number
+  win_rate:    number
+  pnl_pips:    number
+  avg_pips:    number
+  best_pips:   number
+  worst_pips:  number
+}
+
+export interface BacktestSenderStat {
+  sender_name: string
+  messages:    number
+  signals:     number
+  trades:      number
+  wins:        number
+  losses:      number
+  win_rate:    number
+  pnl_pips:    number
+}
+
+export interface BacktestEquityPoint {
+  ts:    string
+  trade: number
+  cumul: number
+}
+
+export interface BacktestRun {
+  id:                      string
+  user_id:                 string
+  group_id:                string
+  group_name:              string | null
+  started_at:              string
+  completed_at:            string | null
+  status:                  string
+  error_msg:               string | null
+
+  mode:                    string
+  limit_value:             string
+  use_ai:                  boolean
+
+  total_messages:          number | null
+  period_from:             string | null
+  period_to:               string | null
+
+  flash_calls:             number
+  flash_cost_usd:          number
+  flash_time_seconds:      number
+  pro_calls:               number
+  pro_cost_usd:            number
+  pro_time_seconds:        number
+  pretrade_calls:          number
+  pretrade_cost_usd:       number
+  total_ai_cost_usd:       number
+  total_ai_seconds:        number
+
+  signals_detected:        number
+  signal_detection_rate:   number
+  signals_extracted:       number
+
+  total_trades:            number
+  trades_filled:           number
+  trades_not_filled:       number
+  trades_open_at_end:      number
+  winning_trades:          number
+  losing_trades:           number
+  win_rate:                number
+  total_pnl_pips:          number
+  avg_pnl_pips:            number
+  best_trade_pips:         number
+  worst_trade_pips:        number
+  profit_factor:           number | null
+  max_drawdown_pips:       number
+  sharpe_ratio:            number | null
+  avg_trade_duration_min:  number
+  avg_rr_ratio:            number | null
+
+  ai_approved:             number
+  ai_rejected:             number
+  ai_modified:             number
+
+  symbol_stats_json:       BacktestSymbolStat[] | null
+  sender_stats_json:       BacktestSenderStat[] | null
+  time_stats_json:         { by_hour: Record<string, { trades: number; wins: number; pnl_pips: number }>; by_weekday: Record<string, { trades: number; wins: number; pnl_pips: number }> } | null
+  bars_coverage_json:      Record<string, { timeframe: string; count: number; period_from: string; period_to: string }> | null
+  equity_curve_json:       BacktestEquityPoint[] | null
+}
+
+export interface BacktestTrade {
+  id:               number
+  run_id:           string
+  msg_id:           number | null
+  msg_ts:           string | null
+  sender_name:      string | null
+  message_text:     string | null
+  symbol:           string | null
+  order_type:       string | null
+  order_mode:       string | null
+  entry_price_raw:  string | null
+  stop_loss:        number | null
+  take_profit:      number | null
+  lot_size:         number | null
+  actual_entry:     number | null
+  actual_entry_ts:  string | null
+  exit_price:       number | null
+  exit_ts:          string | null
+  outcome:          string | null
+  pnl_pips:         number | null
+  duration_min:     number | null
+  ai_approved:      number | null
+  ai_reason:        string | null
 }

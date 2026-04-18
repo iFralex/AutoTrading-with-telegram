@@ -591,6 +591,7 @@ class StrategyExecutor:
         mt5_password: str,
         mt5_server: str,
         signal_message: str = "",
+        flex: bool = False,
     ) -> list[PreTradeDecision]:
         """
         Valuta i segnali in arrivo secondo la strategia dell'utente.
@@ -627,6 +628,7 @@ class StrategyExecutor:
                 event_type="pretrade",
                 pretrade_decisions=decisions,
                 call_type="strategy_pretrade",
+                flex=flex,
             )
 
         # Segnali non gestiti → approvati di default
@@ -656,6 +658,7 @@ class StrategyExecutor:
         mt5_login: int,
         mt5_password: str,
         mt5_server: str,
+        flex: bool = False,
     ) -> StrategyResult:
         """
         Reagisce a un evento MT5 (posizione chiusa/aperta/modificata).
@@ -674,6 +677,7 @@ class StrategyExecutor:
                 ctx=ctx,
                 event_type=event_type,
                 pretrade_decisions=None,
+                flex=flex,
             )
 
         result.event_type = event_type
@@ -689,6 +693,7 @@ class StrategyExecutor:
         event_type: str,
         pretrade_decisions: dict[int, PreTradeDecision] | None,
         call_type: str = "strategy_event",
+        flex: bool = False,
     ) -> StrategyResult:
         """
         Ciclo principale: invia il prompt a Gemini, esegue i tool call in loop
@@ -737,15 +742,24 @@ class StrategyExecutor:
                 + "\n".join(f"  {line}" for line in prefetch_lines)
             )
 
+        from vps.services.signal_processor import flex_retry as _flex_retry
+
         tools     = _make_tools(event_type)
         tool_log: list[dict] = []
 
         system_prompt = _build_system_prompt(management_strategy)
+        flex_extra = {"service_tier": "flex", "http_options": {"timeout": 900_000}} if flex else {}
         config = types.GenerateContentConfig(
             system_instruction=system_prompt,
             tools=tools,  # type: ignore[arg-type]
+            **flex_extra,
         )
         chat = self._client.aio.chats.create(model=_PRO_MODEL, config=config)
+
+        async def _send(msg) -> Any:
+            async def _do():
+                return await chat.send_message(msg)
+            return await (_flex_retry(_do) if flex else _do())
 
         timer = make_timer()
         total_prompt_tokens:     int = 0
@@ -762,7 +776,7 @@ class StrategyExecutor:
 
         try:
             try:
-                response = await chat.send_message(event_prompt)
+                response = await _send(event_prompt)
             except Exception as exc:
                 logger.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
                 error_str = str(exc)
@@ -809,7 +823,7 @@ class StrategyExecutor:
 
                 # Manda i risultati dei tool back all'AI
                 try:
-                    response = await chat.send_message(fn_response_parts)
+                    response = await _send(fn_response_parts)
                 except Exception as exc:
                     logger.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
                     error_str = str(exc)

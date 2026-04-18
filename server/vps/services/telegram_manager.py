@@ -195,6 +195,32 @@ class TelegramManager:
     def active_user_ids(self) -> list[str]:
         return list(self._clients.keys())
 
+    def get_history(
+        self,
+        user_id: str,
+        group_id: int,
+        limit: int | None = None,
+        until_date=None,
+        on_progress=None,
+    ) -> list[dict]:
+        """
+        Recupera messaggi storici da un gruppo Telegram.
+
+        Args:
+            user_id:    ID utente registrato nel manager.
+            group_id:   ID del gruppo/canale da cui scaricare.
+            limit:      Numero massimo di messaggi (None = fino a until_date).
+            until_date: datetime (timezone-aware UTC) — scarica messaggi fino a questa data.
+            on_progress: callable(fetched: int) invocato ogni 100 messaggi.
+
+        Returns:
+            Lista di dict [{id, date_iso, sender_name, text}] ordinati dal più vecchio.
+        """
+        return self._call(
+            self._async_get_history(user_id, group_id, limit, until_date, on_progress),
+            timeout=3600,
+        )
+
     # ── Internals ────────────────────────────────────────────────────────────
 
     def _call(self, coro, timeout: int = 30):
@@ -299,6 +325,70 @@ class TelegramManager:
             "phone": me.phone or entry["phone"],
             "login_key": login_key,
         }
+
+    async def _async_get_history(
+        self,
+        user_id: str,
+        group_id: int,
+        limit: int | None,
+        until_date,
+        on_progress,
+    ) -> list[dict]:
+        client = self._clients.get(user_id)
+        if client is None:
+            raise ValueError(f"Utente {user_id} non connesso nel TelegramManager")
+
+        messages: list[dict] = []
+        fetched = 0
+
+        # Telethon iter_messages: offset_date = scarica messaggi PRIMA di quella data
+        # reverse=False → dal più recente al più vecchio (poi invertiamo alla fine)
+        async for msg in client.iter_messages(
+            group_id,
+            limit=limit,
+            offset_date=until_date,
+            reverse=False,
+        ):
+            text = getattr(msg, "text", None) or getattr(msg, "message", None) or ""
+            if not text:
+                continue
+
+            sender = await msg.get_sender()
+            if sender is None:
+                sender_name = "?"
+            else:
+                sender_name = (
+                    getattr(sender, "first_name", None)
+                    or getattr(sender, "title", None)
+                    or "?"
+                )
+
+            date = getattr(msg, "date", None)
+            date_iso = date.isoformat() if date else None
+
+            messages.append({
+                "id":          msg.id,
+                "date_iso":    date_iso,
+                "sender_name": sender_name,
+                "text":        text,
+            })
+            fetched += 1
+
+            if on_progress and fetched % 100 == 0:
+                try:
+                    on_progress(fetched)
+                except Exception:
+                    pass
+
+            # FloodWait è gestito automaticamente da Telethon con wait_time
+            # ma aggiungiamo un piccolo throttle per non stressare i rate limit
+            if fetched % 200 == 0:
+                await asyncio.sleep(0.5)
+
+        # Dal più recente al più vecchio → invertiamo per ordine cronologico
+        messages.reverse()
+        logger.info("Storico Telegram utente %s: %d messaggi scaricati", user_id, len(messages))
+        return messages
 
     async def _async_get_groups(self, login_key: str) -> list[dict]:
         entry = self._pending.get(login_key)

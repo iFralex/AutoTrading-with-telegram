@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from vps.api.routes.setup import router as setup_router
 from vps.api.routes.dashboard import router as dashboard_router
+from vps.api.routes.backtest import router as backtest_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
@@ -43,6 +44,8 @@ from vps.services.strategy_executor import StrategyExecutor, PreTradeDecision
 from vps.services.strategy_log_store import StrategyLogStore
 from vps.services.closed_trade_store import ClosedTradeStore
 from vps.services.ai_log_store import AILogStore
+from vps.services.backtest_store import BacktestStore
+from vps.services.backtest_engine import BacktestEngine
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -139,6 +142,28 @@ async def lifespan(app: FastAPI):
         strategy_executor = None
         logger.warning("StrategyExecutor non attivo (GEMINI_API_KEY mancante)")
 
+    # Backtest store + engine
+    backtest_store = BacktestStore(_db_path)
+    await backtest_store.init()
+    app.state.backtest_store = backtest_store
+
+    if signal_processor is not None:
+        backtest_engine = BacktestEngine(
+            telegram_manager=None,   # verrà sostituito dopo la creazione del TelegramManager
+            signal_processor=signal_processor,
+            mt5_trader=mt5_trader,
+            backtest_store=backtest_store,
+            strategy_executor=strategy_executor,
+        )
+        app.state.backtest_engine = backtest_engine
+        logger.info("BacktestEngine attivo")
+    else:
+        app.state.backtest_engine = None
+        logger.warning("BacktestEngine non attivo (GEMINI_API_KEY mancante)")
+
+    # Utenti attualmente in backtest: blocca il trading live durante la simulazione
+    app.state.backtesting_users: set[str] = set()
+
     # Range order watcher
     range_watcher = RangeOrderWatcher()
     range_watcher.start()
@@ -224,10 +249,51 @@ async def lifespan(app: FastAPI):
     position_watcher.start()
 
     # Telegram manager
-    async def on_message(user_id: str, message: str, raw_event, sender) -> None:
+    async def on_message(
+        user_id: str,
+        message: str,
+        raw_event,
+        sender,
+        *,
+        _is_forwarded: bool = False,
+    ) -> None:
+        import asyncio
         import uuid
         from dataclasses import asdict
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "title", "?")
+
+        # Blocca il trading live se l'utente è in backtest
+        if user_id in app.state.backtesting_users:
+            logger.info(
+                "Utente %s in backtest — messaggio live ignorato per evitare ordini reali",
+                user_id,
+            )
+            return
+
+        # Se il messaggio arriva dalla sessione Telegram propria dell'utente (non da un link),
+        # e l'utente è target di qualche link, lo ignoriamo: riceverà solo i messaggi propagati.
+        if not _is_forwarded:
+            try:
+                if await store.is_link_target(user_id):
+                    logger.debug(
+                        "Utente %s è link-target — messaggio organico ignorato (arriverà via propagazione)",
+                        user_id,
+                    )
+                    return
+            except Exception as exc:
+                logger.warning("Errore controllo is_link_target per utente %s: %s", user_id, exc)
+
+        # Propaga il messaggio agli utenti collegati (ciascuno processerà con le proprie impostazioni)
+        if not _is_forwarded:
+            try:
+                linked_ids = await store.get_linked_users(user_id)
+                for linked_id in linked_ids:
+                    logger.info("Propagazione segnale da %s a utente collegato %s", user_id, linked_id)
+                    asyncio.get_event_loop().create_task(
+                        on_message(linked_id, message, raw_event, sender, _is_forwarded=True)
+                    )
+            except Exception as exc:
+                logger.warning("Errore propagazione link segnali per utente %s: %s", user_id, exc)
         logger.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
         signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
 
@@ -490,12 +556,38 @@ async def lifespan(app: FastAPI):
                     mt5_server   = mt5_server,
                 ))
 
-    async def on_message_deleted(user_id: str, deleted_ids: list[int]) -> None:
+    async def on_message_deleted(
+        user_id: str,
+        deleted_ids: list[int],
+        *,
+        _is_forwarded: bool = False,
+    ) -> None:
         """
         Callback invocato quando uno o più messaggi vengono eliminati dal gruppo.
         Per ogni message_id eliminato: verifica se era un segnale, recupera le
         posizioni correlate e delega all'AI tramite deletion_strategy.
         """
+        # Ignora eventi di eliminazione organici per gli utenti che sono link-target
+        if not _is_forwarded:
+            try:
+                if await store.is_link_target(user_id):
+                    return
+            except Exception as exc:
+                logger.warning("Errore controllo is_link_target (delete) per utente %s: %s", user_id, exc)
+
+        # Propaga l'eliminazione agli utenti collegati
+        if not _is_forwarded:
+            try:
+                import asyncio
+                linked_ids = await store.get_linked_users(user_id)
+                for linked_id in linked_ids:
+                    logger.info("Propagazione eliminazione da %s a utente collegato %s", user_id, linked_id)
+                    asyncio.get_event_loop().create_task(
+                        on_message_deleted(linked_id, deleted_ids, _is_forwarded=True)
+                    )
+            except Exception as exc:
+                logger.warning("Errore propagazione eliminazione link per utente %s: %s", user_id, exc)
+
         if strategy_executor is None:
             return
 
@@ -589,6 +681,10 @@ async def lifespan(app: FastAPI):
     app.state.telegram_manager = tm
 
     # Ripristina sessioni al boot
+    # Inietta il TelegramManager nel BacktestEngine ora che è disponibile
+    if app.state.backtest_engine is not None:
+        app.state.backtest_engine._tm = tm
+
     active_users = await store.get_active_users()
     if active_users:
         logger.info("Ripristino %d utenti attivi...", len(active_users))
@@ -634,6 +730,7 @@ app.add_middleware(
 
 app.include_router(setup_router)
 app.include_router(dashboard_router)
+app.include_router(backtest_router)
 
 
 @app.get("/health")
