@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """
 
+_CREATE_LINKS_TABLE = """
+CREATE TABLE IF NOT EXISTS signal_links (
+    source_user_id  TEXT NOT NULL,
+    target_user_id  TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (source_user_id, target_user_id)
+)
+"""
+
 # Migrations: colonne aggiunte dopo la versione iniziale dello schema
 _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN sizing_strategy TEXT",
@@ -100,6 +109,7 @@ class UserStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
+            await db.execute(_CREATE_LINKS_TABLE)
             await db.commit()
             # Migration incrementali: ignora errori se la colonna esiste già
             for sql in _MIGRATIONS:
@@ -358,3 +368,62 @@ class UserStore:
             "active":                   bool(row["active"]),
             "created_at":               row["created_at"],
         }
+
+    # ── Signal links ──────────────────────────────────────────────────────────
+
+    async def is_link_target(self, user_id: str) -> bool:
+        """Ritorna True se user_id riceve segnali da almeno un altro utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM signal_links WHERE target_user_id = ? LIMIT 1",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+        return row is not None
+
+    async def add_link(self, source_user_id: str, target_user_id: str) -> None:
+        """Associa i segnali di source_user_id a target_user_id."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO signal_links (source_user_id, target_user_id) VALUES (?, ?)",
+                (source_user_id, target_user_id),
+            )
+            await db.commit()
+
+    async def remove_link(self, source_user_id: str, target_user_id: str) -> None:
+        """Rimuove l'associazione segnali tra i due utenti."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "DELETE FROM signal_links WHERE source_user_id = ? AND target_user_id = ?",
+                (source_user_id, target_user_id),
+            )
+            await db.commit()
+
+    async def get_linked_users(self, source_user_id: str) -> list[str]:
+        """Ritorna la lista di user_id che ricevono i segnali di source_user_id."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "SELECT target_user_id FROM signal_links WHERE source_user_id = ?",
+                (source_user_id,),
+            )
+            rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def list_all_links(self) -> list[dict]:
+        """Ritorna tutti i link segnale presenti nel DB."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT source_user_id, target_user_id, created_at FROM signal_links ORDER BY created_at"
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def delete_all_links_for_user(self, user_id: str) -> None:
+        """Rimuove tutti i link (come sorgente o destinazione) per un utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "DELETE FROM signal_links WHERE source_user_id = ? OR target_user_id = ?",
+                (user_id, user_id),
+            )
+            await db.commit()
