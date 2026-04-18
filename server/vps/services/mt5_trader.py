@@ -1614,21 +1614,14 @@ class MT5Trader:
                 0: "CLIENT", 1: "MOBILE", 2: "WEB",
                 3: "EXPERT", 4: "SL",     5: "TP", 6: "SO",
             }
-            # Retry dentro la stessa sessione MT5: il deal può comparire
-            # in history qualche secondo dopo la chiusura della posizione.
-            # MT5 Python su Windows interpreta i datetime naïve come ora LOCALE:
-            # usare datetime.now() (locale) non datetime.utcnow() (UTC).
+            # Usa history_deals_get(position=...) che interroga il broker
+            # direttamente per position_id, senza bisogno di date range.
+            # Retry perché il deal può comparire qualche secondo dopo la chiusura.
             for attempt in range(4):
                 if attempt > 0:
                     time.sleep(3)
-                now = datetime.now()  # ora locale — MT5 si aspetta ora locale
-                date_from = now - timedelta(days=7)
-                date_to   = now + timedelta(hours=1)
-                deals = mt5.history_deals_get(date_from, date_to) or []
-                closing = [
-                    d for d in deals
-                    if d.position_id == position_id and d.entry in (1, 3)
-                ]
+                deals = mt5.history_deals_get(position=position_id) or []
+                closing = [d for d in deals if d.entry in (1, 3)]
                 if closing:
                     d = closing[-1]
                     logger.debug(
@@ -1647,7 +1640,7 @@ class MT5Trader:
                     }
                 logger.warning(
                     "get_last_closed_deal_sync pos %d: deal non trovato (tentativo %d/4,"
-                    " %d deals totali in history)",
+                    " %d deals per questa posizione)",
                     position_id, attempt + 1, len(deals),
                 )
             return None
