@@ -920,9 +920,10 @@ class MT5Trader:
         nel periodo [date_from, date_to].
         """
         def _fn(mt5):
-            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
-            _from = date_from.replace(tzinfo=None) if date_from.tzinfo else date_from
-            _to   = date_to.replace(tzinfo=None)   if date_to.tzinfo   else date_to
+            # MT5 Python interpreta i datetime naïve come ora locale del sistema;
+            # convertiamo in locale rimuovendo tzinfo dopo la conversione UTC→locale.
+            _from = date_from.astimezone().replace(tzinfo=None) if date_from.tzinfo else date_from
+            _to   = date_to.astimezone().replace(tzinfo=None)   if date_to.tzinfo   else date_to
             deals = mt5.history_deals_get(_from, _to)
             if deals is None:
                 return 0.0
@@ -1138,8 +1139,8 @@ class MT5Trader:
         lots, price, profit, reason, close_time.
         """
         def _fn(mt5):
-            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # MT5 Python interpreta i datetime naïve come ora locale del sistema
+            now = datetime.now()
             date_from = now - timedelta(days=days)
             date_to   = now + timedelta(hours=1)
 
@@ -1615,10 +1616,12 @@ class MT5Trader:
             }
             # Retry dentro la stessa sessione MT5: il deal può comparire
             # in history qualche secondo dopo la chiusura della posizione.
+            # MT5 Python su Windows interpreta i datetime naïve come ora LOCALE:
+            # usare datetime.now() (locale) non datetime.utcnow() (UTC).
             for attempt in range(4):
                 if attempt > 0:
                     time.sleep(3)
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                now = datetime.now()  # ora locale — MT5 si aspetta ora locale
                 date_from = now - timedelta(days=7)
                 date_to   = now + timedelta(hours=1)
                 deals = mt5.history_deals_get(date_from, date_to) or []
