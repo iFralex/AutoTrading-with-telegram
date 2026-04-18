@@ -920,7 +920,10 @@ class MT5Trader:
         nel periodo [date_from, date_to].
         """
         def _fn(mt5):
-            deals = mt5.history_deals_get(date_from, date_to)
+            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
+            _from = date_from.replace(tzinfo=None) if date_from.tzinfo else date_from
+            _to   = date_to.replace(tzinfo=None)   if date_to.tzinfo   else date_to
+            deals = mt5.history_deals_get(_from, _to)
             if deals is None:
                 return 0.0
             total = 0.0
@@ -1135,8 +1138,10 @@ class MT5Trader:
         lots, price, profit, reason, close_time.
         """
         def _fn(mt5):
-            date_from = datetime.now(timezone.utc) - timedelta(days=days)
-            date_to   = datetime.now(timezone.utc) + timedelta(hours=1)
+            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            date_from = now - timedelta(days=days)
+            date_to   = now + timedelta(hours=1)
 
             if symbol:
                 deals = mt5.history_deals_get(date_from, date_to, group=symbol) or []
@@ -1604,8 +1609,10 @@ class MT5Trader:
         Usato dal PositionWatcher per determinare il motivo della chiusura (TP/SL/manuale).
         """
         def _fn(mt5):
-            date_from = datetime.now(timezone.utc) - timedelta(days=7)
-            date_to   = datetime.now(timezone.utc) + timedelta(hours=1)
+            # MT5 Python non gestisce datetime timezone-aware: usare naive UTC
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            date_from = now - timedelta(days=7)
+            date_to   = now + timedelta(hours=1)
             deals = mt5.history_deals_get(date_from, date_to) or []
             # Cerca deal con entry=OUT (1) appartenente a questa posizione
             closing = [
