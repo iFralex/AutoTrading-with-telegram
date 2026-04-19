@@ -1,10 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { api, type DashboardUserResponse, type UserGroup } from "@/src/lib/api"
+import { api, type DashboardUserResponse, type UserGroup, type Group } from "@/src/lib/api"
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
-  Plus, Trash2, Radio,
+  Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw,
 } from "lucide-react"
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -55,7 +55,6 @@ export function SettingsPage({
         {/* Aggiungi nuovo gruppo */}
         <AddGroupCard
           userId={user.user_id}
-          existingIds={user.groups.map(g => g.group_id)}
           onAdded={addGroup}
         />
       </div>
@@ -231,43 +230,61 @@ function GroupCard({
 
 function AddGroupCard({
   userId,
-  existingIds,
   onAdded,
 }: {
   userId: string
-  existingIds: number[]
   onAdded: (g: UserGroup) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [idVal, setIdVal] = useState("")
-  const [nameVal, setNameVal] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [open, setOpen]           = useState(false)
+  const [groups, setGroups]       = useState<Group[]>([])
+  const [fetchLoading, setFL]     = useState(false)
+  const [fetchErr, setFetchErr]   = useState<string | null>(null)
+  const [search, setSearch]       = useState("")
+  const [selected, setSelected]   = useState<Group | null>(null)
+  const [addLoading, setAddL]     = useState(false)
+  const [addErr, setAddErr]       = useState<string | null>(null)
 
-  const submit = async () => {
-    const gid = parseInt(idVal, 10)
-    if (isNaN(gid)) { setErr("L'ID deve essere un numero"); return }
-    if (!nameVal.trim()) { setErr("Il nome non può essere vuoto"); return }
-    if (existingIds.includes(gid)) { setErr("Questo gruppo è già presente"); return }
-    setLoading(true); setErr(null)
+  const openPicker = async () => {
+    setOpen(true)
+    setSelected(null)
+    setSearch("")
+    setAddErr(null)
+    setFL(true)
+    setFetchErr(null)
     try {
-      await api.addUserGroup(userId, gid, nameVal.trim())
-      // Fetch updated groups list
-      const res = await api.getUserGroups(userId)
-      const newGroup = res.groups.find(g => g.group_id === gid)
-      if (newGroup) onAdded(newGroup)
-      setOpen(false); setIdVal(""); setNameVal("")
+      const res = await api.getAvailableGroups(userId)
+      setGroups(res.groups)
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Errore")
+      setFetchErr(e instanceof Error ? e.message : "Errore caricamento")
     } finally {
-      setLoading(false)
+      setFL(false)
     }
   }
+
+  const confirm = async () => {
+    if (!selected) return
+    setAddL(true); setAddErr(null)
+    try {
+      await api.addUserGroup(userId, parseInt(selected.id, 10), selected.name)
+      const res = await api.getUserGroups(userId)
+      const newGroup = res.groups.find(g => String(g.group_id) === selected.id)
+      if (newGroup) onAdded(newGroup)
+      setOpen(false)
+    } catch (e: unknown) {
+      setAddErr(e instanceof Error ? e.message : "Errore")
+    } finally {
+      setAddL(false)
+    }
+  }
+
+  const filtered = groups.filter(g =>
+    g.name.toLowerCase().includes(search.toLowerCase())
+  )
 
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={openPicker}
         className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/[0.1] text-muted-foreground hover:border-indigo-500/30 hover:text-indigo-300 hover:bg-indigo-600/5 transition-all text-sm font-medium"
       >
         <Plus className="w-4 h-4" />
@@ -278,38 +295,112 @@ function AddGroupCard({
 
   return (
     <div className="rounded-xl border border-indigo-500/20 bg-indigo-600/5 p-5 space-y-3">
-      <h3 className="text-sm font-semibold text-foreground">Nuovo canale / gruppo</h3>
-      <div className="space-y-2">
-        <input
-          type="text"
-          value={nameVal}
-          onChange={e => setNameVal(e.target.value)}
-          placeholder="Nome canale (es: Forex Signals Pro)"
-          className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 placeholder:text-muted-foreground/30 transition-colors"
-        />
-        <input
-          type="text"
-          value={idVal}
-          onChange={e => setIdVal(e.target.value)}
-          placeholder="ID Telegram (es: -1001234567890)"
-          className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 placeholder:text-muted-foreground/30 transition-colors"
-        />
-      </div>
-      {err && (
-        <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{err}</p>
-      )}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Seleziona canale / gruppo</h3>
         <button
-          onClick={submit}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+          onClick={() => setOpen(false)}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Loading state */}
+      {fetchLoading && (
+        <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-xs">Caricamento canali…</span>
+        </div>
+      )}
+
+      {/* Fetch error */}
+      {!fetchLoading && fetchErr && (
+        <div className="space-y-2">
+          <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{fetchErr}</p>
+          <button
+            onClick={openPicker}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" /> Riprova
+          </button>
+        </div>
+      )}
+
+      {/* Group list */}
+      {!fetchLoading && !fetchErr && (
+        <>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Cerca canali e gruppi…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-sm bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all placeholder:text-muted-foreground/40"
+            />
+          </div>
+
+          <div className="space-y-1 max-h-56 overflow-y-auto -mx-1 px-1">
+            {filtered.map(g => {
+              const isSelected = selected?.id === g.id
+              return (
+                <button
+                  key={g.id}
+                  onClick={() => setSelected(isSelected ? null : g)}
+                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border ${
+                    isSelected
+                      ? "bg-indigo-600/10 border-indigo-500/25 text-foreground"
+                      : "border-transparent hover:bg-white/[0.04] text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <div className={`flex w-8 h-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                    isSelected ? "bg-indigo-600/20" : "bg-white/[0.06]"
+                  }`}>
+                    {g.type === "channel"
+                      ? <Hash className={`w-3.5 h-3.5 ${isSelected ? "text-indigo-400" : "text-muted-foreground"}`} />
+                      : <Users className={`w-3.5 h-3.5 ${isSelected ? "text-indigo-400" : "text-muted-foreground"}`} />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-medium truncate ${isSelected ? "text-foreground" : ""}`}>{g.name}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {g.members > 0 ? `${g.members.toLocaleString("it-IT")} membri · ` : ""}
+                      {g.type === "channel" ? "Canale" : "Gruppo"}
+                    </p>
+                  </div>
+                  {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
+                </button>
+              )
+            })}
+            {filtered.length === 0 && (
+              <p className="text-center text-xs text-muted-foreground py-6">
+                {search ? `Nessun risultato per "${search}"` : "Nessun canale disponibile"}
+              </p>
+            )}
+          </div>
+
+          <p className="text-[10px] text-muted-foreground text-center">
+            {groups.length} {groups.length === 1 ? "canale trovato" : "canali trovati"}
+          </p>
+        </>
+      )}
+
+      {addErr && (
+        <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{addErr}</p>
+      )}
+
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={confirm}
+          disabled={!selected || addLoading}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
         >
           <Check className="w-3 h-3" />
-          {loading ? "Aggiunta…" : "Aggiungi"}
+          {addLoading ? "Aggiunta…" : "Aggiungi"}
         </button>
         <button
-          onClick={() => { setOpen(false); setErr(null) }}
-          disabled={loading}
+          onClick={() => setOpen(false)}
+          disabled={addLoading}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50"
         >
           <X className="w-3 h-3" />

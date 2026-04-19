@@ -122,6 +122,34 @@ async def list_user_groups(
     return {"groups": groups}
 
 
+@router.get("/user/{user_id}/available-groups")
+async def list_available_groups(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Ritorna i gruppi/canali Telegram a cui è iscritto l'utente,
+    usando il client Telethon attivo, escludendo quelli già configurati.
+    """
+    store = request.app.state.user_store
+    tm    = request.app.state.telegram_manager
+
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    try:
+        all_groups = tm.get_groups_for_user(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    configured_ids = {str(g["group_id"]) for g in (user.get("groups") or [])}
+    available = [g for g in all_groups if g["id"] not in configured_ids]
+    return {"groups": available}
+
+
 class AddGroupBody(BaseModel):
     group_id:   int
     group_name: str = Field(..., min_length=1)

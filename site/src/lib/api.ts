@@ -518,6 +518,14 @@ export const api = {
 
   // ── Gestione gruppi multi-canale ──────────────────────────────────────────
 
+  /** Ritorna i gruppi/canali Telegram disponibili (non ancora configurati) per un utente. */
+  getAvailableGroups(userId: string) {
+    return call<{ groups: Group[] }>(
+      "GET",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/available-groups`
+    )
+  },
+
   /** Ritorna tutti i gruppi/canali configurati per un utente. */
   getUserGroups(userId: string) {
     return call<{ groups: UserGroup[] }>(

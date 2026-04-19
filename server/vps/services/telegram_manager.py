@@ -160,6 +160,18 @@ class TelegramManager:
         """
         return self._call(self._async_get_groups(login_key), timeout=60)
 
+    def get_groups_for_user(self, user_id: str) -> list[dict]:
+        """
+        Ritorna i gruppi/canali usando il client attivo dell'utente già registrato.
+
+        Returns:
+            [{"id": str, "name": str, "type": "channel"|"group", "members": int}]
+
+        Raises:
+            ValueError  se l'utente non ha un client attivo
+        """
+        return self._call(self._async_get_groups_for_user(user_id), timeout=60)
+
     # ── Gestione utenti ──────────────────────────────────────────────────────
 
     def add_user(
@@ -418,8 +430,17 @@ class TelegramManager:
             raise ValueError("Sessione di login non trovata")
 
         client: TelegramClient = entry["client"]
-        groups: list[dict] = []
+        return await self._fetch_dialogs_as_groups(client)
 
+    async def _async_get_groups_for_user(self, user_id: str) -> list[dict]:
+        client = self._clients.get(user_id)
+        if client is None:
+            raise ValueError(f"Nessun client attivo per l'utente {user_id}")
+        return await self._fetch_dialogs_as_groups(client)
+
+    @staticmethod
+    async def _fetch_dialogs_as_groups(client: "TelegramClient") -> list[dict]:
+        groups: list[dict] = []
         async for dialog in client.iter_dialogs():
             if not (dialog.is_group or dialog.is_channel):
                 continue
@@ -432,7 +453,6 @@ class TelegramManager:
                     "members": members,
                 }
             )
-
         groups.sort(key=lambda g: g["members"], reverse=True)
         return groups
 
