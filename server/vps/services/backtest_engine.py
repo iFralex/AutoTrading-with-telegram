@@ -240,7 +240,8 @@ def _simulate_trade(
 
 # ── Report aggregato ──────────────────────────────────────────────────────────
 
-def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict) -> dict:
+def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
+                       starting_balance_usd: float = 1000.0) -> dict:
     """Calcola tutte le statistiche aggregate dal set di trade simulati."""
     filled = [t for t in trades if t["outcome"] not in ("not_filled",)]
     closed = [t for t in filled if t["outcome"] in ("TP", "SL")]
@@ -304,18 +305,43 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict)
                 rr_list.append(tp_dist / sl_dist)
     avg_rr = round(statistics.mean(rr_list), 2) if rr_list else None
 
-    # Equity curve (cronologica)
+    # Equity curve (cronologica) — pips + USD
     sorted_trades = sorted(closed, key=lambda t: t.get("exit_ts") or "")
     cumul = 0.0
+    cumul_usd = starting_balance_usd
     equity_curve = []
     for t in sorted_trades:
         p = t["pnl_pips"] or 0
         cumul += p
-        equity_curve.append({
+        point: dict = {
             "ts":    t.get("exit_ts"),
             "trade": round(p, 1),
             "cumul": round(cumul, 1),
-        })
+        }
+        u = t.get("pnl_usd")
+        if u is not None:
+            cumul_usd += u
+            point["trade_usd"] = round(u, 2)
+            point["cumul_usd"] = round(cumul_usd, 2)
+        equity_curve.append(point)
+
+    # Statistiche monetarie
+    amounts = [t["pnl_usd"] for t in closed if t.get("pnl_usd") is not None]
+    total_usd = round(sum(amounts), 2)       if amounts else None
+    avg_usd   = round(statistics.mean(amounts), 2) if amounts else None
+    best_usd  = round(max(amounts), 2)       if amounts else None
+    worst_usd = round(min(amounts), 2)       if amounts else None
+    final_bal = round(starting_balance_usd + (total_usd or 0), 2) if amounts else None
+    dd_usd_bal = starting_balance_usd
+    dd_usd_peak = starting_balance_usd
+    dd_usd_max  = 0.0
+    for t in sorted_trades:
+        u = t.get("pnl_usd")
+        if u is not None:
+            dd_usd_bal  += u
+            dd_usd_peak  = max(dd_usd_peak, dd_usd_bal)
+            dd_usd_max   = max(dd_usd_max, dd_usd_peak - dd_usd_bal)
+    max_dd_usd = round(dd_usd_max, 2) if amounts else None
 
     # ── Per simbolo ───────────────────────────────────────────────────────────
     symbol_map: dict[str, dict] = {}
@@ -425,6 +451,13 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict)
         "sharpe_ratio":           sharpe,
         "avg_trade_duration_min": avg_dur,
         "avg_rr_ratio":           avg_rr,
+        "starting_balance_usd":   starting_balance_usd,
+        "total_pnl_usd":          total_usd,
+        "avg_pnl_usd":            avg_usd,
+        "best_trade_usd":         best_usd,
+        "worst_trade_usd":        worst_usd,
+        "max_drawdown_usd":       max_dd_usd,
+        "final_balance_usd":      final_bal,
         "ai_approved":            ai_approved,
         "ai_rejected":            ai_rejected,
         "ai_modified":            ai_modified,
@@ -470,6 +503,7 @@ class BacktestEngine:
         mt5_server: str,
         sizing_strategy: str | None,
         management_strategy: str | None,
+        starting_balance_usd: float = 1000.0,
     ) -> None:
         """
         Esegue il backtest completo in background.
@@ -488,6 +522,7 @@ class BacktestEngine:
                 mt5_login=mt5_login, mt5_password=mt5_password, mt5_server=mt5_server,
                 sizing_strategy=sizing_strategy,
                 management_strategy=management_strategy,
+                starting_balance_usd=starting_balance_usd,
                 t0=t0,
             )
         except Exception as exc:
@@ -497,9 +532,12 @@ class BacktestEngine:
     async def _run_inner(self, *, run_id, user_id, group_id, group_name,
                          mode, limit_value, use_ai,
                          mt5_login, mt5_password, mt5_server,
-                         sizing_strategy, management_strategy, t0) -> None:
+                         sizing_strategy, management_strategy,
+                         starting_balance_usd, t0) -> None:
 
         ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
+
+        await self._store.update_run(run_id, starting_balance_usd=starting_balance_usd)
 
         # ── 1. Fetch storico Telegram ─────────────────────────────────────────
         ulog.info("[%s] Phase 1: fetch storico Telegram...", run_id)
@@ -581,6 +619,13 @@ class BacktestEngine:
                 sigs, tok_in, tok_out = await self._sp.extract_signals(
                     msg["text"],
                     sizing_strategy=sizing_strategy,
+                    account_info={
+                        "balance":     starting_balance_usd,
+                        "equity":      starting_balance_usd,
+                        "free_margin": starting_balance_usd,
+                        "currency":    "USD",
+                        "leverage":    100,
+                    } if sizing_strategy else None,
                     user_id=user_id,
                     flex=True,
                 )
@@ -617,7 +662,7 @@ class BacktestEngine:
                     "total_messages": len(messages),
                     "period_from": period_from,
                     "period_to": period_to,
-                }
+                }, starting_balance_usd
             ))
             return
 
@@ -717,6 +762,7 @@ class BacktestEngine:
 
         bars_cache: dict[str, list[dict]] = {}
         point_cache: dict[str, float | None] = {}
+        pip_value_cache: dict[str, float | None] = {}
         bars_coverage: dict[str, dict] = {}
 
         for sym, rng in symbols_needed.items():
@@ -740,6 +786,18 @@ class BacktestEngine:
             }
             ulog.info("[%s] %s: %d barre %s", run_id, sym,
                         result.get("count", 0), result.get("timeframe"))
+            try:
+                specs = await self._mt5.get_symbol_specs(
+                    user_id=user_id,
+                    mt5_login=mt5_login,
+                    mt5_password=mt5_password,
+                    mt5_server=mt5_server,
+                    symbol=sym,
+                )
+                pip_value_cache[sym] = specs.get("pip_value_per_lot")
+            except Exception as exc:
+                ulog.warning("[%s] pip_value %s non disponibile: %s", run_id, sym, exc)
+                pip_value_cache[sym] = None
 
         await self._store.update_run(run_id, bars_coverage_json=bars_coverage)
 
@@ -758,6 +816,13 @@ class BacktestEngine:
                 bars  = bars_cache.get(sig.symbol, [])
                 point = point_cache.get(sig.symbol)
                 result = _simulate_trade(sig, msg_dt or datetime.now(timezone.utc), bars, point)
+
+                pv = pip_value_cache.get(sig.symbol)
+                pnl_usd = (
+                    round(result.pnl_pips * sig.lot_size * pv, 2)
+                    if result.pnl_pips is not None and sig.lot_size and pv
+                    else None
+                )
 
                 trade_rows.append({
                     "run_id":          run_id,
@@ -779,6 +844,7 @@ class BacktestEngine:
                     "exit_ts":         result.exit_ts,
                     "outcome":         result.outcome,
                     "pnl_pips":        result.pnl_pips,
+                    "pnl_usd":         pnl_usd,
                     "duration_min":    result.duration_min,
                     "ai_approved":     ai_meta.get("ai_approved"),
                     "ai_reason":       ai_meta.get("ai_reason", ""),
@@ -821,7 +887,7 @@ class BacktestEngine:
             "period_to":          period_to,
         }
 
-        stats = _compute_aggregate(trade_rows, cost_info, telegram_meta)
+        stats = _compute_aggregate(trade_rows, cost_info, telegram_meta, starting_balance_usd)
         stats["status"] = "done"
         await self._store.finish_run(run_id, stats)
 

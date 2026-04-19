@@ -740,14 +740,15 @@ export interface TradeStats {
 // ── Backtest types ─────────────────────────────────────────────────────────────
 
 export interface BacktestRunRequest {
-  user_id:              string
-  group_id:             string
-  group_name?:          string | null
-  mode:                 "date_limit" | "message_count"
-  limit_value:          string
-  use_ai:               boolean
-  sizing_strategy?:     string | null
-  management_strategy?: string | null
+  user_id:               string
+  group_id:              string
+  group_name?:           string | null
+  mode:                  "date_limit" | "message_count"
+  limit_value:           string
+  use_ai:                boolean
+  sizing_strategy?:      string | null
+  management_strategy?:  string | null
+  starting_balance_usd?: number
 }
 
 export interface BacktestSymbolStat {
@@ -792,6 +793,7 @@ export interface BacktestRun {
   mode:                    string
   limit_value:             string
   use_ai:                  boolean
+  starting_balance_usd:    number
 
   total_messages:          number | null
   period_from:             string | null
@@ -813,6 +815,13 @@ export interface BacktestRun {
   pretrade_cost_usd:       number
   total_ai_cost_usd:       number
   total_ai_seconds:        number
+
+  total_pnl_usd:           number | null
+  avg_pnl_usd:             number | null
+  best_trade_usd:          number | null
+  worst_trade_usd:         number | null
+  max_drawdown_usd:        number | null
+  final_balance_usd:       number | null
 
   signals_detected:        number
   signal_detection_rate:   number
@@ -866,6 +875,7 @@ export interface BacktestTrade {
   exit_ts:          string | null
   outcome:          string | null
   pnl_pips:         number | null
+  pnl_usd:          number | null
   duration_min:     number | null
   ai_approved:      number | null
   ai_reason:        string | null

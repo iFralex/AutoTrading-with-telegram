@@ -30,6 +30,11 @@ function fmtPips(v: number | null): string {
   return (v >= 0 ? "+" : "") + v.toFixed(1) + " pip"
 }
 
+function fmtUsd(v: number | null, dec = 2): string {
+  if (v === null || v === undefined) return "—"
+  return (v >= 0 ? "+" : "") + "$" + Math.abs(v).toFixed(dec)
+}
+
 function fmtPct(v: number | null): string {
   if (v === null || v === undefined) return "—"
   return v.toFixed(1) + "%"
@@ -115,12 +120,13 @@ function RunForm({ user, onStarted }: {
   user: DashboardUser
   onStarted: (runId: string) => void
 }) {
-  const [mode, setMode]         = useState<"date_limit" | "message_count">("message_count")
-  const [dateVal, setDateVal]   = useState("")
-  const [countVal, setCountVal] = useState("1000")
-  const [useAi, setUseAi]       = useState(false)
-  const [loading, setLoading]   = useState(false)
-  const [err, setErr]           = useState<string | null>(null)
+  const [mode, setMode]           = useState<"date_limit" | "message_count">("message_count")
+  const [dateVal, setDateVal]     = useState("")
+  const [countVal, setCountVal]   = useState("1000")
+  const [useAi, setUseAi]         = useState(false)
+  const [balance, setBalance]     = useState("1000")
+  const [loading, setLoading]     = useState(false)
+  const [err, setErr]             = useState<string | null>(null)
 
   async function submit() {
     setErr(null)
@@ -129,12 +135,13 @@ function RunForm({ user, onStarted }: {
     setLoading(true)
     try {
       const res = await api.startBacktest({
-        user_id:    user.user_id,
-        group_id:   String(user.group_id),
-        group_name: user.group_name,
+        user_id:              user.user_id,
+        group_id:             String(user.group_id),
+        group_name:           user.group_name,
         mode,
-        limit_value: limitValue,
-        use_ai:     useAi,
+        limit_value:          limitValue,
+        use_ai:               useAi,
+        starting_balance_usd: parseFloat(balance) || 1000,
       })
       onStarted(res.run_id)
     } catch (e) {
@@ -214,6 +221,21 @@ function RunForm({ user, onStarted }: {
         </div>
       </div>
 
+      {/* Saldo iniziale */}
+      <div>
+        <label className="text-xs text-muted-foreground">Saldo iniziale simulato (USD)</label>
+        <input
+          type="number"
+          min={100}
+          max={1000000}
+          step={100}
+          value={balance}
+          onChange={e => setBalance(e.target.value)}
+          className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
+        />
+        <p className="text-[11px] text-muted-foreground mt-1">Usato per il sizing e per convertire i pip in valore monetario</p>
+      </div>
+
       {err && (
         <p className="text-xs text-red-400 flex items-center gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5" /> {err}
@@ -288,9 +310,11 @@ function RunProgress({ run, onRefresh }: { run: BacktestRun; onRefresh: () => vo
 // ── Full results ──────────────────────────────────────────────────────────────
 
 function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
-  const [trades, setTrades]       = useState<BacktestTrade[] | null>(null)
-  const [loadingTrades, setLT]    = useState(false)
-  const [showTrades, setShowTrades] = useState(false)
+  const [trades, setTrades]         = useState<BacktestTrade[] | null>(null)
+  const [loadingTrades, setLT]      = useState(false)
+  const [showTrades, setShowTrades]  = useState(false)
+  const [equityMode, setEquityMode]  = useState<"pips" | "usd">("pips")
+  const hasUsdEquity = run.equity_curve_json?.some((p: any) => p.cumul_usd !== undefined)
 
   async function loadTrades() {
     if (trades) { setShowTrades(v => !v); return }
@@ -330,8 +354,14 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
         <KpiCard
           label="P&L Totale"
           value={fmtPips(run.total_pnl_pips)}
-          sub={`${run.trades_filled ?? 0} trade eseguiti`}
+          sub={run.total_pnl_usd !== null ? fmtUsd(run.total_pnl_usd) : `${run.trades_filled ?? 0} trade`}
           positive={pnlPositive ? true : pnlPositive === false ? false : null}
+        />
+        <KpiCard
+          label="Saldo Finale"
+          value={run.final_balance_usd !== null ? `$${run.final_balance_usd?.toFixed(2)}` : "—"}
+          sub={`da $${run.starting_balance_usd?.toFixed(0) ?? 1000}`}
+          positive={run.final_balance_usd !== null ? run.final_balance_usd > (run.starting_balance_usd ?? 1000) : null}
         />
         <KpiCard
           label="Win Rate"
@@ -353,22 +383,19 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
         <KpiCard
           label="Max Drawdown"
           value={run.max_drawdown_pips !== null ? `${fmtNum(run.max_drawdown_pips, 1)} pip` : "—"}
+          sub={run.max_drawdown_usd !== null ? fmtUsd(-(run.max_drawdown_usd ?? 0)) : undefined}
           positive={false}
         />
         <KpiCard
           label="Avg Trade"
           value={fmtPips(run.avg_pnl_pips)}
-          sub={`durata media ${fmtDur(run.avg_trade_duration_min)}`}
+          sub={run.avg_pnl_usd !== null ? fmtUsd(run.avg_pnl_usd) : `durata ${fmtDur(run.avg_trade_duration_min)}`}
         />
         <KpiCard
-          label="Best trade"
+          label="Best / Worst"
           value={fmtPips(run.best_trade_pips)}
+          sub={run.best_trade_usd !== null ? `${fmtUsd(run.best_trade_usd)} / ${fmtUsd(run.worst_trade_usd)}` : fmtPips(run.worst_trade_pips)}
           positive={true}
-        />
-        <KpiCard
-          label="Worst trade"
-          value={fmtPips(run.worst_trade_pips)}
-          positive={false}
         />
       </div>
 
@@ -395,7 +422,22 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
       {/* Equity curve */}
       {run.equity_curve_json && run.equity_curve_json.length > 0 && (
         <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Equity curve (pips)</h4>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Equity curve</h4>
+            {hasUsdEquity && (
+              <div className="flex gap-1">
+                {(["pips", "usd"] as const).map(m => (
+                  <button key={m} onClick={() => setEquityMode(m)}
+                    className={`text-[10px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                      equityMode === m
+                        ? "bg-indigo-600/15 text-indigo-300 border-indigo-500/30"
+                        : "bg-transparent text-muted-foreground border-white/[0.08] hover:bg-white/[0.04]"
+                    }`}
+                  >{m === "pips" ? "Pips" : "USD"}</button>
+                ))}
+              </div>
+            )}
+          </div>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={run.equity_curve_json}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -405,13 +447,14 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                 contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 12 }}
                 formatter={(v: unknown) => {
                   const n = typeof v === "number" ? v : parseFloat(String(v))
+                  if (equityMode === "usd") return [`$${n.toFixed(2)}`, "Saldo"] as [string, string]
                   return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "Cumulativo"] as [string, string]
                 }}
                 labelFormatter={() => ""}
               />
               <Line
                 type="monotone"
-                dataKey="cumul"
+                dataKey={equityMode === "usd" ? "cumul_usd" : "cumul"}
                 stroke={pnlPositive ? "#10b981" : "#ef4444"}
                 dot={false}
                 strokeWidth={1.5}
@@ -594,7 +637,7 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-t border-white/[0.05] bg-white/[0.02]">
-                  {["Data", "Mittente", "Simbolo", "Tipo", "Entry", "SL", "TP", "Esito", "P&L", "Durata", "AI"].map(h => (
+                  {["Data", "Mittente", "Simbolo", "Tipo", "Entry", "SL", "TP", "Esito", "P&L (pip)", "P&L (USD)", "Durata", "AI"].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -616,6 +659,9 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                     <td className="px-3 py-2"><OutcomeBadge outcome={t.outcome} /></td>
                     <td className={`px-3 py-2 font-mono font-semibold ${(t.pnl_pips ?? 0) > 0 ? "text-emerald-400" : (t.pnl_pips ?? 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
                       {t.pnl_pips !== null ? fmtPips(t.pnl_pips) : "—"}
+                    </td>
+                    <td className={`px-3 py-2 font-mono font-semibold ${(t.pnl_usd ?? 0) > 0 ? "text-emerald-400" : (t.pnl_usd ?? 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                      {t.pnl_usd !== null ? fmtUsd(t.pnl_usd) : "—"}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDur(t.duration_min)}</td>
                     <td className="px-3 py-2">

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     mode                    TEXT    NOT NULL,
     limit_value             TEXT    NOT NULL,
     use_ai                  INTEGER NOT NULL DEFAULT 0,
+    starting_balance_usd    REAL    DEFAULT 1000,
 
     total_messages          INTEGER,
     period_from             TEXT,
@@ -50,6 +51,13 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     pretrade_cost_usd       REAL    DEFAULT 0,
     total_ai_cost_usd       REAL    DEFAULT 0,
     total_ai_seconds        REAL    DEFAULT 0,
+
+    total_pnl_usd           REAL,
+    avg_pnl_usd             REAL,
+    best_trade_usd          REAL,
+    worst_trade_usd         REAL,
+    max_drawdown_usd        REAL,
+    final_balance_usd       REAL,
 
     signals_detected        INTEGER DEFAULT 0,
     signal_detection_rate   REAL    DEFAULT 0,
@@ -106,6 +114,7 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
     exit_ts          TEXT,
     outcome          TEXT,
     pnl_pips         REAL,
+    pnl_usd          REAL,
     duration_min     REAL,
     ai_approved      INTEGER,
     ai_reason        TEXT
@@ -121,6 +130,14 @@ _INDEXES = [
 _MIGRATIONS = [
     "ALTER TABLE backtest_runs ADD COLUMN pretrade_tokens_in  INTEGER DEFAULT 0",
     "ALTER TABLE backtest_runs ADD COLUMN pretrade_tokens_out INTEGER DEFAULT 0",
+    "ALTER TABLE backtest_runs ADD COLUMN starting_balance_usd REAL DEFAULT 1000",
+    "ALTER TABLE backtest_runs ADD COLUMN total_pnl_usd    REAL",
+    "ALTER TABLE backtest_runs ADD COLUMN avg_pnl_usd      REAL",
+    "ALTER TABLE backtest_runs ADD COLUMN best_trade_usd   REAL",
+    "ALTER TABLE backtest_runs ADD COLUMN worst_trade_usd  REAL",
+    "ALTER TABLE backtest_runs ADD COLUMN max_drawdown_usd REAL",
+    "ALTER TABLE backtest_runs ADD COLUMN final_balance_usd REAL",
+    "ALTER TABLE backtest_trades ADD COLUMN pnl_usd REAL",
 ]
 
 
@@ -157,17 +174,18 @@ class BacktestStore:
         mode: str,
         limit_value: str,
         use_ai: bool,
+        starting_balance_usd: float = 1000.0,
     ) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
                 INSERT INTO backtest_runs
                     (id, user_id, group_id, group_name, started_at, status,
-                     mode, limit_value, use_ai)
-                VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
+                     mode, limit_value, use_ai, starting_balance_usd)
+                VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
                 """,
                 (run_id, user_id, group_id, group_name, _now_iso(),
-                 mode, limit_value, int(use_ai)),
+                 mode, limit_value, int(use_ai), starting_balance_usd),
             )
             await db.commit()
 
@@ -209,7 +227,7 @@ class BacktestStore:
                 t.get("stop_loss"), t.get("take_profit"), t.get("lot_size"),
                 t.get("actual_entry"), t.get("actual_entry_ts"),
                 t.get("exit_price"), t.get("exit_ts"),
-                t.get("outcome"), t.get("pnl_pips"), t.get("duration_min"),
+                t.get("outcome"), t.get("pnl_pips"), t.get("pnl_usd"), t.get("duration_min"),
                 int(t["ai_approved"]) if t.get("ai_approved") is not None else None,
                 t.get("ai_reason"),
             )
@@ -223,8 +241,8 @@ class BacktestStore:
                      symbol, order_type, order_mode, entry_price_raw,
                      stop_loss, take_profit, lot_size,
                      actual_entry, actual_entry_ts, exit_price, exit_ts,
-                     outcome, pnl_pips, duration_min, ai_approved, ai_reason)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     outcome, pnl_pips, pnl_usd, duration_min, ai_approved, ai_reason)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 rows,
             )
