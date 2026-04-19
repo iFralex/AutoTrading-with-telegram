@@ -30,6 +30,7 @@ export function OverviewPage({
   onUserUpdate: (d: DashboardUserResponse) => void
 }) {
   const { user, logs, total_logs } = data
+  const firstGroup = user.groups?.[0]
   const [resetConfirm, setResetConfirm] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -112,17 +113,17 @@ export function OverviewPage({
       <div>
         <SectionHeading>Strategie configurate</SectionHeading>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-          <StrategyPreview label="Sizing" value={user.sizing_strategy} />
-          <StrategyPreview label="Management" value={user.management_strategy} />
-          <StrategyPreview label="Messaggi eliminati" value={user.deletion_strategy} />
+          <StrategyPreview label="Sizing" value={firstGroup?.sizing_strategy} />
+          <StrategyPreview label="Management" value={firstGroup?.management_strategy} />
+          <StrategyPreview label="Messaggi eliminati" value={firstGroup?.deletion_strategy} />
           <div className="rounded-xl border border-white/[0.07] bg-card/40 px-4 py-3 space-y-1">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
               Parametri di ingresso
             </p>
             <div className="flex flex-col gap-1 text-xs font-mono text-foreground/80">
-              <span>Range entry: <span className="text-indigo-300">{user.range_entry_pct ?? 0}%</span></span>
-              <span>Favorevole: <span className={user.entry_if_favorable ? "text-emerald-400" : "text-muted-foreground"}>
-                {user.entry_if_favorable ? "Attivo" : "Disattivo"}
+              <span>Range entry: <span className="text-indigo-300">{firstGroup?.range_entry_pct ?? 0}%</span></span>
+              <span>Favorevole: <span className={firstGroup?.entry_if_favorable ? "text-emerald-400" : "text-muted-foreground"}>
+                {firstGroup?.entry_if_favorable ? "Attivo" : "Disattivo"}
               </span></span>
             </div>
           </div>
