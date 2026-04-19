@@ -53,14 +53,8 @@ _bot_dir = Path(os.environ.get("TRADING_BOT_DIR", _ROOT)).resolve()
 _log_dir = _bot_dir / "logs"
 _log_dir.mkdir(parents=True, exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(_log_dir / "bot.log", encoding="utf-8"),
-    ],
-)
+from vps.logging_setup import setup_logging
+setup_logging(_log_dir)
 logger = logging.getLogger(__name__)
 
 # ── Percorsi dati ─────────────────────────────────────────────────────────────
@@ -175,12 +169,13 @@ async def lifespan(app: FastAPI):
         Salva SEMPRE le posizioni chiuse nel DB (per le statistiche di performance),
         poi delega al StrategyExecutor se l'utente ha una management_strategy configurata.
         """
+        ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
         # ── Salva sempre ogni chiusura per le statistiche ─────────────────────
         if event_type == "position_closed":
             try:
                 await closed_trade_store.insert(user_id=user_id, event_data=event_data)
             except Exception as exc:
-                logger.warning("closed_trade_store.insert utente %s: %s", user_id, exc)
+                ulog.warning("closed_trade_store.insert utente %s: %s", user_id, exc)
 
         if strategy_executor is None:
             return
@@ -199,7 +194,7 @@ async def lifespan(app: FastAPI):
         if not (mt5_login and mt5_password and mt5_server):
             return
 
-        logger.info(
+        ulog.info(
             "StrategyExecutor utente %s: evento %s — avvio agent...",
             user_id, event_type,
         )
@@ -215,7 +210,7 @@ async def lifespan(app: FastAPI):
                 mt5_server          = mt5_server,
             )
         except Exception as exc:
-            logger.error("StrategyExecutor on_event errore: %s", exc, exc_info=True)
+            ulog.error("StrategyExecutor on_event errore: %s", exc, exc_info=True)
             await strategy_log_store.insert(
                 user_id             = user_id,
                 event_type          = event_type,
@@ -225,7 +220,7 @@ async def lifespan(app: FastAPI):
             )
             return
 
-        logger.info(
+        ulog.info(
             "StrategyExecutor utente %s: %s completato — %d tool call, risposta: %.120s",
             user_id, event_type,
             len(result.tool_calls),
@@ -260,11 +255,12 @@ async def lifespan(app: FastAPI):
         import asyncio
         import uuid
         from dataclasses import asdict
+        ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
         sender_name = getattr(sender, "first_name", None) or getattr(sender, "title", "?")
 
         # Blocca il trading live se l'utente è in backtest
         if user_id in app.state.backtesting_users:
-            logger.info(
+            ulog.info(
                 "Utente %s in backtest — messaggio live ignorato per evitare ordini reali",
                 user_id,
             )
@@ -275,26 +271,26 @@ async def lifespan(app: FastAPI):
         if not _is_forwarded:
             try:
                 if await store.is_link_target(user_id):
-                    logger.debug(
+                    ulog.debug(
                         "Utente %s è link-target — messaggio organico ignorato (arriverà via propagazione)",
                         user_id,
                     )
                     return
             except Exception as exc:
-                logger.warning("Errore controllo is_link_target per utente %s: %s", user_id, exc)
+                ulog.warning("Errore controllo is_link_target per utente %s: %s", user_id, exc)
 
         # Propaga il messaggio agli utenti collegati (ciascuno processerà con le proprie impostazioni)
         if not _is_forwarded:
             try:
                 linked_ids = await store.get_linked_users(user_id)
                 for linked_id in linked_ids:
-                    logger.info("Propagazione segnale da %s a utente collegato %s", user_id, linked_id)
+                    ulog.info("Propagazione segnale da %s a utente collegato %s", user_id, linked_id)
                     asyncio.get_event_loop().create_task(
                         on_message(linked_id, message, raw_event, sender, _is_forwarded=True)
                     )
             except Exception as exc:
-                logger.warning("Errore propagazione link segnali per utente %s: %s", user_id, exc)
-        logger.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
+                ulog.warning("Errore propagazione link segnali per utente %s: %s", user_id, exc)
+        ulog.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
         signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
 
         # Estrai il message_id Telegram per poter rilevare eliminazioni future
@@ -343,23 +339,23 @@ async def lifespan(app: FastAPI):
             log_flash_raw = "YES" if flash_result else "NO"
             log_is_signal = flash_result
         except Exception as exc:
-            logger.error("Gemini Flash errore: %s", exc)
+            ulog.error("Gemini Flash errore: %s", exc)
             log_error_step = "flash"
             log_error_msg  = str(exc)
             await _save_log()
             return
 
         if not log_is_signal:
-            logger.debug("Messaggio classificato come non-segnale (Flash)")
+            ulog.debug("Messaggio classificato come non-segnale (Flash)")
             await _save_log()
             return
 
-        logger.info("Segnale rilevato — recupero credenziali utente %s...", user_id)
+        ulog.info("Segnale rilevato — recupero credenziali utente %s...", user_id)
 
         # ── Step 2: recupera credenziali MT5 dal DB ───────────────────────────
         user = await store.get_user(user_id)
         if user is None:
-            logger.error("Utente %s non trovato nel DB — skip", user_id)
+            ulog.error("Utente %s non trovato nel DB — skip", user_id)
             log_error_step = "db_lookup"
             log_error_msg  = f"Utente {user_id} non trovato nel DB"
             await _save_log()
@@ -373,11 +369,11 @@ async def lifespan(app: FastAPI):
         extraction_instructions = user.get("extraction_instructions") or None
         range_entry_pct     = int(user.get("range_entry_pct") or 0)
         entry_if_favorable  = bool(user.get("entry_if_favorable"))
-        logger.info("Utente %s: range_entry_pct=%d%%, entry_if_favorable=%s", user_id, range_entry_pct, entry_if_favorable)
+        ulog.info("Utente %s: range_entry_pct=%d%%, entry_if_favorable=%s", user_id, range_entry_pct, entry_if_favorable)
 
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
-            logger.warning(
+            ulog.warning(
                 "Utente %s: credenziali MT5 mancanti — skip esecuzione", user_id
             )
             log_error_step = "mt5_creds"
@@ -395,11 +391,11 @@ async def lifespan(app: FastAPI):
                     mt5_server   = mt5_server,
                 )
             except Exception as exc:
-                logger.warning("Utente %s: account_info fallita: %s", user_id, exc)
+                ulog.warning("Utente %s: account_info fallita: %s", user_id, exc)
                 log_account_info = None
 
             if log_account_info is None:
-                logger.warning(
+                ulog.warning(
                     "Utente %s: account_info non disponibile — sizing senza contesto conto",
                     user_id,
                 )
@@ -414,7 +410,7 @@ async def lifespan(app: FastAPI):
                 extraction_instructions=extraction_instructions,
             )
         except Exception as exc:
-            logger.error("Gemini Pro errore: %s", exc)
+            ulog.error("Gemini Pro errore: %s", exc)
             log_error_step = "extraction"
             log_error_msg  = str(exc)
             await _save_log()
@@ -474,13 +470,13 @@ async def lifespan(app: FastAPI):
                             )
                         approved_signals.append(sig)
                     else:
-                        logger.info(
+                        ulog.info(
                             "StrategyExecutor utente %s: segnale [%d] rifiutato — %s",
                             user_id, i, dec.reason,
                         )
 
                 if not approved_signals:
-                    logger.info(
+                    ulog.info(
                         "StrategyExecutor utente %s: tutti i segnali rifiutati dalla strategia",
                         user_id,
                     )
@@ -493,7 +489,7 @@ async def lifespan(app: FastAPI):
                 log_signals = [asdict(s) for s in signals]
 
             except Exception as exc:
-                logger.error("StrategyExecutor pre_trade errore: %s", exc, exc_info=True)
+                ulog.error("StrategyExecutor pre_trade errore: %s", exc, exc_info=True)
                 # Non blocchiamo l'esecuzione se lo strategy executor fallisce
 
         # ── Step 6: esegui gli ordini su MT5 ─────────────────────────────────
@@ -509,7 +505,7 @@ async def lifespan(app: FastAPI):
                 entry_if_favorable = entry_if_favorable,
             )
         except Exception as exc:
-            logger.error("MT5 execute_signals errore: %s", exc)
+            ulog.error("MT5 execute_signals errore: %s", exc)
             log_error_step = "mt5_execute"
             log_error_msg  = str(exc)
             await _save_log()
@@ -517,7 +513,7 @@ async def lifespan(app: FastAPI):
 
         ok  = sum(1 for r in results if r.success)
         err = sum(1 for r in results if not r.success)
-        logger.info(
+        ulog.info(
             "Utente %s: %d ordini OK, %d falliti su %d segnali",
             user_id, ok, err, len(signals),
         )
@@ -567,13 +563,14 @@ async def lifespan(app: FastAPI):
         Per ogni message_id eliminato: verifica se era un segnale, recupera le
         posizioni correlate e delega all'AI tramite deletion_strategy.
         """
+        ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
         # Ignora eventi di eliminazione organici per gli utenti che sono link-target
         if not _is_forwarded:
             try:
                 if await store.is_link_target(user_id):
                     return
             except Exception as exc:
-                logger.warning("Errore controllo is_link_target (delete) per utente %s: %s", user_id, exc)
+                ulog.warning("Errore controllo is_link_target (delete) per utente %s: %s", user_id, exc)
 
         # Propaga l'eliminazione agli utenti collegati
         if not _is_forwarded:
@@ -581,12 +578,12 @@ async def lifespan(app: FastAPI):
                 import asyncio
                 linked_ids = await store.get_linked_users(user_id)
                 for linked_id in linked_ids:
-                    logger.info("Propagazione eliminazione da %s a utente collegato %s", user_id, linked_id)
+                    ulog.info("Propagazione eliminazione da %s a utente collegato %s", user_id, linked_id)
                     asyncio.get_event_loop().create_task(
                         on_message_deleted(linked_id, deleted_ids, _is_forwarded=True)
                     )
             except Exception as exc:
-                logger.warning("Errore propagazione eliminazione link per utente %s: %s", user_id, exc)
+                ulog.warning("Errore propagazione eliminazione link per utente %s: %s", user_id, exc)
 
         if strategy_executor is None:
             return
@@ -598,7 +595,7 @@ async def lifespan(app: FastAPI):
                 continue  # Non era un segnale tracciato
 
             sig_group_id = log_entry.get("signal_group_id")
-            logger.info(
+            ulog.info(
                 "Messaggio #%d eliminato per utente %s — era un segnale (group=%s)",
                 msg_id, user_id, sig_group_id,
             )
@@ -610,7 +607,7 @@ async def lifespan(app: FastAPI):
 
             deletion_strategy = user.get("deletion_strategy") or ""
             if not deletion_strategy.strip():
-                logger.debug(
+                ulog.debug(
                     "Utente %s: deletion_strategy non configurata — skip messaggio eliminato #%d",
                     user_id, msg_id,
                 )
@@ -629,7 +626,7 @@ async def lifespan(app: FastAPI):
                 "signals_json":        log_entry.get("signals_json"),
             }
 
-            logger.info(
+            ulog.info(
                 "StrategyExecutor utente %s: evento message_deleted (msg #%d) — avvio agent...",
                 user_id, msg_id,
             )
@@ -645,7 +642,7 @@ async def lifespan(app: FastAPI):
                     mt5_server          = mt5_server,
                 )
             except Exception as exc:
-                logger.error(
+                ulog.error(
                     "StrategyExecutor on_event message_deleted errore: %s", exc, exc_info=True
                 )
                 await strategy_log_store.insert(
@@ -657,7 +654,7 @@ async def lifespan(app: FastAPI):
                 )
                 continue
 
-            logger.info(
+            ulog.info(
                 "StrategyExecutor utente %s: message_deleted completato — %d tool call",
                 user_id, len(result.tool_calls),
             )

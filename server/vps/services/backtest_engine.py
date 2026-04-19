@@ -476,7 +476,8 @@ class BacktestEngine:
         Aggiorna backtest_runs e inserisce backtest_trades al termine.
         """
         t0 = _time.monotonic()
-        logger.info("Backtest %s avviato per utente %s", run_id, user_id)
+        _u = {"user_id": user_id}
+        logger.info("Backtest %s avviato per utente %s", run_id, user_id, extra=_u)
 
         try:
             await self._run_inner(
@@ -490,7 +491,7 @@ class BacktestEngine:
                 t0=t0,
             )
         except Exception as exc:
-            logger.error("Backtest %s errore: %s", run_id, exc, exc_info=True)
+            logger.error("Backtest %s errore: %s", run_id, exc, exc_info=True, extra=_u)
             await self._store.fail_run(run_id, str(exc))
 
     async def _run_inner(self, *, run_id, user_id, group_id, group_name,
@@ -498,8 +499,10 @@ class BacktestEngine:
                          mt5_login, mt5_password, mt5_server,
                          sizing_strategy, management_strategy, t0) -> None:
 
+        ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
+
         # ── 1. Fetch storico Telegram ─────────────────────────────────────────
-        logger.info("[%s] Phase 1: fetch storico Telegram...", run_id)
+        ulog.info("[%s] Phase 1: fetch storico Telegram...", run_id)
         await self._store.update_run(run_id, status="running:telegram_fetch")
 
         until_date: datetime | None = None
@@ -527,7 +530,7 @@ class BacktestEngine:
 
         period_from = messages[0]["date_iso"]
         period_to   = messages[-1]["date_iso"]
-        logger.info("[%s] Scaricati %d messaggi (%s → %s)", run_id, len(messages), period_from, period_to)
+        ulog.info("[%s] Scaricati %d messaggi (%s → %s)", run_id, len(messages), period_from, period_to)
         await self._store.update_run(run_id,
             total_messages=len(messages),
             period_from=period_from,
@@ -535,7 +538,7 @@ class BacktestEngine:
         )
 
         # ── 2. Detection batch in parallelo (Flash flex) ──────────────────────
-        logger.info("[%s] Phase 2: detection Flash batch (%d msg)...", run_id, len(messages))
+        ulog.info("[%s] Phase 2: detection Flash batch (%d msg)...", run_id, len(messages))
         await self._store.update_run(run_id, status="running:signal_detection")
 
         flash_t0 = _time.monotonic()
@@ -546,7 +549,7 @@ class BacktestEngine:
 
         signals_detected = sum(1 for d in detections if d)
         detection_rate   = round(signals_detected / len(messages) * 100, 1) if messages else 0.0
-        logger.info("[%s] Segnali rilevati: %d/%d (%.1f%%)", run_id,
+        ulog.info("[%s] Segnali rilevati: %d/%d (%.1f%%)", run_id,
                     signals_detected, len(messages), detection_rate)
 
         await self._store.update_run(run_id,
@@ -560,7 +563,7 @@ class BacktestEngine:
         )
 
         # ── 3. Extraction segnali (Pro flex) ──────────────────────────────────
-        logger.info("[%s] Phase 3: extraction Pro per %d messaggi...", run_id, signals_detected)
+        ulog.info("[%s] Phase 3: extraction Pro per %d messaggi...", run_id, signals_detected)
         await self._store.update_run(run_id, status="running:signal_extraction")
 
         signal_msgs = [
@@ -580,7 +583,7 @@ class BacktestEngine:
                     flex=True,
                 )
             except Exception as exc:
-                logger.warning("[%s] Extraction fallita msg %s: %s", run_id, msg["id"], exc)
+                ulog.warning("[%s] Extraction fallita msg %s: %s", run_id, msg["id"], exc)
                 sigs = []
 
             if sigs:
@@ -599,7 +602,7 @@ class BacktestEngine:
 
         pro_elapsed = _time.monotonic() - pro_t0
         signals_extracted = sum(len(e["signals"]) for e in extracted)
-        logger.info("[%s] TradeSignal estratti: %d", run_id, signals_extracted)
+        ulog.info("[%s] TradeSignal estratti: %d", run_id, signals_extracted)
         await self._store.update_run(run_id,
             pro_calls=pro_stats["calls"],
             pro_tokens_in=pro_stats["tokens_in"],
@@ -624,7 +627,7 @@ class BacktestEngine:
         pretrade_calls = 0
 
         if use_ai and self._se and management_strategy:
-            logger.info("[%s] Phase 4: pre-trade AI su %d gruppi segnali...", run_id, len(extracted))
+            ulog.info("[%s] Phase 4: pre-trade AI su %d gruppi segnali...", run_id, len(extracted))
             await self._store.update_run(run_id, status="running:ai_pretrade")
 
             for entry in extracted:
@@ -668,7 +671,7 @@ class BacktestEngine:
                             })
                     entry["approved"] = approved
                 except Exception as exc:
-                    logger.warning("[%s] pre_trade fallito: %s", run_id, exc)
+                    ulog.warning("[%s] pre_trade fallito: %s", run_id, exc)
                     entry["approved"] = [(s, {"ai_approved": None, "ai_reason": ""})
                                          for s in entry["signals"]]
         else:
@@ -682,7 +685,7 @@ class BacktestEngine:
         )
 
         # ── 5. Download barre MT5 per simbolo ────────────────────────────────
-        logger.info("[%s] Phase 5: download barre MT5...", run_id)
+        ulog.info("[%s] Phase 5: download barre MT5...", run_id)
         await self._store.update_run(run_id, status="running:mt5_bars")
 
         # Raccoglie simboli e range temporali necessari
@@ -709,7 +712,7 @@ class BacktestEngine:
         bars_coverage: dict[str, dict] = {}
 
         for sym, rng in symbols_needed.items():
-            logger.info("[%s] Download barre %s...", run_id, sym)
+            ulog.info("[%s] Download barre %s...", run_id, sym)
             result = await self._mt5.get_historical_bars(
                 user_id=user_id,
                 mt5_login=mt5_login,
@@ -727,13 +730,13 @@ class BacktestEngine:
                 "period_from": result.get("period_from"),
                 "period_to":   result.get("period_to"),
             }
-            logger.info("[%s] %s: %d barre %s", run_id, sym,
+            ulog.info("[%s] %s: %d barre %s", run_id, sym,
                         result.get("count", 0), result.get("timeframe"))
 
         await self._store.update_run(run_id, bars_coverage_json=bars_coverage)
 
         # ── 6. Simulazione walk-forward ───────────────────────────────────────
-        logger.info("[%s] Phase 6: simulazione %d segnali...", run_id, signals_extracted)
+        ulog.info("[%s] Phase 6: simulazione %d segnali...", run_id, signals_extracted)
         await self._store.update_run(run_id, status="running:simulation")
 
         trade_rows: list[dict] = []
@@ -793,7 +796,7 @@ class BacktestEngine:
         await self._store.insert_trades(trade_rows)
 
         # ── 7. Report finale ──────────────────────────────────────────────────
-        logger.info("[%s] Phase 7: calcolo report...", run_id)
+        ulog.info("[%s] Phase 7: calcolo report...", run_id)
 
         total_elapsed = _time.monotonic() - t0
         total_ai_cost = (
@@ -814,7 +817,7 @@ class BacktestEngine:
         stats["status"] = "done"
         await self._store.finish_run(run_id, stats)
 
-        logger.info(
+        ulog.info(
             "[%s] Completato in %.0fs — %d trade simulati, win rate %.1f%%, "
             "P&L %.1f pips, costo AI $%.4f",
             run_id, total_elapsed,

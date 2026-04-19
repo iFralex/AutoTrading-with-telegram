@@ -59,7 +59,8 @@ from vps.services.mt5_trader import MT5Trader
 if TYPE_CHECKING:
     from vps.services.ai_log_store import AILogStore
 
-logger = logging.getLogger(__name__)
+logger  = logging.getLogger(__name__)
+_ai_log = logging.getLogger("ai_calls")
 
 _PRO_MODEL    = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro-preview-03-25")
 MAX_ITERATIONS = 8    # sicurezza: max cicli tool-call per esecuzione
@@ -744,6 +745,7 @@ class StrategyExecutor:
 
         from vps.services.signal_processor import flex_retry as _flex_retry
 
+        ulog      = logging.LoggerAdapter(logger, {"user_id": ctx.user_id})
         tools     = _make_tools(event_type)
         tool_log: list[dict] = []
 
@@ -778,7 +780,7 @@ class StrategyExecutor:
             try:
                 response = await _send(event_prompt)
             except Exception as exc:
-                logger.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
+                ulog.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
                 error_str = str(exc)
                 return StrategyResult(event_type="", error=error_str)
 
@@ -791,7 +793,7 @@ class StrategyExecutor:
                 if not fn_calls:
                     # L'AI ha finito — raccoglie il testo finale
                     final_text = response.text or ""
-                    logger.info(
+                    ulog.info(
                         "StrategyExecutor utente %s: completato in %d iterazioni, %d tool call",
                         ctx.user_id, iteration + 1, len(tool_log),
                     )
@@ -806,7 +808,7 @@ class StrategyExecutor:
                 for fc in fn_calls:
                     name = fc.name
                     args = dict(fc.args)
-                    logger.debug("StrategyExecutor: tool call %s(%s)", name, args)
+                    ulog.debug("StrategyExecutor: tool call %s(%s)", name, args)
 
                     result_data = await self._dispatch(
                         name, args, ctx, pretrade_decisions
@@ -825,7 +827,7 @@ class StrategyExecutor:
                 try:
                     response = await _send(fn_response_parts)
                 except Exception as exc:
-                    logger.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
+                    ulog.error("StrategyExecutor: errore Gemini iterazione %d: %s", iteration, exc)
                     error_str = str(exc)
                     return StrategyResult(
                         event_type="",
@@ -836,7 +838,7 @@ class StrategyExecutor:
                 _accumulate_tokens(response)
 
             # Raggiunto MAX_ITERATIONS senza risposta finale
-            logger.warning(
+            ulog.warning(
                 "StrategyExecutor utente %s: raggiunto MAX_ITERATIONS (%d)",
                 ctx.user_id, MAX_ITERATIONS,
             )
@@ -869,6 +871,39 @@ class StrategyExecutor:
                     )
                 except Exception as log_exc:
                     logger.warning("ai_logs insert (strategy): %s", log_exc)
+            # ── ai_calls.log: sessione completa con tool call ─────────────────
+            tool_calls_text = "\n".join(
+                "  [{}] {}({}) → {}".format(
+                    i,
+                    t["name"],
+                    json.dumps(t["args"], separators=(",", ":"), ensure_ascii=False),
+                    json.dumps(t.get("result"), separators=(",", ":"), default=str,
+                               ensure_ascii=False)[:400],
+                )
+                for i, t in enumerate(tool_log)
+            ) or "  (nessuno)"
+            _ai_log.debug(
+                "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "[%s]  user=%-20s  model=%s  latency=%dms  tokens=%s/%s  iter=%d\n"
+                "── SYSTEM ───────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── EVENT PROMPT ─────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── TOOL CALLS ───────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── RISPOSTA FINALE ──────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                call_type.upper(),
+                ctx.user_id, _PRO_MODEL,
+                timer.elapsed_ms(),
+                total_prompt_tokens, total_completion_tokens,
+                len(tool_log),
+                system_prompt,
+                event_prompt,
+                tool_calls_text,
+                final_text or error_str or "(nessuna risposta)",
+            )
 
     # ── Dispatcher tool ───────────────────────────────────────────────────────
 

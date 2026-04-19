@@ -26,7 +26,8 @@ from google import genai
 if TYPE_CHECKING:
     from vps.services.ai_log_store import AILogStore
 
-logger = logging.getLogger(__name__)
+logger   = logging.getLogger(__name__)
+_ai_log  = logging.getLogger("ai_calls")
 
 # ── Flex tier retry ───────────────────────────────────────────────────────────
 
@@ -269,6 +270,21 @@ class SignalProcessor:
                     )
                 except Exception as log_exc:
                     logger.warning("ai_logs insert (flash): %s", log_exc)
+            # ── ai_calls.log: input e output completi ─────────────────────────
+            _ai_log.debug(
+                "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "[FLASH_DETECT]  user=%-20s  model=%s  latency=%dms  tokens=%s/%s\n"
+                "── PROMPT ───────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── RESPONSE ─────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                user_id or "—", FLASH_MODEL,
+                latency if resp is not None or error else 0,
+                p_tok, c_tok,
+                prompt,
+                result_text if result_text is not None else f"(error: {error})",
+            )
         return resp.text.strip().upper().startswith("YES")
 
     async def _extract(
@@ -327,6 +343,21 @@ class SignalProcessor:
                     )
                 except Exception as log_exc:
                     logger.warning("ai_logs insert (pro): %s", log_exc)
+            # ── ai_calls.log: input e output completi ─────────────────────────
+            _ai_log.debug(
+                "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "[PRO_EXTRACT]  user=%-20s  model=%s  latency=%dms  tokens=%s/%s\n"
+                "── PROMPT ───────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── RESPONSE ─────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                user_id or "—", PRO_MODEL,
+                latency if resp is not None or error else 0,
+                p_tok, c_tok,
+                prompt,
+                (resp.text if resp and resp.text else None) or f"(error: {error})",
+            )
         text = resp.text.strip()
 
         # Rimuovi eventuale wrapper markdown ```json ... ```

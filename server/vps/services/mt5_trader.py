@@ -687,7 +687,7 @@ class MT5Trader:
             user_dir, is_first_boot = self._ensure_user_dir(user_id)
         except Exception as exc:
             msg = str(exc)
-            logger.error("Utente %s — setup MT5: %s", user_id, msg)
+            logger.error("Utente %s — setup MT5: %s", user_id, msg, extra={"user_id": user_id})
             return [TradeResult(success=False, error=msg, signal=s) for s in signals]
 
         terminal_path = str(user_dir / "terminal64.exe")
@@ -698,10 +698,11 @@ class MT5Trader:
 
         # Al primo avvio: configura il server nella finestra di login MT5 tramite
         # SendKeys, poi lascia MT5 in esecuzione per l'attach di mt5.initialize().
+        _u = {"user_id": user_id}
         if is_first_boot:
             logger.info(
                 "Utente %s — primo avvio MT5: configurazione server '%s' via GUI...",
-                user_id, server,
+                user_id, server, extra=_u,
             )
             _kill_mt5_for_dir(user_dir)   # Kill eventuali residui dal template
             _configure_server_via_gui(user_dir, server)
@@ -733,23 +734,23 @@ class MT5Trader:
                     last_err = f"MT5 non avviabile: {msg} (codice {code})"
                     logger.warning(
                         "Utente %s — tentativo %d/%d fallito: %s",
-                        user_id, attempt, MT5_INIT_RETRIES, last_err,
+                        user_id, attempt, MT5_INIT_RETRIES, last_err, extra=_u,
                     )
 
                 if not init_ok:
-                    logger.error("Utente %s — %s", user_id, last_err)
+                    logger.error("Utente %s — %s", user_id, last_err, extra=_u)
                     return [TradeResult(success=False, error=last_err, signal=s) for s in signals]
 
                 # Verifica che il login sia avvenuto correttamente
                 acc = mt5.account_info()
                 if acc is None:
                     err = "MT5 avviato ma login non riuscito (account_info None)"
-                    logger.error("Utente %s — %s", user_id, err)
+                    logger.error("Utente %s — %s", user_id, err, extra=_u)
                     return [TradeResult(success=False, error=err, signal=s) for s in signals]
 
                 logger.info(
                     "Utente %s — MT5 connesso a %s, invio %d ordini...",
-                    user_id, server, len(signals),
+                    user_id, server, len(signals), extra=_u,
                 )
 
                 # ── Ordini ────────────────────────────────────────────────────
@@ -904,6 +905,7 @@ class MT5Trader:
             logger.warning(
                 "Utente %s | %s %s | retcode 10027 — invio Ctrl+E e retry...",
                 user_id, sig.order_type, sig.symbol,
+                extra={"user_id": user_id},
             )
             _enable_autotrading_via_gui(user_dir, mt5_login)
             time.sleep(1.0)
@@ -932,6 +934,7 @@ class MT5Trader:
                 sig.stop_loss   or 0.0,
                 sig.take_profit or 0.0,
                 err,
+                extra={"user_id": user_id},
             )
             return TradeResult(success=False, error=err, signal=sig)
 
@@ -942,6 +945,7 @@ class MT5Trader:
             sig.stop_loss   or 0.0,
             sig.take_profit or 0.0,
             res.order,
+            extra={"user_id": user_id},
         )
         return TradeResult(success=True, order_id=res.order, signal=sig)
 
@@ -1049,7 +1053,7 @@ class MT5Trader:
         try:
             return await self._run_mt5_async(user_id, mt5_login, mt5_password, mt5_server, _fn)
         except Exception as exc:
-            logger.error("get_full_account_info utente %s: %s", user_id, exc)
+            logger.error("get_full_account_info utente %s: %s", user_id, exc, extra={"user_id": user_id})
             return {"error": str(exc)}
 
     async def get_pnl_for_period(
@@ -1083,7 +1087,7 @@ class MT5Trader:
         try:
             return await self._run_mt5_async(user_id, mt5_login, mt5_password, mt5_server, _fn)
         except Exception as exc:
-            logger.error("get_pnl_for_period utente %s: %s", user_id, exc)
+            logger.error("get_pnl_for_period utente %s: %s", user_id, exc, extra={"user_id": user_id})
             return 0.0
 
     async def get_symbol_tick(
@@ -1116,7 +1120,7 @@ class MT5Trader:
         try:
             return await self._run_mt5_async(user_id, mt5_login, mt5_password, mt5_server, _fn)
         except Exception as exc:
-            logger.error("get_symbol_tick %s utente %s: %s", symbol, user_id, exc)
+            logger.error("get_symbol_tick %s utente %s: %s", symbol, user_id, exc, extra={"user_id": user_id})
             return {"error": str(exc)}
 
     async def get_symbol_specs(
@@ -1221,7 +1225,7 @@ class MT5Trader:
         try:
             return await self._run_mt5_async(user_id, mt5_login, mt5_password, mt5_server, _fn)
         except Exception as exc:
-            logger.error("get_positions utente %s: %s", user_id, exc)
+            logger.error("get_positions utente %s: %s", user_id, exc, extra={"user_id": user_id})
             return []
 
     async def get_pending_orders_list(
@@ -1326,7 +1330,7 @@ class MT5Trader:
         try:
             return await self._run_mt5_async(user_id, mt5_login, mt5_password, mt5_server, _fn)
         except Exception as exc:
-            logger.error("get_closed_deals utente %s: %s", user_id, exc)
+            logger.error("get_closed_deals utente %s: %s", user_id, exc, extra={"user_id": user_id})
             return []
 
     # ── Modifica posizioni aperte ─────────────────────────────────────────────
