@@ -343,9 +343,13 @@ class TelegramManager:
 
         # Telethon iter_messages: offset_date = scarica messaggi PRIMA di quella data
         # reverse=False → dal più recente al più vecchio (poi invertiamo alla fine)
+        # Usiamo un limite grezzo più grande per compensare i messaggi non-testo
+        # (foto, video, messaggi di servizio) che vengono scartati — ci fermiamo
+        # noi stessi quando abbiamo raccolto abbastanza messaggi con testo.
+        raw_limit = limit * 10 if limit else None
         async for msg in client.iter_messages(
             group_id,
-            limit=limit,
+            limit=raw_limit,
             offset_date=until_date,
             reverse=False,
         ):
@@ -373,6 +377,9 @@ class TelegramManager:
                 "text":        text,
             })
             fetched += 1
+
+            if limit and fetched >= limit:
+                break
 
             if on_progress and fetched % 100 == 0:
                 try:
