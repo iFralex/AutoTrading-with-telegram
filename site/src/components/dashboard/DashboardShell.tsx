@@ -214,8 +214,8 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
             <div className="ml-auto flex items-center gap-2.5">
               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${data.user.active ? "bg-emerald-400" : "bg-muted-foreground/40"}`} />
               <span className="text-sm font-mono text-foreground/70">{data.user.phone}</span>
-              <span className="hidden sm:block text-xs px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/[0.08] text-muted-foreground truncate max-w-[160px]">
-                {data.user.group_name}
+              <span className="hidden sm:block text-xs px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/[0.08] text-muted-foreground">
+                {data.user.groups.length} {data.user.groups.length === 1 ? "canale" : "canali"}
               </span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
                 data.user.active
@@ -248,7 +248,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
           ) : (
             <>
               {section === "overview"  && <OverviewPage  data={data} onUserUpdate={setData} />}
-              {section === "analytics" && <AnalyticsPage userId={data.user.user_id} />}
+              {section === "analytics" && <AnalyticsPage userId={data.user.user_id} groups={data.user.groups} />}
               {section === "ai"        && <AIPage        userId={data.user.user_id} />}
               {section === "settings"  && <SettingsPage  data={data} onUserUpdate={setData} />}
               {section === "logs"      && <LogsPage      data={data} />}

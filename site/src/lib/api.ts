@@ -148,15 +148,11 @@ async function call<T>(
 
 // ── Dashboard types ───────────────────────────────────────────────────────────
 
-export interface DashboardUser {
+export interface UserGroup {
+  id: number
   user_id: string
-  api_id: number
-  api_hash: string
-  phone: string
   group_id: number
   group_name: string
-  mt5_login: number | null
-  mt5_server: string | null
   sizing_strategy: string | null
   management_strategy: string | null
   range_entry_pct: number
@@ -165,6 +161,22 @@ export interface DashboardUser {
   extraction_instructions: string | null
   active: boolean
   created_at: string
+}
+
+export interface DashboardUser {
+  user_id: string
+  api_id: number
+  api_hash: string
+  phone: string
+  /** @deprecated usa groups[0].group_id */
+  group_id: number
+  /** @deprecated usa groups[0].group_name */
+  group_name: string
+  mt5_login: number | null
+  mt5_server: string | null
+  active: boolean
+  created_at: string
+  groups: UserGroup[]
 }
 
 export interface TradeSignalLog {
@@ -423,11 +435,12 @@ export const api = {
     )
   },
 
-  /** Carica ulteriori log segnali (paginazione). */
-  getDashboardLogs(userId: string, limit = 50, offset = 0) {
+  /** Carica ulteriori log segnali (paginazione, opzionalmente filtrata per gruppo). */
+  getDashboardLogs(userId: string, limit = 50, offset = 0, groupId?: number) {
+    const gq = groupId != null ? `&group_id=${groupId}` : ""
     return call<DashboardLogsResponse>(
       "GET",
-      `/api/dashboard/logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`
+      `/api/dashboard/logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}${gq}`
     )
   },
 
@@ -503,6 +516,50 @@ export const api = {
     )
   },
 
+  // ── Gestione gruppi multi-canale ──────────────────────────────────────────
+
+  /** Ritorna tutti i gruppi/canali configurati per un utente. */
+  getUserGroups(userId: string) {
+    return call<{ groups: UserGroup[] }>(
+      "GET",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/groups`
+    )
+  },
+
+  /** Aggiunge un nuovo gruppo/canale e riavvia il listener. */
+  addUserGroup(userId: string, groupId: number, groupName: string) {
+    return call<{ ok: boolean }>(
+      "POST",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/groups`,
+      { group_id: groupId, group_name: groupName }
+    )
+  },
+
+  /** Aggiorna le impostazioni di un gruppo specifico. */
+  updateUserGroup(
+    userId: string,
+    groupId: number,
+    settings: Partial<Pick<UserGroup,
+      "group_name" | "sizing_strategy" | "management_strategy" |
+      "range_entry_pct" | "entry_if_favorable" |
+      "deletion_strategy" | "extraction_instructions"
+    >>
+  ) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/groups/${groupId}`,
+      settings
+    )
+  },
+
+  /** Rimuove un gruppo/canale e riavvia il listener. */
+  removeUserGroup(userId: string, groupId: number) {
+    return call<{ ok: boolean }>(
+      "DELETE",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/groups/${groupId}`
+    )
+  },
+
   /** Aggiorna la modalità di ingresso quando il prezzo è già favorevole. */
   updateEntryIfFavorable(userId: string, entryIfFavorable: boolean) {
     return call<{ ok: boolean }>(
@@ -512,11 +569,12 @@ export const api = {
     )
   },
 
-  /** Statistiche aggregate complete per un utente. */
-  getDashboardStats(userId: string) {
+  /** Statistiche aggregate complete per un utente (opzionalmente filtrate per gruppo). */
+  getDashboardStats(userId: string, groupId?: number) {
+    const gq = groupId != null ? `&group_id=${groupId}` : ""
     return call<DashboardStats>(
       "GET",
-      `/api/dashboard/stats?user_id=${encodeURIComponent(userId)}`
+      `/api/dashboard/stats?user_id=${encodeURIComponent(userId)}${gq}`
     )
   },
 

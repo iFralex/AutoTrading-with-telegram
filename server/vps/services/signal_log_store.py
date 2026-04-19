@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS signal_logs (
     error_step           TEXT,
     error_msg            TEXT,
     telegram_message_id  INTEGER,
-    signal_group_id      TEXT
+    signal_group_id      TEXT,
+    group_id             INTEGER,
+    group_name           TEXT
 )
 """
 
@@ -61,9 +63,16 @@ CREATE INDEX IF NOT EXISTS idx_signal_logs_tg_msg_id
     ON signal_logs(user_id, telegram_message_id)
 """
 
+_CREATE_INDEX_GROUP = """
+CREATE INDEX IF NOT EXISTS idx_signal_logs_group
+    ON signal_logs(user_id, group_id)
+"""
+
 _MIGRATIONS = [
     "ALTER TABLE signal_logs ADD COLUMN telegram_message_id INTEGER",
     "ALTER TABLE signal_logs ADD COLUMN signal_group_id TEXT",
+    "ALTER TABLE signal_logs ADD COLUMN group_id INTEGER",
+    "ALTER TABLE signal_logs ADD COLUMN group_name TEXT",
 ]
 
 
@@ -104,19 +113,18 @@ class SignalLogStore:
             await db.execute(_CREATE_TABLE)
             await db.execute(_CREATE_INDEX)
             await db.commit()
-            # Migration prima degli indici sulle nuove colonne
             for sql in _MIGRATIONS:
                 try:
                     await db.execute(sql)
                     await db.commit()
                 except Exception:
                     pass
-            # L'indice su telegram_message_id richiede che la colonna esista già
-            try:
-                await db.execute(_CREATE_INDEX_MSG_ID)
-                await db.commit()
-            except Exception:
-                pass
+            for idx_sql in (_CREATE_INDEX_MSG_ID, _CREATE_INDEX_GROUP):
+                try:
+                    await db.execute(idx_sql)
+                    await db.commit()
+                except Exception:
+                    pass
 
     async def insert(
         self,
@@ -136,6 +144,8 @@ class SignalLogStore:
         ts: str | None = None,
         telegram_message_id: int | None = None,
         signal_group_id: str | None = None,
+        group_id: int | None = None,
+        group_name: str | None = None,
     ) -> int:
         """
         Inserisce un log di elaborazione.
@@ -156,74 +166,62 @@ class SignalLogStore:
                      has_mt5_creds, sizing_strategy, account_info,
                      signals_json, results_json,
                      error_step, error_msg,
-                     telegram_message_id, signal_group_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     telegram_message_id, signal_group_id,
+                     group_id, group_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    user_id,
-                    ts,
-                    sender_name,
-                    message_text,
-                    1 if is_signal else 0,
-                    flash_raw,
-                    1 if has_mt5_creds else 0,
-                    sizing_strategy,
-                    account_info_json,
-                    signals_json,
-                    results_json,
-                    error_step,
-                    error_msg,
-                    telegram_message_id,
-                    signal_group_id,
+                    user_id, ts, sender_name, message_text,
+                    1 if is_signal else 0, flash_raw,
+                    1 if has_mt5_creds else 0, sizing_strategy, account_info_json,
+                    signals_json, results_json,
+                    error_step, error_msg,
+                    telegram_message_id, signal_group_id,
+                    group_id, group_name,
                 ),
             )
             await db.commit()
             return cursor.lastrowid  # type: ignore[return-value]
 
     async def get_by_telegram_message_id(
-        self, user_id: str, telegram_message_id: int
+        self, user_id: str, telegram_message_id: int, group_id: int | None = None
     ) -> dict | None:
-        """
-        Cerca un log per message_id Telegram.
-        Ritorna il record se era un segnale, None altrimenti.
-        """
+        """Cerca un log per message_id Telegram, opzionalmente filtrato per gruppo."""
+        cond = "WHERE user_id = ? AND telegram_message_id = ?"
+        params: list = [user_id, telegram_message_id]
+        if group_id is not None:
+            cond += " AND group_id = ?"
+            params.append(group_id)
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                """
-                SELECT * FROM signal_logs
-                WHERE user_id = ? AND telegram_message_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (user_id, telegram_message_id),
+                f"SELECT * FROM signal_logs {cond} ORDER BY id DESC LIMIT 1",
+                params,
             )
             row = await cursor.fetchone()
-
-        if row is None:
-            return None
-        return _row_to_dict(row)
+        return _row_to_dict(row) if row is not None else None
 
     async def get_by_user_id(
         self,
         user_id: str,
         limit: int = 50,
         offset: int = 0,
+        group_id: int | None = None,
     ) -> list[dict]:
-        """Ritorna i log più recenti per un utente (ordinati dal più nuovo)."""
+        """Ritorna i log più recenti per un utente, opzionalmente filtrati per gruppo."""
+        cond = "WHERE user_id = ?"
+        params: list = [user_id]
+        if group_id is not None:
+            cond += " AND group_id = ?"
+            params.append(group_id)
+        params += [limit, offset]
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                """
-                SELECT * FROM signal_logs
-                WHERE user_id = ?
-                ORDER BY id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (user_id, limit, offset),
+                f"SELECT * FROM signal_logs {cond} ORDER BY id DESC LIMIT ? OFFSET ?",
+                params,
             )
             rows = await cursor.fetchall()
-
         return [_row_to_dict(row) for row in rows]
 
     async def delete_by_user_id(self, user_id: str) -> int:
@@ -235,110 +233,118 @@ class SignalLogStore:
             await db.commit()
             return cursor.rowcount
 
-    async def count_by_user_id(self, user_id: str) -> int:
-        """Conta i log totali per un utente."""
+    async def count_by_user_id(self, user_id: str, group_id: int | None = None) -> int:
+        """Conta i log totali per un utente, opzionalmente filtrati per gruppo."""
+        cond = "WHERE user_id = ?"
+        params: list = [user_id]
+        if group_id is not None:
+            cond += " AND group_id = ?"
+            params.append(group_id)
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
-                "SELECT COUNT(*) FROM signal_logs WHERE user_id = ?",
-                (user_id,),
+                f"SELECT COUNT(*) FROM signal_logs {cond}", params
             )
             row = await cursor.fetchone()
         return row[0] if row else 0
 
-    async def get_stats_by_user_id(self, user_id: str) -> dict:
+    async def get_stats_by_user_id(self, user_id: str, group_id: int | None = None) -> dict:
         """
         Calcola statistiche aggregate complete per un utente dai signal_logs.
-        Usa query SQL aggregate dove possibile, Python per i campi JSON.
+        Se group_id è specificato, filtra per quel gruppo (vista per-canale).
         """
         import json as _json
         from datetime import datetime as _dt
+
+        # Costruzione filtro opzionale gruppo
+        gf = " AND group_id = ?" if group_id is not None else ""
+        base_p: tuple = (user_id, group_id) if group_id is not None else (user_id,)
 
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
 
             # ── 1. Contatori base ──────────────────────────────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT
                   COUNT(*) AS total_messages,
                   COALESCE(SUM(is_signal), 0) AS total_signals,
                   COALESCE(SUM(CASE WHEN error_step IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_errors,
                   COALESCE(SUM(CASE WHEN results_json IS NOT NULL THEN 1 ELSE 0 END), 0) AS messages_with_orders
-                FROM signal_logs WHERE user_id = ?
+                FROM signal_logs WHERE user_id = ?{gf}
                 """,
-                (user_id,),
+                base_p,
             )
             base = dict(await cur.fetchone())
 
             # ── 2. Trend giornaliero (ultimi 90 giorni) ───────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT
                   date(ts) AS day,
                   COUNT(*) AS messages,
                   COALESCE(SUM(is_signal), 0) AS signals,
                   COALESCE(SUM(CASE WHEN results_json IS NOT NULL THEN 1 ELSE 0 END), 0) AS orders_sent
                 FROM signal_logs
-                WHERE user_id = ? AND date(ts) >= date('now', '-90 days')
+                WHERE user_id = ?{gf} AND date(ts) >= date('now', '-90 days')
                 GROUP BY date(ts)
                 ORDER BY day ASC
                 """,
-                (user_id,),
+                base_p,
             )
             daily_stats = [dict(r) for r in await cur.fetchall()]
 
             # ── 3. Distribuzione oraria ───────────────────────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT
                   CAST(strftime('%H', ts) AS INTEGER) AS hour,
                   COUNT(*) AS messages,
                   COALESCE(SUM(is_signal), 0) AS signals
                 FROM signal_logs
-                WHERE user_id = ?
+                WHERE user_id = ?{gf}
                 GROUP BY strftime('%H', ts)
                 ORDER BY hour ASC
                 """,
-                (user_id,),
+                base_p,
             )
             hourly_distribution = [dict(r) for r in await cur.fetchall()]
 
             # ── 4. Top senders ────────────────────────────────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT sender_name, COUNT(*) AS count
                 FROM signal_logs
-                WHERE user_id = ? AND sender_name IS NOT NULL
+                WHERE user_id = ?{gf} AND sender_name IS NOT NULL
                 GROUP BY sender_name
                 ORDER BY count DESC
                 LIMIT 10
                 """,
-                (user_id,),
+                base_p,
             )
             top_senders = [dict(r) for r in await cur.fetchall()]
 
             # ── 5. Errori per step ────────────────────────────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT error_step, COUNT(*) AS count
                 FROM signal_logs
-                WHERE user_id = ? AND error_step IS NOT NULL
+                WHERE user_id = ?{gf} AND error_step IS NOT NULL
                 GROUP BY error_step
                 ORDER BY count DESC
                 """,
-                (user_id,),
+                base_p,
             )
             errors_by_step = [dict(r) for r in await cur.fetchall()]
 
             # ── 6. Righe con JSON per analisi dettagliata ─────────────────
             cur = await db.execute(
-                """
+                f"""
                 SELECT ts, signals_json, results_json, account_info
                 FROM signal_logs
-                WHERE user_id = ? AND (signals_json IS NOT NULL OR account_info IS NOT NULL)
+                WHERE user_id = ?{gf} AND (signals_json IS NOT NULL OR account_info IS NOT NULL)
                 ORDER BY id ASC
                 """,
-                (user_id,),
+                base_p,
             )
             json_rows = await cur.fetchall()
 

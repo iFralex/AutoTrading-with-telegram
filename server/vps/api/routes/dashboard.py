@@ -85,117 +85,106 @@ async def get_dashboard_user(
     }
 
 
-class UpdateSizingStrategyBody(BaseModel):
-    sizing_strategy: str | None = None
+# ── Gestione gruppi (multi-gruppo) ───────────────────────────────────────────
+
+async def _restart_listener(store, tm, user_id: str) -> None:
+    """Riavvia il listener Telegram con la lista aggiornata dei gruppi attivi."""
+    user = await store.get_user(user_id)
+    if user is None:
+        return
+    groups = await store.get_user_groups(user_id)
+    active_ids = [g["group_id"] for g in groups if g["active"]]
+    try:
+        tm.update_user_groups(
+            user_id=user_id,
+            api_id=user["api_id"],
+            api_hash=user["api_hash"],
+            group_ids=active_ids,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"DB aggiornato ma errore nel listener Telegram: {exc}",
+        )
 
 
-@router.patch("/user/{user_id}/sizing-strategy")
-async def update_sizing_strategy(
+@router.get("/user/{user_id}/groups")
+async def list_user_groups(
     user_id: str,
-    body: UpdateSizingStrategyBody,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Aggiorna la sizing_strategy dell'utente."""
+    """Ritorna tutti i gruppi/canali dell'utente."""
     store = request.app.state.user_store
     user = await store.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_sizing_strategy(user_id, body.sizing_strategy)
-    return {"ok": True}
+    groups = await store.get_user_groups(user_id)
+    return {"groups": groups}
 
 
-class UpdateManagementStrategyBody(BaseModel):
-    management_strategy: str | None = None
+class AddGroupBody(BaseModel):
+    group_id:   int
+    group_name: str = Field(..., min_length=1)
 
 
-@router.patch("/user/{user_id}/management-strategy")
-async def update_management_strategy(
+@router.post("/user/{user_id}/groups")
+async def add_user_group(
     user_id: str,
-    body: UpdateManagementStrategyBody,
+    body: AddGroupBody,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Aggiorna la management_strategy dell'utente."""
+    """Aggiunge un nuovo gruppo/canale e aggiorna il listener Telegram."""
     store = request.app.state.user_store
-    user = await store.get_user(user_id)
+    tm    = request.app.state.telegram_manager
+    user  = await store.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_management_strategy(user_id, body.management_strategy)
+    await store.upsert_user_group(user_id, body.group_id, body.group_name)
+    await _restart_listener(store, tm, user_id)
     return {"ok": True}
 
 
-class UpdateRangeEntryPctBody(BaseModel):
-    range_entry_pct: int = Field(..., ge=0, le=100)
-
-
-@router.patch("/user/{user_id}/range-entry-pct")
-async def update_range_entry_pct(
-    user_id: str,
-    body: UpdateRangeEntryPctBody,
-    request: Request = None,  # type: ignore[assignment]
-):
-    """Aggiorna la percentuale di posizionamento nel range di ingresso (0–100)."""
-    store = request.app.state.user_store
-    user = await store.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_range_entry_pct(user_id, body.range_entry_pct)
-    return {"ok": True}
-
-
-class UpdateDeletionStrategyBody(BaseModel):
-    deletion_strategy: str | None = None
-
-
-@router.patch("/user/{user_id}/deletion-strategy")
-async def update_deletion_strategy(
-    user_id: str,
-    body: UpdateDeletionStrategyBody,
-    request: Request = None,  # type: ignore[assignment]
-):
-    """Aggiorna la strategia AI da eseguire quando un messaggio segnale viene eliminato."""
-    store = request.app.state.user_store
-    user = await store.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_deletion_strategy(user_id, body.deletion_strategy)
-    return {"ok": True}
-
-
-class UpdateExtractionInstructionsBody(BaseModel):
+class UpdateGroupSettingsBody(BaseModel):
+    group_name:              str | None = None
+    sizing_strategy:         str | None = None
+    management_strategy:     str | None = None
+    range_entry_pct:         int | None = Field(None, ge=0, le=100)
+    entry_if_favorable:      bool | None = None
+    deletion_strategy:       str | None = None
     extraction_instructions: str | None = None
 
 
-@router.patch("/user/{user_id}/extraction-instructions")
-async def update_extraction_instructions(
-    user_id: str,
-    body: UpdateExtractionInstructionsBody,
+@router.patch("/user/{user_id}/groups/{group_id}")
+async def update_user_group(
+    user_id:  str,
+    group_id: int,
+    body: UpdateGroupSettingsBody,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Aggiorna le istruzioni custom iniettate nel prompt Pro di estrazione segnali."""
+    """Aggiorna le impostazioni di un gruppo specifico."""
     store = request.app.state.user_store
-    user = await store.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_extraction_instructions(user_id, body.extraction_instructions)
+    grp = await store.get_user_group(user_id, group_id)
+    if grp is None:
+        raise HTTPException(status_code=404, detail=f"Gruppo {group_id} non trovato per l'utente")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    await store.update_user_group_settings(user_id, group_id, fields)
     return {"ok": True}
 
 
-class UpdateEntryIfFavorableBody(BaseModel):
-    entry_if_favorable: bool
-
-
-@router.patch("/user/{user_id}/entry-if-favorable")
-async def update_entry_if_favorable(
-    user_id: str,
-    body: UpdateEntryIfFavorableBody,
+@router.delete("/user/{user_id}/groups/{group_id}")
+async def remove_user_group(
+    user_id:  str,
+    group_id: int,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Aggiorna la modalità di ingresso quando il prezzo corrente è già più favorevole del target."""
+    """Rimuove un gruppo dal profilo e aggiorna il listener Telegram."""
     store = request.app.state.user_store
-    user = await store.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    await store.update_entry_if_favorable(user_id, body.entry_if_favorable)
+    tm    = request.app.state.telegram_manager
+    grp = await store.get_user_group(user_id, group_id)
+    if grp is None:
+        raise HTTPException(status_code=404, detail=f"Gruppo {group_id} non trovato per l'utente")
+    await store.delete_user_group(user_id, group_id)
+    await _restart_listener(store, tm, user_id)
     return {"ok": True}
 
 
@@ -216,11 +205,12 @@ async def test_order(
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {body.user_id} non trovato")
 
-    mt5_login          = user.get("mt5_login")
-    mt5_password       = user.get("mt5_password")
-    mt5_server         = user.get("mt5_server")
-    range_entry_pct    = int(user.get("range_entry_pct") or 0)
-    entry_if_favorable = bool(user.get("entry_if_favorable"))
+    mt5_login    = user.get("mt5_login")
+    mt5_password = user.get("mt5_password")
+    mt5_server   = user.get("mt5_server")
+    first_group  = (user.get("groups") or [{}])[0]
+    range_entry_pct    = int(first_group.get("range_entry_pct") or 0)
+    entry_if_favorable = bool(first_group.get("entry_if_favorable"))
 
     if not (mt5_login and mt5_password and mt5_server):
         raise HTTPException(
@@ -400,7 +390,8 @@ async def get_trade_stats(
 
 @router.get("/stats")
 async def get_dashboard_stats(
-    user_id: str  = Query(..., description="Telegram user_id"),
+    user_id:  str       = Query(..., description="Telegram user_id"),
+    group_id: int | None = Query(None, description="Filtra per gruppo specifico (None = globale)"),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -415,22 +406,23 @@ async def get_dashboard_stats(
     - Andamento balance/equity nel tempo
     """
     log_store = request.app.state.signal_log_store
-    stats = await log_store.get_stats_by_user_id(user_id)
+    stats = await log_store.get_stats_by_user_id(user_id, group_id=group_id)
     return stats
 
 
 @router.get("/logs")
 async def get_dashboard_logs(
-    user_id: str  = Query(..., description="Telegram user_id"),
-    limit:   int  = Query(50,  ge=1, le=200),
-    offset:  int  = Query(0,   ge=0),
+    user_id:  str       = Query(..., description="Telegram user_id"),
+    limit:    int       = Query(50,  ge=1, le=200),
+    offset:   int       = Query(0,   ge=0),
+    group_id: int | None = Query(None, description="Filtra per gruppo specifico"),
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Paginazione dei log segnali per un utente già identificato."""
+    """Paginazione dei log segnali per un utente, opzionalmente filtrata per gruppo."""
     log_store = request.app.state.signal_log_store
 
-    logs  = await log_store.get_by_user_id(user_id, limit=limit, offset=offset)
-    total = await log_store.count_by_user_id(user_id)
+    logs  = await log_store.get_by_user_id(user_id, limit=limit, offset=offset, group_id=group_id)
+    total = await log_store.count_by_user_id(user_id, group_id=group_id)
 
     return {"logs": logs, "total": total}
 

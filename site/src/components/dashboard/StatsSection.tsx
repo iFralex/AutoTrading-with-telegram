@@ -498,7 +498,7 @@ function TradePerformanceSection({ ts }: { ts: TradeStats }) {
 
 // ── Componente principale ─────────────────────────────────────────────────────
 
-export function StatsSection({ userId }: { userId: string }) {
+export function StatsSection({ userId, groupId }: { userId: string; groupId?: number }) {
   const [stats, setStats]         = useState<DashboardStats | null>(null)
   const [tradeStats, setTradeStats] = useState<TradeStats | null>(null)
   const [loading, setLoading]     = useState(true)
@@ -508,13 +508,13 @@ export function StatsSection({ userId }: { userId: string }) {
     setLoading(true)
     setError(null)
     Promise.all([
-      api.getDashboardStats(userId),
+      api.getDashboardStats(userId, groupId),
       api.getTradeStats(userId),
     ])
       .then(([s, t]) => { setStats(s); setTradeStats(t) })
       .catch(e => setError(e instanceof Error ? e.message : "Errore sconosciuto"))
       .finally(() => setLoading(false))
-  }, [userId])
+  }, [userId, groupId])
 
   if (loading) return <StatsLoading />
   if (error)   return <StatsError message={error} />

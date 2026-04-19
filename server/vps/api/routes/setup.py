@@ -475,26 +475,33 @@ async def complete_setup(
             mt5_password = await ss.get_mt5_password(body.phone)
 
         await store.upsert({
-            "user_id":             body.user_id,
-            "api_id":              body.api_id,
-            "api_hash":            body.api_hash,
-            "phone":               body.phone,
-            "group_id":            int(body.group_id),
-            "group_name":          body.group_name,
-            "mt5_login":           body.mt5_login,
-            "mt5_password":        mt5_password,
-            "mt5_server":          body.mt5_server,
-            "sizing_strategy":          body.sizing_strategy,
-            "management_strategy":      body.management_strategy,
-            "deletion_strategy":        body.deletion_strategy,
-            "extraction_instructions":  body.extraction_instructions,
+            "user_id":      body.user_id,
+            "api_id":       body.api_id,
+            "api_hash":     body.api_hash,
+            "phone":        body.phone,
+            "group_id":     int(body.group_id),
+            "group_name":   body.group_name,
+            "mt5_login":    body.mt5_login,
+            "mt5_password": mt5_password,
+            "mt5_server":   body.mt5_server,
         })
+
+        # Popola il primo gruppo nella tabella multi-gruppo
+        await store.upsert_user_group(
+            user_id=body.user_id,
+            group_id=int(body.group_id),
+            group_name=body.group_name,
+            sizing_strategy=body.sizing_strategy,
+            management_strategy=body.management_strategy,
+            deletion_strategy=body.deletion_strategy,
+            extraction_instructions=body.extraction_instructions,
+        )
 
         tm.add_user(
             user_id=body.user_id,
             api_id=body.api_id,
             api_hash=body.api_hash,
-            group_id=int(body.group_id),
+            group_ids=[int(body.group_id)],
             login_key=body.login_key,
         )
 

@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 MessageCallback = Callable[..., Awaitable[None]]
 
 # Tipo del callback chiamato quando uno o più messaggi vengono eliminati
-# firma: on_delete(user_id, deleted_ids) → None
-DeleteCallback = Callable[[str, list[int]], Awaitable[None]]
+# firma: on_delete(user_id, group_id, deleted_ids) → None
+DeleteCallback = Callable[[str, "int | None", list[int]], Awaitable[None]]
 
 
 class PasswordRequiredError(Exception):
@@ -167,20 +167,35 @@ class TelegramManager:
         user_id: str,
         api_id: int,
         api_hash: str,
-        group_id: int,
+        group_ids: list[int],
         login_key: str,
     ) -> None:
         """
         Promuove il login pendente a sessione attiva e avvia l'ascolto
-        dei messaggi sul gruppo indicato.
+        dei messaggi su tutti i gruppi indicati.
         """
         self._call(
-            self._async_add_user(user_id, api_id, api_hash, group_id, login_key)
+            self._async_add_user(user_id, api_id, api_hash, group_ids, login_key)
         )
 
     def remove_user(self, user_id: str) -> None:
         """Disconnette e rimuove l'utente."""
         self._call(self._async_remove_user(user_id))
+
+    def update_user_groups(
+        self,
+        user_id: str,
+        api_id: int,
+        api_hash: str,
+        group_ids: list[int],
+    ) -> None:
+        """
+        Aggiorna la lista di gruppi/canali monitorati per un utente già attivo.
+        Disconnette il client esistente e lo ricrea con i nuovi group_ids.
+        """
+        self._call(
+            self._async_update_user_groups(user_id, api_id, api_hash, group_ids)
+        )
 
     def restore_users(self, users: list[dict]) -> None:
         """
@@ -426,28 +441,23 @@ class TelegramManager:
         user_id: str,
         api_id: int,
         api_hash: str,
-        group_id: int,
+        group_ids: list[int],
         login_key: str,
     ) -> None:
         entry = self._pending.pop(login_key, None)
         if entry is None:
             raise ValueError(f"Login pendente '{login_key}' non trovato")
 
-        # Disconnetti il client temporaneo (la sessione è già salvata su disco)
         tmp_client: TelegramClient = entry["client"]
         await tmp_client.disconnect()
 
-        # Sposta il file di sessione da _tmp_{key}.session a {user_id}.session
         tmp_path = self._sessions_dir / f"_tmp_{login_key}.session"
         final_path = self._sessions_dir / f"{user_id}.session"
         if tmp_path.exists():
             tmp_path.rename(final_path)
         else:
-            logger.warning(
-                "File sessione temporaneo non trovato: %s", tmp_path
-            )
+            logger.warning("File sessione temporaneo non trovato: %s", tmp_path)
 
-        # Crea il client definitivo caricando la sessione appena rinominata
         session_name = str(final_path.with_suffix(""))
         client = await self._make_client(api_id, api_hash, session_name)
 
@@ -461,16 +471,44 @@ class TelegramManager:
             await self._clients[user_id].disconnect()
 
         self._clients[user_id] = client
-        self._attach_handler(client, user_id, group_id)
-        logger.info(
-            "Utente %s aggiunto, ascolto sul gruppo %d", user_id, group_id
-        )
+        self._attach_handler(client, user_id, group_ids)
+        logger.info("Utente %s aggiunto, ascolto sui gruppi %s", user_id, group_ids)
 
     async def _async_remove_user(self, user_id: str) -> None:
         client = self._clients.pop(user_id, None)
         if client:
             await client.disconnect()
             logger.info("Utente %s disconnesso", user_id)
+
+    async def _async_update_user_groups(
+        self,
+        user_id: str,
+        api_id: int,
+        api_hash: str,
+        group_ids: list[int],
+    ) -> None:
+        old_client = self._clients.pop(user_id, None)
+        if old_client:
+            await old_client.disconnect()
+
+        if not group_ids:
+            logger.info("Utente %s: nessun gruppo attivo, listener rimosso", user_id)
+            return
+
+        session_path = self._sessions_dir / f"{user_id}.session"
+        if not session_path.exists():
+            raise RuntimeError(f"File sessione non trovato per utente {user_id}")
+
+        session_name = str(session_path.with_suffix(""))
+        client = await self._make_client(api_id, api_hash, session_name)
+
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            raise RuntimeError(f"Sessione utente {user_id} non autorizzata")
+
+        self._clients[user_id] = client
+        self._attach_handler(client, user_id, group_ids)
+        logger.info("Utente %s: gruppi aggiornati a %s", user_id, group_ids)
 
     async def _async_restore_users(self, users: list[dict]) -> None:
         """Riconnette tutti gli utenti dal database all'avvio del servizio."""
@@ -498,14 +536,15 @@ class TelegramManager:
                     continue
 
                 self._clients[uid] = client
-                self._attach_handler(client, uid, int(u["group_id"]))
+                group_ids = [int(g) for g in u.get("group_ids") or [] if g]
+                if not group_ids and u.get("group_id"):
+                    group_ids = [int(u["group_id"])]
+                self._attach_handler(client, uid, group_ids)
 
                 me: User = await client.get_me()
                 logger.info(
-                    "Utente %s (%s) ripristinato, ascolto gruppo %s",
-                    uid,
-                    me.first_name,
-                    u["group_id"],
+                    "Utente %s (%s) ripristinato, ascolto gruppi %s",
+                    uid, me.first_name, group_ids,
                 )
                 restored += 1
 
@@ -517,14 +556,17 @@ class TelegramManager:
         logger.info("Ripristinati %d/%d utenti", restored, len(users))
 
     def _attach_handler(
-        self, client: TelegramClient, user_id: str, group_id: int
+        self, client: TelegramClient, user_id: str, group_ids: list[int]
     ) -> None:
         """
-        Registra il NewMessage e il MessageDeleted handler sul client.
-        Viene chiamata sia per utenti nuovi che per quelli ripristinati al boot.
+        Registra NewMessage e MessageDeleted handler per tutti i gruppi in group_ids.
+        Il callback on_message riceve il group_id sorgente dell'evento.
         """
+        if not group_ids:
+            logger.warning("Utente %s: nessun gruppo, handler non registrato", user_id)
+            return
 
-        @client.on(events.NewMessage(chats=group_id))
+        @client.on(events.NewMessage(chats=group_ids))
         async def _handler(event: events.NewMessage.Event) -> None:
             if self._on_message is None:
                 return
@@ -532,19 +574,18 @@ class TelegramManager:
                 sender = await event.get_sender()
                 await self._on_message(
                     user_id=user_id,
+                    group_id=event.chat_id,
                     message=event.message.message or "",
                     raw_event=event,
                     sender=sender,
                 )
             except Exception as exc:
                 logger.error(
-                    "Errore nel callback messaggio (utente %s): %s",
-                    user_id,
-                    exc,
-                    exc_info=True,
+                    "Errore callback messaggio (utente %s): %s",
+                    user_id, exc, exc_info=True,
                 )
 
-        @client.on(events.MessageDeleted(chats=group_id))
+        @client.on(events.MessageDeleted(chats=group_ids))
         async def _delete_handler(event: events.MessageDeleted.Event) -> None:
             if self._on_delete is None:
                 return
@@ -552,11 +593,9 @@ class TelegramManager:
             if not deleted_ids:
                 return
             try:
-                await self._on_delete(user_id, deleted_ids)
+                await self._on_delete(user_id, getattr(event, "chat_id", None), deleted_ids)
             except Exception as exc:
                 logger.error(
-                    "Errore nel callback eliminazione messaggi (utente %s): %s",
-                    user_id,
-                    exc,
-                    exc_info=True,
+                    "Errore callback eliminazione (utente %s): %s",
+                    user_id, exc, exc_info=True,
                 )

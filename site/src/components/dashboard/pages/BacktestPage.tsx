@@ -120,6 +120,10 @@ function RunForm({ user, onStarted }: {
   user: DashboardUser
   onStarted: (runId: string) => void
 }) {
+  const groups = user.groups ?? []
+  const [selectedGroupId, setSelectedGroupId] = useState<number>(
+    groups[0]?.group_id ?? 0
+  )
   const [mode, setMode]           = useState<"date_limit" | "message_count">("message_count")
   const [dateVal, setDateVal]     = useState("")
   const [countVal, setCountVal]   = useState("1000")
@@ -128,16 +132,19 @@ function RunForm({ user, onStarted }: {
   const [loading, setLoading]     = useState(false)
   const [err, setErr]             = useState<string | null>(null)
 
+  const selectedGroup = groups.find(g => g.group_id === selectedGroupId) ?? groups[0]
+
   async function submit() {
     setErr(null)
     const limitValue = mode === "date_limit" ? dateVal : countVal
     if (!limitValue) { setErr("Inserisci un valore"); return }
+    if (!selectedGroup) { setErr("Seleziona un gruppo"); return }
     setLoading(true)
     try {
       const res = await api.startBacktest({
         user_id:              user.user_id,
-        group_id:             String(user.group_id),
-        group_name:           user.group_name,
+        group_id:             String(selectedGroup.group_id),
+        group_name:           selectedGroup.group_name,
         mode,
         limit_value:          limitValue,
         use_ai:               useAi,
@@ -154,6 +161,29 @@ function RunForm({ user, onStarted }: {
   return (
     <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-4">
       <h3 className="text-sm font-semibold text-foreground">Nuovo backtest</h3>
+
+      {/* Group selector */}
+      {groups.length > 1 && (
+        <div>
+          <label className="text-xs text-muted-foreground">Gruppo / canale</label>
+          <select
+            value={selectedGroupId}
+            onChange={e => setSelectedGroupId(Number(e.target.value))}
+            className="mt-1 w-full px-3 py-2 text-sm bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all text-foreground"
+          >
+            {groups.map(g => (
+              <option key={g.group_id} value={g.group_id}>
+                {g.group_name} ({g.group_id})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {groups.length === 1 && (
+        <p className="text-xs text-muted-foreground">
+          Gruppo: <span className="font-medium text-foreground">{groups[0].group_name}</span>
+        </p>
+      )}
 
       {/* Mode toggle */}
       <div className="flex gap-2">

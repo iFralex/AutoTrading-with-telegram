@@ -71,6 +71,49 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN extraction_instructions TEXT",
 ]
 
+# ── Tabella multi-gruppo ──────────────────────────────────────────────────────
+
+_CREATE_USER_GROUPS_TABLE = """
+CREATE TABLE IF NOT EXISTS user_groups (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                 TEXT    NOT NULL,
+    group_id                INTEGER NOT NULL,
+    group_name              TEXT    NOT NULL,
+    sizing_strategy         TEXT,
+    management_strategy     TEXT,
+    range_entry_pct         INTEGER NOT NULL DEFAULT 0,
+    entry_if_favorable      INTEGER NOT NULL DEFAULT 0,
+    deletion_strategy       TEXT,
+    extraction_instructions TEXT,
+    active                  INTEGER NOT NULL DEFAULT 1,
+    created_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, group_id)
+)
+"""
+
+_CREATE_USER_GROUPS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_user_groups_user_id ON user_groups(user_id)
+"""
+
+# Migrazione dati: popola user_groups dai gruppi già presenti nella tabella users
+_MIGRATE_USER_GROUPS_DATA = """
+INSERT OR IGNORE INTO user_groups
+    (user_id, group_id, group_name,
+     sizing_strategy, management_strategy,
+     range_entry_pct, entry_if_favorable,
+     deletion_strategy, extraction_instructions,
+     active, created_at)
+SELECT
+    user_id, group_id, group_name,
+    sizing_strategy, management_strategy,
+    COALESCE(range_entry_pct, 0),
+    COALESCE(entry_if_favorable, 0),
+    deletion_strategy, extraction_instructions,
+    active, created_at
+FROM users
+WHERE group_id IS NOT NULL AND group_id != 0
+"""
+
 
 def _cipher() -> Fernet:
     key = os.environ.get("ENCRYPTION_KEY", "")
@@ -105,7 +148,7 @@ class UserStore:
         self._db_path = db_path
 
     async def init(self) -> None:
-        """Crea il database e la tabella se non esistono; applica le migration."""
+        """Crea il database e le tabelle se non esistono; applica le migration."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_CREATE_TABLE)
@@ -118,6 +161,15 @@ class UserStore:
                     await db.commit()
                 except Exception:
                     pass
+            # Tabella multi-gruppo e migrazione dati
+            await db.execute(_CREATE_USER_GROUPS_TABLE)
+            await db.execute(_CREATE_USER_GROUPS_INDEX)
+            await db.commit()
+            try:
+                await db.execute(_MIGRATE_USER_GROUPS_DATA)
+                await db.commit()
+            except Exception:
+                pass
 
     # ── Write ────────────────────────────────────────────────────────────────
 
@@ -177,6 +229,116 @@ class UserStore:
                     user.get("deletion_strategy"),
                     user.get("extraction_instructions"),
                 ),
+            )
+            await db.commit()
+
+    # ── User groups CRUD ─────────────────────────────────────────────────────
+
+    async def _fetch_groups_for_user(self, db: "aiosqlite.Connection", user_id: str) -> list[dict]:
+        """Helper: legge tutti i gruppi dell'utente usando una connessione già aperta."""
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM user_groups WHERE user_id = ? ORDER BY id ASC",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        return [_group_row_to_dict(row) for row in rows]
+
+    async def get_user_groups(self, user_id: str) -> list[dict]:
+        """Ritorna tutti i gruppi di un utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._fetch_groups_for_user(db, user_id)
+
+    async def get_user_group(self, user_id: str, group_id: int) -> dict | None:
+        """Ritorna le impostazioni di un singolo gruppo."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM user_groups WHERE user_id = ? AND group_id = ?",
+                (user_id, group_id),
+            )
+            row = await cursor.fetchone()
+        return _group_row_to_dict(row) if row is not None else None
+
+    async def upsert_user_group(
+        self,
+        user_id: str,
+        group_id: int,
+        group_name: str,
+        *,
+        sizing_strategy: str | None = None,
+        management_strategy: str | None = None,
+        range_entry_pct: int = 0,
+        entry_if_favorable: bool = False,
+        deletion_strategy: str | None = None,
+        extraction_instructions: str | None = None,
+        active: bool = True,
+    ) -> None:
+        """Inserisce o aggiorna un gruppo utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO user_groups
+                    (user_id, group_id, group_name,
+                     sizing_strategy, management_strategy, range_entry_pct,
+                     entry_if_favorable, deletion_strategy, extraction_instructions, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, group_id) DO UPDATE SET
+                    group_name              = excluded.group_name,
+                    sizing_strategy         = excluded.sizing_strategy,
+                    management_strategy     = excluded.management_strategy,
+                    range_entry_pct         = excluded.range_entry_pct,
+                    entry_if_favorable      = excluded.entry_if_favorable,
+                    deletion_strategy       = excluded.deletion_strategy,
+                    extraction_instructions = excluded.extraction_instructions,
+                    active                  = excluded.active
+                """,
+                (
+                    user_id, group_id, group_name,
+                    sizing_strategy, management_strategy,
+                    max(0, min(100, int(range_entry_pct))),
+                    1 if entry_if_favorable else 0,
+                    deletion_strategy, extraction_instructions,
+                    1 if active else 0,
+                ),
+            )
+            await db.commit()
+
+    async def update_user_group_settings(
+        self,
+        user_id: str,
+        group_id: int,
+        fields: dict,
+    ) -> None:
+        """Aggiorna selettivamente le impostazioni di un gruppo utente."""
+        allowed = {
+            "group_name", "sizing_strategy", "management_strategy",
+            "range_entry_pct", "entry_if_favorable",
+            "deletion_strategy", "extraction_instructions",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return
+        # Coerce types
+        if "range_entry_pct" in updates:
+            updates["range_entry_pct"] = max(0, min(100, int(updates["range_entry_pct"])))
+        if "entry_if_favorable" in updates:
+            updates["entry_if_favorable"] = 1 if updates["entry_if_favorable"] else 0
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [user_id, group_id]
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                f"UPDATE user_groups SET {set_clause} WHERE user_id = ? AND group_id = ?",
+                values,
+            )
+            await db.commit()
+
+    async def delete_user_group(self, user_id: str, group_id: int) -> None:
+        """Rimuove un gruppo dal profilo dell'utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "DELETE FROM user_groups WHERE user_id = ? AND group_id = ?",
+                (user_id, group_id),
             )
             await db.commit()
 
@@ -253,56 +415,61 @@ class UserStore:
     async def get_active_users(self) -> list[dict]:
         """
         Ritorna tutti gli utenti attivi nel formato atteso da
-        TelegramManager.restore_users().
+        TelegramManager.restore_users(). Include group_ids (lista) per il
+        multi-gruppo e i campi del primo gruppo per backward-compat.
         """
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM users WHERE active = 1"
-            )
+            cursor = await db.execute("SELECT * FROM users WHERE active = 1")
             rows = await cursor.fetchall()
 
-        result = []
-        for row in rows:
-            mt5_password: str | None = None
-            if row["mt5_password_enc"]:
-                try:
-                    mt5_password = _decrypt(row["mt5_password_enc"])
-                except Exception:
-                    mt5_password = None  # chiave cambiata o dati corrotti
+            result = []
+            for row in rows:
+                groups = await self._fetch_groups_for_user(db, row["user_id"])
+                active_groups = [g for g in groups if g["active"]]
+                first = active_groups[0] if active_groups else {}
 
-            result.append(
-                {
-                    "user_id":                  row["user_id"],
-                    "api_id":                   row["api_id"],
-                    "api_hash":                 row["api_hash"],
-                    "phone":                    row["phone"],
-                    "group_id":                 row["group_id"],
-                    "group_name":               row["group_name"],
-                    "mt5_login":                row["mt5_login"],
-                    "mt5_password":             mt5_password,
-                    "mt5_server":               row["mt5_server"],
-                    "sizing_strategy":          row["sizing_strategy"],
-                    "management_strategy":      row["management_strategy"],
-                    "deletion_strategy":        row["deletion_strategy"],
-                    "extraction_instructions":  row["extraction_instructions"],
-                    "range_entry_pct":          int(row["range_entry_pct"] or 0),
-                    "entry_if_favorable":       bool(row["entry_if_favorable"]),
-                }
-            )
+                mt5_password: str | None = None
+                if row["mt5_password_enc"]:
+                    try:
+                        mt5_password = _decrypt(row["mt5_password_enc"])
+                    except Exception:
+                        mt5_password = None
+
+                result.append({
+                    "user_id":   row["user_id"],
+                    "api_id":    row["api_id"],
+                    "api_hash":  row["api_hash"],
+                    "phone":     row["phone"],
+                    "mt5_login": row["mt5_login"],
+                    "mt5_password": mt5_password,
+                    "mt5_server":   row["mt5_server"],
+                    # Multi-gruppo
+                    "group_ids": [g["group_id"] for g in active_groups],
+                    "groups":    active_groups,
+                    # Backward-compat: primo gruppo attivo
+                    "group_id":              first.get("group_id"),
+                    "group_name":            first.get("group_name"),
+                    "sizing_strategy":       first.get("sizing_strategy"),
+                    "management_strategy":   first.get("management_strategy"),
+                    "deletion_strategy":     first.get("deletion_strategy"),
+                    "extraction_instructions": first.get("extraction_instructions"),
+                    "range_entry_pct":       first.get("range_entry_pct", 0),
+                    "entry_if_favorable":    first.get("entry_if_favorable", False),
+                })
         return result
 
     async def get_user_by_phone(self, phone: str) -> dict | None:
-        """Cerca un utente per numero di telefono."""
+        """Cerca un utente per numero di telefono. Include la lista dei gruppi."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM users WHERE phone = ?", (phone,)
             )
             row = await cursor.fetchone()
-
-        if row is None:
-            return None
+            if row is None:
+                return None
+            groups = await self._fetch_groups_for_user(db, row["user_id"])
 
         mt5_password: str | None = None
         if row["mt5_password_enc"]:
@@ -311,36 +478,40 @@ class UserStore:
             except Exception:
                 pass
 
+        first = groups[0] if groups else {}
         return {
-            "user_id":                  row["user_id"],
-            "api_id":                   row["api_id"],
-            "api_hash":                 row["api_hash"],
-            "phone":                    row["phone"],
-            "group_id":                 row["group_id"],
-            "group_name":               row["group_name"],
-            "mt5_login":                row["mt5_login"],
-            "mt5_password":             mt5_password,
-            "mt5_server":               row["mt5_server"],
-            "sizing_strategy":          row["sizing_strategy"],
-            "management_strategy":      row["management_strategy"],
-            "deletion_strategy":        row["deletion_strategy"],
-            "extraction_instructions":  row["extraction_instructions"],
-            "range_entry_pct":          int(row["range_entry_pct"] or 0),
-            "entry_if_favorable":       bool(row["entry_if_favorable"]),
-            "active":                   bool(row["active"]),
-            "created_at":               row["created_at"],
+            "user_id":   row["user_id"],
+            "api_id":    row["api_id"],
+            "api_hash":  row["api_hash"],
+            "phone":     row["phone"],
+            "mt5_login": row["mt5_login"],
+            "mt5_password": mt5_password,
+            "mt5_server":   row["mt5_server"],
+            "active":    bool(row["active"]),
+            "created_at": row["created_at"],
+            "groups":    groups,
+            # Backward-compat: primo gruppo
+            "group_id":              first.get("group_id"),
+            "group_name":            first.get("group_name"),
+            "sizing_strategy":       first.get("sizing_strategy"),
+            "management_strategy":   first.get("management_strategy"),
+            "deletion_strategy":     first.get("deletion_strategy"),
+            "extraction_instructions": first.get("extraction_instructions"),
+            "range_entry_pct":       first.get("range_entry_pct", 0),
+            "entry_if_favorable":    first.get("entry_if_favorable", False),
         }
 
     async def get_user(self, user_id: str) -> dict | None:
+        """Ritorna l'utente con la lista completa dei gruppi."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM users WHERE user_id = ?", (user_id,)
             )
             row = await cursor.fetchone()
-
-        if row is None:
-            return None
+            if row is None:
+                return None
+            groups = await self._fetch_groups_for_user(db, row["user_id"])
 
         mt5_password: str | None = None
         if row["mt5_password_enc"]:
@@ -349,24 +520,27 @@ class UserStore:
             except Exception:
                 pass
 
+        first = groups[0] if groups else {}
         return {
-            "user_id":                  row["user_id"],
-            "api_id":                   row["api_id"],
-            "api_hash":                 row["api_hash"],
-            "phone":                    row["phone"],
-            "group_id":                 row["group_id"],
-            "group_name":               row["group_name"],
-            "mt5_login":                row["mt5_login"],
-            "mt5_password":             mt5_password,
-            "mt5_server":               row["mt5_server"],
-            "sizing_strategy":          row["sizing_strategy"],
-            "management_strategy":      row["management_strategy"],
-            "deletion_strategy":        row["deletion_strategy"],
-            "extraction_instructions":  row["extraction_instructions"],
-            "range_entry_pct":          int(row["range_entry_pct"] or 0),
-            "entry_if_favorable":       bool(row["entry_if_favorable"]),
-            "active":                   bool(row["active"]),
-            "created_at":               row["created_at"],
+            "user_id":   row["user_id"],
+            "api_id":    row["api_id"],
+            "api_hash":  row["api_hash"],
+            "phone":     row["phone"],
+            "mt5_login": row["mt5_login"],
+            "mt5_password": mt5_password,
+            "mt5_server":   row["mt5_server"],
+            "active":    bool(row["active"]),
+            "created_at": row["created_at"],
+            "groups":    groups,
+            # Backward-compat: primo gruppo
+            "group_id":              first.get("group_id"),
+            "group_name":            first.get("group_name"),
+            "sizing_strategy":       first.get("sizing_strategy"),
+            "management_strategy":   first.get("management_strategy"),
+            "deletion_strategy":     first.get("deletion_strategy"),
+            "extraction_instructions": first.get("extraction_instructions"),
+            "range_entry_pct":       first.get("range_entry_pct", 0),
+            "entry_if_favorable":    first.get("entry_if_favorable", False),
         }
 
     # ── Signal links ──────────────────────────────────────────────────────────
@@ -427,3 +601,22 @@ class UserStore:
                 (user_id, user_id),
             )
             await db.commit()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
+    return {
+        "id":                       row["id"],
+        "user_id":                  row["user_id"],
+        "group_id":                 row["group_id"],
+        "group_name":               row["group_name"],
+        "sizing_strategy":          row["sizing_strategy"],
+        "management_strategy":      row["management_strategy"],
+        "range_entry_pct":          int(row["range_entry_pct"] or 0),
+        "entry_if_favorable":       bool(row["entry_if_favorable"]),
+        "deletion_strategy":        row["deletion_strategy"],
+        "extraction_instructions":  row["extraction_instructions"],
+        "active":                   bool(row["active"]),
+        "created_at":               row["created_at"],
+    }

@@ -246,6 +246,7 @@ async def lifespan(app: FastAPI):
     # Telegram manager
     async def on_message(
         user_id: str,
+        group_id: int | None,
         message: str,
         raw_event,
         sender,
@@ -286,7 +287,7 @@ async def lifespan(app: FastAPI):
                 for linked_id in linked_ids:
                     ulog.info("Propagazione segnale da %s a utente collegato %s", user_id, linked_id)
                     asyncio.get_event_loop().create_task(
-                        on_message(linked_id, message, raw_event, sender, _is_forwarded=True)
+                        on_message(linked_id, None, message, raw_event, sender, _is_forwarded=True)
                     )
             except Exception as exc:
                 ulog.warning("Errore propagazione link segnali per utente %s: %s", user_id, exc)
@@ -310,6 +311,7 @@ async def lifespan(app: FastAPI):
         log_results:         list | None = None
         log_error_step:      str | None  = None
         log_error_msg:       str | None  = None
+        log_group_name:      str | None  = None
 
         async def _save_log() -> None:
             await signal_log_store.insert(
@@ -327,6 +329,8 @@ async def lifespan(app: FastAPI):
                 error_msg            = log_error_msg,
                 telegram_message_id  = telegram_message_id,
                 signal_group_id      = signal_group_id if log_is_signal else None,
+                group_id             = group_id,
+                group_name           = log_group_name,
             )
 
         if signal_processor is None:
@@ -361,15 +365,25 @@ async def lifespan(app: FastAPI):
             await _save_log()
             return
 
-        mt5_login           = user.get("mt5_login")
-        mt5_password        = user.get("mt5_password")   # già decifrata da UserStore
-        mt5_server          = user.get("mt5_server")
-        log_sizing_strategy     = user.get("sizing_strategy") or None
-        management_strategy     = user.get("management_strategy") or None
-        extraction_instructions = user.get("extraction_instructions") or None
-        range_entry_pct     = int(user.get("range_entry_pct") or 0)
-        entry_if_favorable  = bool(user.get("entry_if_favorable"))
-        ulog.info("Utente %s: range_entry_pct=%d%%, entry_if_favorable=%s", user_id, range_entry_pct, entry_if_favorable)
+        mt5_login    = user.get("mt5_login")
+        mt5_password = user.get("mt5_password")   # già decifrata da UserStore
+        mt5_server   = user.get("mt5_server")
+
+        # Impostazioni per-gruppo: usa group_id del messaggio, altrimenti primo gruppo
+        group_settings: dict | None = None
+        if group_id is not None:
+            group_settings = await store.get_user_group(user_id, group_id)
+        if group_settings is None:
+            groups = user.get("groups") or []
+            group_settings = groups[0] if groups else {}
+        log_group_name          = (group_settings or {}).get("group_name")
+        log_sizing_strategy     = (group_settings or {}).get("sizing_strategy") or None
+        management_strategy     = (group_settings or {}).get("management_strategy") or None
+        extraction_instructions = (group_settings or {}).get("extraction_instructions") or None
+        range_entry_pct     = int((group_settings or {}).get("range_entry_pct") or 0)
+        entry_if_favorable  = bool((group_settings or {}).get("entry_if_favorable"))
+        ulog.info("Utente %s: gruppo=%s range_entry_pct=%d%% entry_if_favorable=%s",
+                  user_id, group_id, range_entry_pct, entry_if_favorable)
 
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
@@ -554,6 +568,7 @@ async def lifespan(app: FastAPI):
 
     async def on_message_deleted(
         user_id: str,
+        group_id: int | None,
         deleted_ids: list[int],
         *,
         _is_forwarded: bool = False,
@@ -580,7 +595,7 @@ async def lifespan(app: FastAPI):
                 for linked_id in linked_ids:
                     ulog.info("Propagazione eliminazione da %s a utente collegato %s", user_id, linked_id)
                     asyncio.get_event_loop().create_task(
-                        on_message_deleted(linked_id, deleted_ids, _is_forwarded=True)
+                        on_message_deleted(linked_id, None, deleted_ids, _is_forwarded=True)
                     )
             except Exception as exc:
                 ulog.warning("Errore propagazione eliminazione link per utente %s: %s", user_id, exc)
@@ -590,7 +605,9 @@ async def lifespan(app: FastAPI):
 
         for msg_id in deleted_ids:
             # Cerca il log del messaggio eliminato
-            log_entry = await signal_log_store.get_by_telegram_message_id(user_id, msg_id)
+            log_entry = await signal_log_store.get_by_telegram_message_id(
+                user_id, msg_id, group_id=group_id
+            )
             if log_entry is None or not log_entry.get("is_signal"):
                 continue  # Non era un segnale tracciato
 
@@ -600,12 +617,18 @@ async def lifespan(app: FastAPI):
                 msg_id, user_id, sig_group_id,
             )
 
-            # Recupera la deletion_strategy dell'utente
+            # Recupera le impostazioni del gruppo sorgente
             user = await store.get_user(user_id)
             if user is None:
                 continue
 
-            deletion_strategy = user.get("deletion_strategy") or ""
+            del_group_settings: dict | None = None
+            if group_id is not None:
+                del_group_settings = await store.get_user_group(user_id, group_id)
+            if del_group_settings is None:
+                groups = user.get("groups") or []
+                del_group_settings = groups[0] if groups else {}
+            deletion_strategy = (del_group_settings or {}).get("deletion_strategy") or ""
             if not deletion_strategy.strip():
                 ulog.debug(
                     "Utente %s: deletion_strategy non configurata — skip messaggio eliminato #%d",
