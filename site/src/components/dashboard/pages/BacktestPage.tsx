@@ -524,23 +524,32 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
       {/* Costi AI */}
       <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-          <DollarSign className="w-3.5 h-3.5" /> Costi AI (Flex tier, stima)
+          <DollarSign className="w-3.5 h-3.5" /> Costi AI (Flex tier)
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <p className="text-muted-foreground">Flash ({run.flash_calls} call)</p>
             <p className="font-mono font-semibold">${fmtNum(run.flash_cost_usd, 4)}</p>
+            <p className="text-muted-foreground font-mono">
+              ↑{(run.flash_tokens_in ?? 0).toLocaleString()} ↓{(run.flash_tokens_out ?? 0).toLocaleString()} tok
+            </p>
             <p className="text-muted-foreground">{fmtNum(run.flash_time_seconds, 0)}s</p>
           </div>
           <div>
             <p className="text-muted-foreground">Pro ({run.pro_calls} call)</p>
             <p className="font-mono font-semibold">${fmtNum(run.pro_cost_usd, 4)}</p>
+            <p className="text-muted-foreground font-mono">
+              ↑{(run.pro_tokens_in ?? 0).toLocaleString()} ↓{(run.pro_tokens_out ?? 0).toLocaleString()} tok
+            </p>
             <p className="text-muted-foreground">{fmtNum(run.pro_time_seconds, 0)}s</p>
           </div>
           {run.use_ai && (
             <div>
               <p className="text-muted-foreground">Pre-trade ({run.pretrade_calls} call)</p>
               <p className="font-mono font-semibold">${fmtNum(run.pretrade_cost_usd, 4)}</p>
+              <p className="text-muted-foreground font-mono">
+                ↑{(run.pretrade_tokens_in ?? 0).toLocaleString()} ↓{(run.pretrade_tokens_out ?? 0).toLocaleString()} tok
+              </p>
             </div>
           )}
           <div className="sm:col-start-4">

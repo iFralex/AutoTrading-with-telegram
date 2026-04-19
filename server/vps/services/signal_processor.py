@@ -166,7 +166,7 @@ class SignalProcessor:
 
         # ── Step 1: rilevamento rapido (Flash) ────────────────────────────────
         try:
-            is_signal = await self._detect(message, user_id=user_id)
+            is_signal, _, _ = await self._detect(message, user_id=user_id)
         except Exception as exc:
             logger.error("Gemini Flash errore: %s", exc)
             return []
@@ -179,7 +179,7 @@ class SignalProcessor:
 
         # ── Step 2: estrazione strutturata (Pro) ──────────────────────────────
         try:
-            signals = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
+            signals, _, _ = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
             return []
@@ -195,7 +195,8 @@ class SignalProcessor:
         if not message.strip():
             return False
         try:
-            return await self._detect(message, user_id=user_id)
+            result, _, _ = await self._detect(message, user_id=user_id)
+            return result
         except Exception as exc:
             logger.error("Gemini Flash errore: %s", exc)
             return False
@@ -208,13 +209,14 @@ class SignalProcessor:
         user_id: str | None = None,
         extraction_instructions: str | None = None,
         flex: bool = False,
-    ) -> list[TradeSignal]:
+    ) -> tuple[list[TradeSignal], int, int]:
         """
         Solo extraction Pro — da usare dopo aver già verificato che il
         messaggio è un segnale (es. con detect_signal()).
+        Ritorna (signals, prompt_tokens, completion_tokens).
         """
         try:
-            signals = await self._extract(
+            signals, tok_in, tok_out = await self._extract(
                 message, sizing_strategy, account_info,
                 user_id=user_id,
                 extraction_instructions=extraction_instructions,
@@ -222,18 +224,20 @@ class SignalProcessor:
             )
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
-            return []
+            return [], 0, 0
         logger.info("Estratti %d segnali", len(signals))
-        return signals
+        return signals, tok_in, tok_out
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    async def _detect(self, message: str, user_id: str | None = None, flex: bool = False) -> bool:
+    async def _detect(self, message: str, user_id: str | None = None, flex: bool = False) -> tuple[bool, int, int]:
         from vps.services.ai_log_store import make_timer
         prompt = _DETECTION_PROMPT.format(message=message)
         timer  = make_timer()
         error: str | None = None
         resp   = None
+        p_tok: int = 0
+        c_tok: int = 0
         kwargs = {"config": _FLEX_CONFIG} if flex else {}
         try:
             async def _call():
@@ -247,19 +251,19 @@ class SignalProcessor:
             error = str(exc)
             raise
         finally:
+            latency     = timer.elapsed_ms()
+            meta        = getattr(resp, "usage_metadata", None) if resp else None
+            p_tok       = getattr(meta, "prompt_token_count",     0) if meta else 0
+            c_tok       = getattr(meta, "candidates_token_count", 0) if meta else 0
+            result_text = (resp.text.strip() if resp and resp.text else None)
             if self._ai_logs is not None:
-                latency = timer.elapsed_ms()
-                meta    = getattr(resp, "usage_metadata", None) if resp else None
-                p_tok   = getattr(meta, "prompt_token_count",     None) if meta else None
-                c_tok   = getattr(meta, "candidates_token_count", None) if meta else None
-                result_text = (resp.text.strip() if resp and resp.text else None)
                 try:
                     await self._ai_logs.insert(
                         call_type         = "flash_detect",
                         model             = FLASH_MODEL,
                         user_id           = user_id,
-                        prompt_tokens     = p_tok,
-                        completion_tokens = c_tok,
+                        prompt_tokens     = p_tok or None,
+                        completion_tokens = c_tok or None,
                         latency_ms        = latency,
                         error             = error,
                         context           = {
@@ -285,7 +289,7 @@ class SignalProcessor:
                 prompt,
                 result_text if result_text is not None else f"(error: {error})",
             )
-        return resp.text.strip().upper().startswith("YES")
+        return resp.text.strip().upper().startswith("YES"), p_tok, c_tok
 
     async def _extract(
         self,
@@ -295,7 +299,7 @@ class SignalProcessor:
         user_id: str | None = None,
         extraction_instructions: str | None = None,
         flex: bool = False,
-    ) -> list[TradeSignal]:
+    ) -> tuple[list[TradeSignal], int, int]:
         from vps.services.ai_log_store import make_timer
         sizing_section = _build_sizing_section(sizing_strategy, account_info)
         custom_section = _build_custom_section(extraction_instructions)
@@ -307,6 +311,8 @@ class SignalProcessor:
         timer = make_timer()
         error: str | None = None
         resp  = None
+        p_tok: int = 0
+        c_tok: int = 0
         kwargs = {"config": _FLEX_CONFIG} if flex else {}
         try:
             async def _call():
@@ -320,18 +326,18 @@ class SignalProcessor:
             error = str(exc)
             raise
         finally:
+            latency = timer.elapsed_ms()
+            meta    = getattr(resp, "usage_metadata", None) if resp else None
+            p_tok   = getattr(meta, "prompt_token_count",     0) if meta else 0
+            c_tok   = getattr(meta, "candidates_token_count", 0) if meta else 0
             if self._ai_logs is not None:
-                latency = timer.elapsed_ms()
-                meta    = getattr(resp, "usage_metadata", None) if resp else None
-                p_tok   = getattr(meta, "prompt_token_count",     None) if meta else None
-                c_tok   = getattr(meta, "candidates_token_count", None) if meta else None
                 try:
                     await self._ai_logs.insert(
                         call_type         = "pro_extract",
                         model             = PRO_MODEL,
                         user_id           = user_id,
-                        prompt_tokens     = p_tok,
-                        completion_tokens = c_tok,
+                        prompt_tokens     = p_tok or None,
+                        completion_tokens = c_tok or None,
                         latency_ms        = latency,
                         error             = error,
                         context           = {
@@ -376,7 +382,7 @@ class SignalProcessor:
             end   = text.rfind("]") + 1
             if start == -1 or end == 0:
                 logger.error("Gemini Pro output non parsabile:\n%.300s", text)
-                return []
+                return [], p_tok, c_tok
             raw = json.loads(text[start:end])
 
         signals: list[TradeSignal] = []
@@ -398,7 +404,7 @@ class SignalProcessor:
             except (KeyError, TypeError, ValueError) as exc:
                 logger.warning("Elemento ignorato (%s): %s", exc, item)
 
-        return signals
+        return signals, p_tok, c_tok
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

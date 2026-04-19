@@ -335,7 +335,7 @@ async def lifespan(app: FastAPI):
 
         # ── Step 1: rilevamento rapido (Flash) — prima di aprire MT5 ─────────
         try:
-            flash_result = await signal_processor._detect(message, user_id=user_id)
+            flash_result, _, _ = await signal_processor._detect(message, user_id=user_id)
             log_flash_raw = "YES" if flash_result else "NO"
             log_is_signal = flash_result
         except Exception as exc:
@@ -402,7 +402,7 @@ async def lifespan(app: FastAPI):
 
         # ── Step 4: extraction strutturata (Pro) con contesto sizing ──────────
         try:
-            signals = await signal_processor.extract_signals(
+            signals, _, _ = await signal_processor.extract_signals(
                 message,
                 sizing_strategy=log_sizing_strategy,
                 account_info=log_account_info,
@@ -427,7 +427,7 @@ async def lifespan(app: FastAPI):
         # ── Step 5 (opzionale): filtro pre-trade con StrategyExecutor ─────────
         if strategy_executor and management_strategy:
             try:
-                decisions = await strategy_executor.pre_trade(
+                decisions, _, _ = await strategy_executor.pre_trade(
                     user_id             = user_id,
                     signals             = signals,
                     management_strategy = management_strategy,

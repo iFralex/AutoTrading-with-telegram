@@ -302,7 +302,7 @@ async def simulate_message(
 
     # ── Step 1: Flash detection ───────────────────────────────────────────────
     try:
-        is_signal = await signal_processor._detect(body.message)
+        is_signal, _, _ = await signal_processor._detect(body.message)
         flash_raw = "YES" if is_signal else "NO"
     except Exception as exc:
         return {
@@ -327,7 +327,7 @@ async def simulate_message(
     # ── Step 2: Pro extraction ────────────────────────────────────────────────
     from dataclasses import asdict
     try:
-        signals = await signal_processor.extract_signals(
+        signals, _, _ = await signal_processor.extract_signals(
             body.message,
             sizing_strategy=sizing_strategy,
             account_info=None,   # non apriamo MT5 durante la simulazione

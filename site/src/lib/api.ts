@@ -798,12 +798,18 @@ export interface BacktestRun {
   period_to:               string | null
 
   flash_calls:             number
+  flash_tokens_in:         number
+  flash_tokens_out:        number
   flash_cost_usd:          number
   flash_time_seconds:      number
   pro_calls:               number
+  pro_tokens_in:           number
+  pro_tokens_out:          number
   pro_cost_usd:            number
   pro_time_seconds:        number
   pretrade_calls:          number
+  pretrade_tokens_in:      number
+  pretrade_tokens_out:     number
   pretrade_cost_usd:       number
   total_ai_cost_usd:       number
   total_ai_seconds:        number

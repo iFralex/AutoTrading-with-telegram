@@ -575,8 +575,10 @@ class BacktestEngine:
         pro_t0    = _time.monotonic()
 
         for msg in signal_msgs:
+            tok_in  = 0
+            tok_out = 0
             try:
-                sigs = await self._sp.extract_signals(
+                sigs, tok_in, tok_out = await self._sp.extract_signals(
                     msg["text"],
                     sizing_strategy=sizing_strategy,
                     user_id=user_id,
@@ -589,15 +591,12 @@ class BacktestEngine:
             if sigs:
                 extracted.append({"msg": msg, "signals": sigs})
 
-            # Stima costi Pro (senza ai_log_store nel backtest per non inquinare i log live)
-            pro_stats["calls"] += 1
-            est_in  = len(msg["text"]) // 4 + 50
-            est_out = 150
-            pro_stats["tokens_in"]  += est_in
-            pro_stats["tokens_out"] += est_out
+            pro_stats["calls"]      += 1
+            pro_stats["tokens_in"]  += tok_in
+            pro_stats["tokens_out"] += tok_out
             pro_stats["cost_usd"]   += (
-                est_in  / 1_000_000 * _GEMINI_PRICING["pro_in"] +
-                est_out / 1_000_000 * _GEMINI_PRICING["pro_out"]
+                tok_in  / 1_000_000 * _GEMINI_PRICING["pro_in"] +
+                tok_out / 1_000_000 * _GEMINI_PRICING["pro_out"]
             )
 
         pro_elapsed = _time.monotonic() - pro_t0
@@ -623,8 +622,10 @@ class BacktestEngine:
             return
 
         # ── 4. [use_ai=True] Decisione pre-trade AI ───────────────────────────
-        pretrade_cost = 0.0
-        pretrade_calls = 0
+        pretrade_cost    = 0.0
+        pretrade_calls   = 0
+        pretrade_tok_in  = 0
+        pretrade_tok_out = 0
 
         if use_ai and self._se and management_strategy:
             ulog.info("[%s] Phase 4: pre-trade AI su %d gruppi segnali...", run_id, len(extracted))
@@ -632,7 +633,7 @@ class BacktestEngine:
 
             for entry in extracted:
                 try:
-                    decisions = await self._se.pre_trade(
+                    decisions, pt_in, pt_out = await self._se.pre_trade(
                         user_id=user_id,
                         signals=entry["signals"],
                         management_strategy=management_strategy,
@@ -642,8 +643,13 @@ class BacktestEngine:
                         signal_message=entry["msg"]["text"],
                         flex=True,
                     )
-                    pretrade_calls += 1
-                    pretrade_cost  += 0.02  # stima conservativa per call Pro
+                    pretrade_calls   += 1
+                    pretrade_tok_in  += pt_in
+                    pretrade_tok_out += pt_out
+                    pretrade_cost    += (
+                        pt_in  / 1_000_000 * _GEMINI_PRICING["pro_in"] +
+                        pt_out / 1_000_000 * _GEMINI_PRICING["pro_out"]
+                    )
 
                     # Applica decisioni
                     approved = []
@@ -681,6 +687,8 @@ class BacktestEngine:
 
         await self._store.update_run(run_id,
             pretrade_calls=pretrade_calls,
+            pretrade_tokens_in=pretrade_tok_in,
+            pretrade_tokens_out=pretrade_tok_out,
             pretrade_cost_usd=round(pretrade_cost, 4),
         )
 
@@ -837,23 +845,23 @@ class BacktestEngine:
 
         async def _one(i: int, text: str) -> None:
             async with sem:
+                tok_in  = 0
+                tok_out = 0
                 try:
-                    is_sig = await self._sp._detect(text, user_id=user_id, flex=True)
+                    is_sig, tok_in, tok_out = await self._sp._detect(text, user_id=user_id, flex=True)
                     results[i] = is_sig
                 except Exception as exc:
                     logger.warning("Flash detection msg %d: %s", i, exc)
                     results[i] = False
                 finally:
-                    est_in  = len(text) // 4 + 30
-                    est_out = 5
-                    cost    = (
-                        est_in  / 1_000_000 * _GEMINI_PRICING["flash_in"] +
-                        est_out / 1_000_000 * _GEMINI_PRICING["flash_out"]
+                    cost = (
+                        tok_in  / 1_000_000 * _GEMINI_PRICING["flash_in"] +
+                        tok_out / 1_000_000 * _GEMINI_PRICING["flash_out"]
                     )
                     async with lock:
                         stats["calls"]      += 1
-                        stats["tokens_in"]  += est_in
-                        stats["tokens_out"] += est_out
+                        stats["tokens_in"]  += tok_in
+                        stats["tokens_out"] += tok_out
                         stats["cost_usd"]   += cost
 
         await asyncio.gather(*(_one(i, t) for i, t in enumerate(texts)))

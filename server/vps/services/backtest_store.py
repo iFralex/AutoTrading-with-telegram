@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     pro_cost_usd            REAL    DEFAULT 0,
     pro_time_seconds        REAL    DEFAULT 0,
     pretrade_calls          INTEGER DEFAULT 0,
+    pretrade_tokens_in      INTEGER DEFAULT 0,
+    pretrade_tokens_out     INTEGER DEFAULT 0,
     pretrade_cost_usd       REAL    DEFAULT 0,
     total_ai_cost_usd       REAL    DEFAULT 0,
     total_ai_seconds        REAL    DEFAULT 0,
@@ -117,7 +119,8 @@ _INDEXES = [
 ]
 
 _MIGRATIONS = [
-    # future schema migrations here
+    "ALTER TABLE backtest_runs ADD COLUMN pretrade_tokens_in  INTEGER DEFAULT 0",
+    "ALTER TABLE backtest_runs ADD COLUMN pretrade_tokens_out INTEGER DEFAULT 0",
 ]
 
 

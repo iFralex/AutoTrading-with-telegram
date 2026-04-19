@@ -82,10 +82,12 @@ class PreTradeDecision:
 
 @dataclass
 class StrategyResult:
-    event_type:     str
-    tool_calls:     list[dict]  = field(default_factory=list)
-    final_response: str         = ""
-    error:          str | None  = None
+    event_type:        str
+    tool_calls:        list[dict]  = field(default_factory=list)
+    final_response:    str         = ""
+    error:             str | None  = None
+    prompt_tokens:     int         = 0
+    completion_tokens: int         = 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -593,14 +595,14 @@ class StrategyExecutor:
         mt5_server: str,
         signal_message: str = "",
         flex: bool = False,
-    ) -> list[PreTradeDecision]:
+    ) -> tuple[list[PreTradeDecision], int, int]:
         """
         Valuta i segnali in arrivo secondo la strategia dell'utente.
-        Ritorna una lista di PreTradeDecision (una per segnale).
+        Ritorna (decisions, prompt_tokens, completion_tokens).
         Segnali non menzionati dall'AI vengono approvati di default.
         """
         if not management_strategy.strip() or not signals:
-            return [PreTradeDecision(i, approved=True) for i in range(len(signals))]
+            return [PreTradeDecision(i, approved=True) for i in range(len(signals))], 0, 0
 
         signals_text = "\n".join(
             f"  [{i}] {s.order_type} {s.symbol}"
@@ -648,7 +650,7 @@ class StrategyExecutor:
             sum(1 for d in all_decisions if d.approved and (
                 d.modified_lots is not None or d.modified_sl is not None or d.modified_tp is not None)),
         )
-        return all_decisions
+        return all_decisions, result.prompt_tokens, result.completion_tokens
 
     async def on_event(
         self,
@@ -782,7 +784,9 @@ class StrategyExecutor:
             except Exception as exc:
                 ulog.error("StrategyExecutor: errore chiamata Gemini iniziale: %s", exc)
                 error_str = str(exc)
-                return StrategyResult(event_type="", error=error_str)
+                return StrategyResult(event_type="", error=error_str,
+                                      prompt_tokens=total_prompt_tokens,
+                                      completion_tokens=total_completion_tokens)
 
             _accumulate_tokens(response)
 
@@ -801,6 +805,8 @@ class StrategyExecutor:
                         event_type="",
                         tool_calls=tool_log,
                         final_response=final_text.strip(),
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
                     )
 
                 # Esegui i tool call e prepara le risposte
@@ -833,6 +839,8 @@ class StrategyExecutor:
                         event_type="",
                         tool_calls=tool_log,
                         error=error_str,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
                     )
 
                 _accumulate_tokens(response)
@@ -847,6 +855,8 @@ class StrategyExecutor:
                 event_type="",
                 tool_calls=tool_log,
                 error=error_str,
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=total_completion_tokens,
             )
 
         finally:
