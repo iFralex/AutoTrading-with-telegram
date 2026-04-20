@@ -726,35 +726,101 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
 
 // ── Trade chart modal ─────────────────────────────────────────────────────────
 
-type Bar = { time: number; open: number; high: number; low: number; close: number }
+type OhlcBar = { time: number; open: number; high: number; low: number; close: number }
+
+// Custom candlestick shape for recharts Bar.
+// dataKey="high" so recharts sizes bars correctly; we override rendering entirely.
+// y + height = pixel position of domain baseline (priceMin), y = pixel of high.
+function makeCandlestick(domainMin: number) {
+  return function CandlestickShape({ x, y, width, height, payload }: {
+    x: number; y: number; width: number; height: number; payload?: OhlcBar
+  }) {
+    if (!payload || height <= 0 || width <= 0) return null
+    const { open, high, low, close } = payload
+    if (high === domainMin) return null
+
+    const bullish = close >= open
+    const color   = bullish ? "#10b981" : "#ef4444"
+
+    // Convert a price value to a pixel y-coordinate
+    const pxPerUnit = height / (high - domainMin)
+    const toY = (v: number) => y + height - (v - domainMin) * pxPerUnit
+
+    const yHigh  = toY(high)
+    const yLow   = toY(low)
+    const yOpen  = toY(open)
+    const yClose = toY(close)
+
+    const bodyTop    = Math.min(yOpen, yClose)
+    const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1)
+    const wickX      = x + width / 2
+    const bodyW      = Math.max(width - 2, 1)
+
+    return (
+      <g>
+        {/* Wick: high → low */}
+        <line x1={wickX} y1={yHigh} x2={wickX} y2={yLow} stroke={color} strokeWidth={1} />
+        {/* Body: open → close */}
+        <rect x={x + 1} y={bodyTop} width={bodyW} height={bodyHeight} fill={color} opacity={0.85} />
+      </g>
+    )
+  }
+}
+
+function OhlcTooltip({ active, payload, label }: {
+  active?: boolean
+  payload?: { payload?: OhlcBar }[]
+  label?: string
+}) {
+  if (!active || !payload?.[0]?.payload) return null
+  const b = payload[0].payload
+  const bull = b.close >= b.open
+  return (
+    <div style={{ background: "#0a0a14", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11, padding: "8px 12px" }}>
+      <p className="text-white/40 mb-1 text-[10px]">{label}</p>
+      {[
+        { k: "O", v: b.open },
+        { k: "H", v: b.high },
+        { k: "L", v: b.low  },
+        { k: "C", v: b.close },
+      ].map(({ k, v }) => (
+        <p key={k} className={`font-mono text-[11px] ${k === "C" ? (bull ? "text-emerald-400" : "text-red-400") : "text-white/70"}`}>
+          {k}: <strong>{v.toFixed(5)}</strong>
+        </p>
+      ))}
+    </div>
+  )
+}
 
 function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: () => void }) {
-  const bars = trade.chart_bars_json
+  const bars  = trade.chart_bars_json
   const isBuy = trade.order_type === "BUY"
 
-  const entryUnix  = trade.actual_entry_ts ? new Date(trade.actual_entry_ts).getTime() / 1000 : null
-  const exitUnix   = trade.exit_ts         ? new Date(trade.exit_ts).getTime()         / 1000 : null
+  const entryUnix = trade.actual_entry_ts ? new Date(trade.actual_entry_ts).getTime() / 1000 : null
+  const exitUnix  = trade.exit_ts         ? new Date(trade.exit_ts).getTime()         / 1000 : null
 
-  const chartData = (bars ?? []).map((b: Bar) => ({
-    time:  b.time,
-    close: b.close,
-    high:  b.high,
-    low:   b.low,
+  const chartData = (bars ?? []).map((b: OhlcBar) => ({
+    ...b,
     label: new Date(b.time * 1000).toLocaleString("it-IT", {
       day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
     }),
   }))
 
-  const entryIdx = entryUnix ? chartData.findIndex(d => d.time >= entryUnix) : -1
-  const exitIdx  = exitUnix  ? chartData.findIndex(d => d.time >= exitUnix)  : -1
+  const entryIdx = entryUnix != null ? chartData.findIndex(d => d.time >= entryUnix) : -1
+  const exitIdx  = exitUnix  != null ? chartData.findIndex(d => d.time >= exitUnix)  : -1
 
-  const priceMin = bars ? Math.min(...bars.map((b: Bar) => b.low),
-    trade.stop_loss ?? Infinity, trade.take_profit ?? Infinity, trade.actual_entry ?? Infinity)
-    * 0.9999 : 0
-  const priceMax = bars ? Math.max(...bars.map((b: Bar) => b.high),
-    trade.stop_loss ?? -Infinity, trade.take_profit ?? -Infinity, trade.actual_entry ?? -Infinity)
-    * 1.0001 : 1
+  const levels = [
+    trade.stop_loss, trade.take_profit, trade.actual_entry,
+  ].filter((v): v is number => v != null)
 
+  const priceMin = bars
+    ? Math.min(...bars.map((b: OhlcBar) => b.low),  ...levels) * 0.9999
+    : 0
+  const priceMax = bars
+    ? Math.max(...bars.map((b: OhlcBar) => b.high), ...levels) * 1.0001
+    : 1
+
+  const CandlestickShape = makeCandlestick(priceMin)
   const pnlPos = (trade.pnl_pips ?? 0) >= 0
 
   return (
@@ -763,6 +829,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-[#0a0a14] border border-white/[0.08] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
+
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
           <div className="flex items-center gap-3">
@@ -784,20 +851,20 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
         {/* Levels legend */}
         <div className="flex flex-wrap gap-x-5 gap-y-1 px-5 pt-3 text-[11px]">
           {trade.actual_entry != null && (
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5 text-amber-400">
               <span className="w-5 h-0.5 bg-amber-400 inline-block" />
               Entry {trade.actual_entry.toFixed(5)}
             </span>
           )}
           {trade.stop_loss != null && (
             <span className="flex items-center gap-1.5 text-red-400">
-              <span className="w-5 h-0.5 bg-red-400 inline-block border-dashed border-t border-red-400" style={{borderStyle:"dashed"}} />
+              <span className="w-5 border-t border-dashed border-red-400 inline-block" />
               SL {trade.stop_loss.toFixed(5)}
             </span>
           )}
           {trade.take_profit != null && (
             <span className="flex items-center gap-1.5 text-emerald-400">
-              <span className="w-5 h-0.5 bg-emerald-400 inline-block" style={{borderStyle:"dashed"}} />
+              <span className="w-5 border-t border-dashed border-emerald-400 inline-block" />
               TP {trade.take_profit.toFixed(5)}
             </span>
           )}
@@ -816,45 +883,39 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
               Dati grafico non disponibili (backtest eseguito prima di questo aggiornamento)
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 9, fill: "#6b7280" }}
-                  interval={Math.floor(chartData.length / 6)}
+                  interval={Math.max(1, Math.floor(chartData.length / 6))}
                 />
                 <YAxis
                   domain={[priceMin, priceMax]}
                   tick={{ fontSize: 9, fill: "#6b7280" }}
                   tickFormatter={(v: number) => v.toFixed(4)}
-                  width={70}
+                  width={72}
                 />
-                <Tooltip
-                  contentStyle={{ background: "#0a0a14", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }}
-                  formatter={(v: unknown) => [(v as number).toFixed(5), "Close"]}
-                  labelFormatter={l => String(l)}
+                <Tooltip content={<OhlcTooltip />} />
+
+                {/* Candlestick bars */}
+                <Bar
+                  dataKey="high"
+                  minPointSize={1}
+                  isAnimationActive={false}
+                  shape={<CandlestickShape x={0} y={0} width={0} height={0} />}
                 />
 
-                {/* Price line */}
-                <Line
-                  type="monotone"
-                  dataKey="close"
-                  stroke="#6366f1"
-                  dot={false}
-                  strokeWidth={1.5}
-                  name="Close"
-                />
-
-                {/* Entry line */}
+                {/* Entry level */}
                 {trade.actual_entry != null && (
                   <ReferenceLine y={trade.actual_entry} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
-                {/* SL line */}
+                {/* SL level */}
                 {trade.stop_loss != null && (
                   <ReferenceLine y={trade.stop_loss} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
-                {/* TP line */}
+                {/* TP level */}
                 {trade.take_profit != null && (
                   <ReferenceLine y={trade.take_profit} stroke="#10b981" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
@@ -864,10 +925,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                   <ReferenceDot
                     x={chartData[entryIdx]?.label}
                     y={trade.actual_entry}
-                    r={5}
-                    fill="#f59e0b"
-                    stroke="#0a0a14"
-                    strokeWidth={2}
+                    r={5} fill="#f59e0b" stroke="#0a0a14" strokeWidth={2}
                   />
                 )}
                 {/* Exit dot */}
@@ -875,10 +933,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                   <ReferenceDot
                     x={chartData[exitIdx]?.label}
                     y={trade.exit_price}
-                    r={5}
-                    fill={pnlPos ? "#10b981" : "#ef4444"}
-                    stroke="#0a0a14"
-                    strokeWidth={2}
+                    r={5} fill={pnlPos ? "#10b981" : "#ef4444"} stroke="#0a0a14" strokeWidth={2}
                   />
                 )}
               </ComposedChart>
@@ -889,12 +944,12 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
         {/* Trade details */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 pb-5 text-xs">
           {[
-            { label: "Entry time",  v: fmtTs(trade.actual_entry_ts) },
-            { label: "Exit time",   v: fmtTs(trade.exit_ts) },
-            { label: "Durata",      v: fmtDur(trade.duration_min) },
-            { label: "Lot size",    v: trade.lot_size?.toFixed(2) ?? "—" },
-            { label: "Mittente",    v: trade.sender_name ?? "—" },
-            { label: "Modalità",    v: trade.order_mode ?? "—" },
+            { label: "Entry time", v: fmtTs(trade.actual_entry_ts) },
+            { label: "Exit time",  v: fmtTs(trade.exit_ts) },
+            { label: "Durata",     v: fmtDur(trade.duration_min) },
+            { label: "Lot size",   v: trade.lot_size?.toFixed(2) ?? "—" },
+            { label: "Mittente",   v: trade.sender_name ?? "—" },
+            { label: "Modalità",   v: trade.order_mode ?? "—" },
           ].map(({ label, v }) => (
             <div key={label} className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/[0.05]">
               <p className="text-muted-foreground mb-0.5">{label}</p>
