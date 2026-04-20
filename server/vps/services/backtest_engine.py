@@ -274,6 +274,18 @@ def _simulate_trade(
     )
 
 
+def _sample_equity_curve(curve: list[dict], max_points: int) -> list[dict]:
+    """Campiona uniformemente la equity curve mantenendo sempre primo e ultimo punto."""
+    if len(curve) <= max_points:
+        return curve
+    # Sempre includi primo e ultimo, distribuisci il resto uniformemente
+    indices = {0, len(curve) - 1}
+    step = (len(curve) - 1) / (max_points - 1)
+    for i in range(1, max_points - 1):
+        indices.add(round(i * step))
+    return [curve[i] for i in sorted(indices)]
+
+
 # ── Report aggregato ──────────────────────────────────────────────────────────
 
 def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
@@ -522,7 +534,7 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
         "symbol_stats_json":      symbol_stats,
         "sender_stats_json":      sender_stats,
         "time_stats_json":        {"by_hour": by_hour, "by_weekday": by_weekday},
-        "equity_curve_json":      equity_curve[-500:],
+        "equity_curve_json":      _sample_equity_curve(equity_curve, 500),
         **cost_info,
         **telegram_meta,
     }
