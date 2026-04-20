@@ -637,11 +637,11 @@ class BacktestEngine:
                 extracted.append({"msg": msg, "signals": sigs})
 
             pro_stats["calls"]      += 1
-            pro_stats["tokens_in"]  += tok_in
-            pro_stats["tokens_out"] += tok_out
+            pro_stats["tokens_in"]  += tok_in or 0
+            pro_stats["tokens_out"] += tok_out or 0
             pro_stats["cost_usd"]   += (
-                tok_in  / 1_000_000 * _GEMINI_PRICING["pro_in"] +
-                tok_out / 1_000_000 * _GEMINI_PRICING["pro_out"]
+                (tok_in  or 0) / 1_000_000 * _GEMINI_PRICING["pro_in"] +
+                (tok_out or 0) / 1_000_000 * _GEMINI_PRICING["pro_out"]
             )
 
         pro_elapsed = _time.monotonic() - pro_t0
@@ -689,11 +689,11 @@ class BacktestEngine:
                         flex=True,
                     )
                     pretrade_calls   += 1
-                    pretrade_tok_in  += pt_in
-                    pretrade_tok_out += pt_out
+                    pretrade_tok_in  += pt_in or 0
+                    pretrade_tok_out += pt_out or 0
                     pretrade_cost    += (
-                        pt_in  / 1_000_000 * _GEMINI_PRICING["pro_in"] +
-                        pt_out / 1_000_000 * _GEMINI_PRICING["pro_out"]
+                        (pt_in  or 0) / 1_000_000 * _GEMINI_PRICING["pro_in"] +
+                        (pt_out or 0) / 1_000_000 * _GEMINI_PRICING["pro_out"]
                     )
 
                     # Applica decisioni
@@ -921,13 +921,13 @@ class BacktestEngine:
                     results[i] = False
                 finally:
                     cost = (
-                        tok_in  / 1_000_000 * _GEMINI_PRICING["flash_in"] +
-                        tok_out / 1_000_000 * _GEMINI_PRICING["flash_out"]
+                        (tok_in  or 0) / 1_000_000 * _GEMINI_PRICING["flash_in"] +
+                        (tok_out or 0) / 1_000_000 * _GEMINI_PRICING["flash_out"]
                     )
                     async with lock:
                         stats["calls"]      += 1
-                        stats["tokens_in"]  += tok_in
-                        stats["tokens_out"] += tok_out
+                        stats["tokens_in"]  += tok_in or 0
+                        stats["tokens_out"] += tok_out or 0
                         stats["cost_usd"]   += cost
 
         await asyncio.gather(*(_one(i, t) for i, t in enumerate(texts)))
