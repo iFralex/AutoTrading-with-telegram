@@ -801,6 +801,7 @@ function OhlcTooltip({ active, payload, label }: {
 function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: () => void }) {
   const bars  = trade.chart_bars_json
   const isBuy = trade.order_type === "BUY"
+  const [chartType, setChartType] = useState<"candle" | "line">("candle")
 
   const entryUnix = trade.actual_entry_ts ? new Date(trade.actual_entry_ts).getTime() / 1000 : null
   const exitUnix  = trade.exit_ts         ? new Date(trade.exit_ts).getTime()         / 1000 : null
@@ -890,6 +891,24 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
               Dati grafico non disponibili (backtest eseguito prima di questo aggiornamento)
             </div>
           ) : (
+            <>
+              {/* Chart type toggle */}
+              <div className="flex justify-end mb-2 gap-1">
+                {(["candle", "line"] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setChartType(t)}
+                    className={`px-2.5 py-1 text-[11px] rounded font-medium transition-colors ${
+                      chartType === t
+                        ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
+                        : "text-muted-foreground hover:text-foreground border border-transparent"
+                    }`}
+                  >
+                    {t === "candle" ? "Candele" : "Linea"}
+                  </button>
+                ))}
+              </div>
+
             <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
@@ -904,15 +923,25 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                   tickFormatter={(v: number) => v.toFixed(4)}
                   width={72}
                 />
-                <Tooltip content={<OhlcTooltip />} />
+                <Tooltip content={chartType === "candle" ? <OhlcTooltip /> : undefined} />
 
-                {/* Candlestick bars — shape as function to get background prop */}
-                <Bar
-                  dataKey="high"
-                  isAnimationActive={false}
-                  background={{ fill: "transparent" }}
-                  shape={candlestickShape}
-                />
+                {chartType === "candle" ? (
+                  /* Candlestick bars — shape as function to get background prop */
+                  <Bar
+                    dataKey="high"
+                    isAnimationActive={false}
+                    background={{ fill: "transparent" }}
+                    shape={candlestickShape}
+                  />
+                ) : (
+                  <Line
+                    dataKey="close"
+                    dot={false}
+                    isAnimationActive={false}
+                    stroke={isBuy ? "#10b981" : "#ef4444"}
+                    strokeWidth={1.5}
+                  />
+                )}
 
                 {/* Entry level */}
                 {trade.actual_entry != null && (
@@ -945,6 +974,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                 )}
               </ComposedChart>
             </ResponsiveContainer>
+            </>
           )}
         </div>
 
