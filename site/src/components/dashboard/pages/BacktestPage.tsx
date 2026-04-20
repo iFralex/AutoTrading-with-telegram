@@ -120,9 +120,10 @@ function KpiCard({ label, value, sub, positive }: {
 
 // ── Run form ──────────────────────────────────────────────────────────────────
 
-function RunForm({ user, onStarted }: {
+function RunForm({ user, onStarted, disabled }: {
   user: DashboardUser
   onStarted: (runId: string) => void
+  disabled?: boolean
 }) {
   const groups = user.groups ?? []
   const [selectedGroupId, setSelectedGroupId] = useState<number>(
@@ -165,6 +166,13 @@ function RunForm({ user, onStarted }: {
   return (
     <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-4">
       <h3 className="text-sm font-semibold text-foreground">Nuovo backtest</h3>
+
+      {disabled && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-600/8 border border-amber-500/20 text-xs text-amber-400">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          Un backtest è già in esecuzione. Attendi il completamento prima di avviarne un altro.
+        </div>
+      )}
 
       {/* Group selector */}
       {groups.length > 1 && (
@@ -278,8 +286,8 @@ function RunForm({ user, onStarted }: {
 
       <button
         onClick={submit}
-        disabled={loading}
-        className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
+        disabled={loading || disabled}
+        className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
       >
         {loading
           ? <><RefreshCw className="w-4 h-4 animate-spin" /> Avvio…</>
@@ -1129,7 +1137,11 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
 
         {/* Left column: form + history */}
         <div className="space-y-4">
-          <RunForm user={user} onStarted={handleStarted} />
+          <RunForm
+            user={user}
+            onStarted={handleStarted}
+            disabled={runs.some(r => r.status.startsWith("running"))}
+          />
 
           {/* History */}
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl overflow-hidden">
