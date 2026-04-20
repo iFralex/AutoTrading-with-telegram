@@ -729,22 +729,27 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
 type OhlcBar = { time: number; open: number; high: number; low: number; close: number }
 
 // Custom candlestick shape for recharts Bar.
-// dataKey="high" so recharts sizes bars correctly; we override rendering entirely.
-// y + height = pixel position of domain baseline (priceMin), y = pixel of high.
-function makeCandlestick(domainMin: number) {
-  return function CandlestickShape({ x, y, width, height, payload }: {
-    x: number; y: number; width: number; height: number; payload?: OhlcBar
-  }) {
-    if (!payload || height <= 0 || width <= 0) return null
+// Uses the `background` prop (chart area rect passed by recharts) + the known
+// domain to compute pixel positions independently of recharts' baseline logic.
+function makeCandlestick(domainMin: number, domainMax: number) {
+  const range = domainMax - domainMin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function CandlestickShape(props: any) {
+    const { x = 0, width = 0, background, payload } = props as {
+      x?: number; width?: number
+      background?: { y: number | null; height: number | null }
+      payload?: OhlcBar
+    }
+    if (!payload || !background || !background.height || background.height <= 0 || width <= 0 || range <= 0) return null
     const { open, high, low, close } = payload
-    if (high === domainMin) return null
 
     const bullish = close >= open
     const color   = bullish ? "#10b981" : "#ef4444"
 
-    // Convert a price value to a pixel y-coordinate
-    const pxPerUnit = height / (high - domainMin)
-    const toY = (v: number) => y + height - (v - domainMin) * pxPerUnit
+    // Map a price → pixel y (SVG: 0 = top, increases downward)
+    const chartTop = background.y ?? 0
+    const chartH   = background.height ?? 0
+    const toY = (v: number) => chartTop + chartH * (1 - (v - domainMin) / range)
 
     const yHigh  = toY(high)
     const yLow   = toY(low)
@@ -758,10 +763,8 @@ function makeCandlestick(domainMin: number) {
 
     return (
       <g>
-        {/* Wick: high → low */}
         <line x1={wickX} y1={yHigh} x2={wickX} y2={yLow} stroke={color} strokeWidth={1} />
-        {/* Body: open → close */}
-        <rect x={x + 1} y={bodyTop} width={bodyW} height={bodyHeight} fill={color} opacity={0.85} />
+        <rect x={x + 1} y={bodyTop} width={bodyW} height={bodyHeight} fill={color} opacity={0.9} />
       </g>
     )
   }
@@ -820,7 +823,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
     ? Math.max(...bars.map((b: OhlcBar) => b.high), ...levels) * 1.0001
     : 1
 
-  const CandlestickShape = makeCandlestick(priceMin)
+  const candlestickShape = makeCandlestick(priceMin, priceMax)
   const pnlPos = (trade.pnl_pips ?? 0) >= 0
 
   return (
@@ -899,12 +902,12 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                 />
                 <Tooltip content={<OhlcTooltip />} />
 
-                {/* Candlestick bars */}
+                {/* Candlestick bars — shape as function to get background prop */}
                 <Bar
                   dataKey="high"
-                  minPointSize={1}
                   isAnimationActive={false}
-                  shape={<CandlestickShape x={0} y={0} width={0} height={0} />}
+                  background={{ fill: "transparent" }}
+                  shape={candlestickShape}
                 />
 
                 {/* Entry level */}
