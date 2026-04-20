@@ -10,7 +10,7 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell,
-  ReferenceLine, ReferenceDot, ComposedChart, Area,
+  ReferenceLine, ReferenceDot, ComposedChart, Area, AreaChart,
 } from "recharts"
 import { api, type BacktestRun, type BacktestTrade, type DashboardUser } from "@/src/lib/api"
 
@@ -355,9 +355,9 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
   const [trades, setTrades]           = useState<BacktestTrade[] | null>(null)
   const [loadingTrades, setLT]        = useState(false)
   const [showTrades, setShowTrades]   = useState(false)
-  const [equityMode, setEquityMode]   = useState<"pips" | "usd">("pips")
-  const [selectedTrade, setSelected]  = useState<BacktestTrade | null>(null)
   const hasUsdEquity = run.equity_curve_json?.some((p: any) => p.cumul_usd !== undefined)
+  const [equityMode, setEquityMode]   = useState<"pips" | "usd">(hasUsdEquity ? "usd" : "pips")
+  const [selectedTrade, setSelected]  = useState<BacktestTrade | null>(null)
 
   async function loadTrades() {
     if (trades) { setShowTrades(v => !v); return }
@@ -467,47 +467,113 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
         ))}
       </div>
 
-      {/* Equity curve */}
+      {/* Balance chart */}
       {run.equity_curve_json && run.equity_curve_json.length > 0 && (
         <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Equity curve</h4>
+          {/* Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Andamento balance</h4>
+              {hasUsdEquity && (
+                <div className="flex items-center gap-3 mt-1.5 text-xs">
+                  <span className="text-muted-foreground">
+                    Inizio: <span className="font-mono text-foreground">${(run.starting_balance_usd ?? 1000).toFixed(2)}</span>
+                  </span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="text-muted-foreground">
+                    Fine: <span className={`font-mono font-semibold ${pnlPositive ? "text-emerald-400" : "text-red-400"}`}>
+                      ${run.final_balance_usd?.toFixed(2) ?? "—"}
+                    </span>
+                  </span>
+                  {run.total_pnl_usd != null && (
+                    <span className={`font-mono text-xs ${pnlPositive ? "text-emerald-400" : "text-red-400"}`}>
+                      ({pnlPositive ? "+" : ""}{run.total_pnl_usd.toFixed(2)} USD)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             {hasUsdEquity && (
-              <div className="flex gap-1">
-                {(["pips", "usd"] as const).map(m => (
+              <div className="flex gap-1 shrink-0">
+                {(["usd", "pips"] as const).map(m => (
                   <button key={m} onClick={() => setEquityMode(m)}
                     className={`text-[10px] px-2 py-0.5 rounded font-medium border transition-colors ${
                       equityMode === m
                         ? "bg-indigo-600/15 text-indigo-300 border-indigo-500/30"
                         : "bg-transparent text-muted-foreground border-white/[0.08] hover:bg-white/[0.04]"
                     }`}
-                  >{m === "pips" ? "Pips" : "USD"}</button>
+                  >{m === "usd" ? "USD" : "Pips"}</button>
                 ))}
               </div>
             )}
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={run.equity_curve_json}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="ts" hide />
-              <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} />
-              <Tooltip
-                contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 12 }}
-                formatter={(v: unknown) => {
-                  const n = typeof v === "number" ? v : parseFloat(String(v))
-                  if (equityMode === "usd") return [`$${n.toFixed(2)}`, "Saldo"] as [string, string]
-                  return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "Cumulativo"] as [string, string]
+
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={run.equity_curve_json} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="balanceGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={pnlPositive ? "#10b981" : "#ef4444"} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={pnlPositive ? "#10b981" : "#ef4444"} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis
+                dataKey="ts"
+                tick={{ fontSize: 9, fill: "#6b7280" }}
+                tickFormatter={(v: string) => {
+                  try {
+                    return new Date(v).toLocaleDateString("it-IT", {
+                      day: "2-digit", month: "2-digit", timeZone: TZ,
+                    })
+                  } catch { return "" }
                 }}
-                labelFormatter={() => ""}
+                interval="preserveStartEnd"
+                minTickGap={40}
               />
-              <Line
+              <YAxis
+                tick={{ fontSize: 9, fill: "#6b7280" }}
+                tickFormatter={(v: number) =>
+                  equityMode === "usd" ? `$${v.toFixed(0)}` : `${v > 0 ? "+" : ""}${v.toFixed(0)}`
+                }
+                width={equityMode === "usd" ? 64 : 52}
+              />
+              <Tooltip
+                contentStyle={{ background: "#0f0f1e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }}
+                labelFormatter={(v: unknown) => {
+                  try {
+                    return new Date(String(v)).toLocaleString("it-IT", {
+                      day: "2-digit", month: "2-digit", year: "2-digit",
+                      hour: "2-digit", minute: "2-digit", timeZone: TZ,
+                    })
+                  } catch { return String(v) }
+                }}
+                formatter={(v: unknown, name: unknown) => {
+                  const n = typeof v === "number" ? v : parseFloat(String(v))
+                  if (name === "cumul_usd") return [`$${n.toFixed(2)}`, "Saldo"] as [string, string]
+                  return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "P&L cumulativo"] as [string, string]
+                }}
+              />
+              {/* Reference line at starting balance (break-even) */}
+              {equityMode === "usd" && run.starting_balance_usd != null && (
+                <ReferenceLine
+                  y={run.starting_balance_usd}
+                  stroke="rgba(255,255,255,0.15)"
+                  strokeDasharray="4 3"
+                />
+              )}
+              {equityMode === "pips" && (
+                <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 3" />
+              )}
+              <Area
                 type="monotone"
                 dataKey={equityMode === "usd" ? "cumul_usd" : "cumul"}
                 stroke={pnlPositive ? "#10b981" : "#ef4444"}
-                dot={false}
+                fill="url(#balanceGradient)"
                 strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
               />
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
