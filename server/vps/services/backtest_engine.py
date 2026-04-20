@@ -361,6 +361,18 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
             point["cumul_usd"] = round(cumul_usd, 2)
         equity_curve.append(point)
 
+    # Prepend starting point (balance = 0 pip / starting_balance_usd)
+    # so the chart always begins from the simulation start date
+    start_point: dict = {
+        "ts":    telegram_meta.get("period_from"),
+        "trade": 0.0,
+        "cumul": 0.0,
+    }
+    if any("cumul_usd" in p for p in equity_curve):
+        start_point["trade_usd"] = 0.0
+        start_point["cumul_usd"] = round(starting_balance_usd, 2)
+    equity_curve = [start_point] + equity_curve
+
     # Statistiche monetarie
     amounts = [t["pnl_usd"] for t in closed if t.get("pnl_usd") is not None]
     total_usd = round(sum(amounts), 2)       if amounts else None
