@@ -559,6 +559,29 @@ class MT5Trader:
                 sym_info = mt5.symbol_info(symbol)
                 point = float(sym_info.point) if sym_info else None
 
+                # Rileva offset fuso orario del broker rispetto a UTC.
+                # Molti broker europei restituiscono bar["time"] in ora locale
+                # del server (es. UTC+2) anziché UTC. Normalizziamo a UTC.
+                import time as _systime
+                broker_offset_sec = 0
+                try:
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick and tick.time:
+                        utc_now = int(_systime.time())
+                        raw_diff = tick.time - utc_now
+                        # Valido solo se entro ±14h dal tick recente (<14h di distanza)
+                        if abs(raw_diff) <= 50400:
+                            nearest = round(raw_diff / 3600) * 3600
+                            if abs(raw_diff - nearest) < 300:  # entro 5 min dall'ora esatta
+                                broker_offset_sec = nearest
+                                if broker_offset_sec:
+                                    logger.info(
+                                        "Broker offset rilevato: %+dh per %s",
+                                        broker_offset_sec // 3600, symbol,
+                                    )
+                except Exception as _tz_exc:
+                    logger.debug("Rilevamento broker offset fallito: %s", _tz_exc)
+
                 # Prova timeframe dal più granulare al meno
                 tf_order = [
                     (mt5.TIMEFRAME_M1,  "M1"),
@@ -571,7 +594,8 @@ class MT5Trader:
                     if rates is not None and len(rates) > 0:
                         bar_list = [
                             {
-                                "time":  int(b["time"]),
+                                # Sottrai offset broker → timestamp UTC corretto
+                                "time":  int(b["time"]) - broker_offset_sec,
                                 "open":  float(b["open"]),
                                 "high":  float(b["high"]),
                                 "low":   float(b["low"]),
@@ -580,9 +604,10 @@ class MT5Trader:
                             for b in rates
                         ]
                         logger.info(
-                            "Barre %s %s: %d barre (%s→%s)",
+                            "Barre %s %s: %d barre (%s→%s) offset=%+ds",
                             symbol, tf_name, len(bar_list),
                             bar_list[0]["time"], bar_list[-1]["time"],
+                            broker_offset_sec,
                         )
                         return {
                             "bars":        bar_list,

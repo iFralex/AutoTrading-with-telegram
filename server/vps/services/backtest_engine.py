@@ -445,6 +445,12 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
     sender_stats.sort(key=lambda x: x["trades"], reverse=True)
 
     # ── Per ora e giorno settimana ─────────────────────────────────────────────
+    try:
+        import zoneinfo as _zi
+        _ROME_TZ = _zi.ZoneInfo("Europe/Rome")
+    except Exception:
+        _ROME_TZ = None  # type: ignore[assignment]
+
     by_hour:    dict[str, dict] = {}
     by_weekday: dict[str, dict] = {}
     for t in closed:
@@ -453,6 +459,10 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
             continue
         try:
             dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if _ROME_TZ:
+                dt = dt.astimezone(_ROME_TZ)
             h  = str(dt.hour)
             wd = str(dt.weekday())  # 0=lunedì
             p  = t.get("pnl_pips") or 0

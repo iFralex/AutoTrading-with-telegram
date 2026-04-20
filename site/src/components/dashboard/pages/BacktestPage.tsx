@@ -16,12 +16,15 @@ import { api, type BacktestRun, type BacktestTrade, type DashboardUser } from "@
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+const TZ = "Europe/Rome"
+
 function fmtTs(iso: string | null): string {
   if (!iso) return "—"
   try {
     return new Date(iso).toLocaleString("it-IT", {
       day: "2-digit", month: "2-digit", year: "2-digit",
       hour: "2-digit", minute: "2-digit",
+      timeZone: TZ,
     })
   } catch { return iso }
 }
@@ -806,6 +809,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
     ...b,
     label: new Date(b.time * 1000).toLocaleString("it-IT", {
       day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+      timeZone: TZ,
     }),
   }))
 
