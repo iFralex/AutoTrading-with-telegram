@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { api, type DashboardUserResponse, type UserGroup, type Group } from "@/src/lib/api"
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
-  Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw,
+  Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw, Copy,
 } from "lucide-react"
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -49,6 +49,7 @@ export function SettingsPage({
             onUpdate={updateGroup}
             onRemove={() => removeGroup(group.group_id)}
             canRemove={user.groups.length > 1}
+            otherGroups={user.groups.filter(g => g.group_id !== group.group_id)}
           />
         ))}
 
@@ -70,16 +71,22 @@ function GroupCard({
   onUpdate,
   onRemove,
   canRemove,
+  otherGroups,
 }: {
   group: UserGroup
   userId: string
   onUpdate: (g: UserGroup) => void
   onRemove: () => void
   canRemove: boolean
+  otherGroups: UserGroup[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeErr, setRemoveErr] = useState<string | null>(null)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const [copyOk, setCopyOk] = useState(false)
+  const copyRef = useRef<HTMLDivElement>(null)
 
   const patch = (fields: Partial<UserGroup>) => onUpdate({ ...group, ...fields })
 
@@ -96,6 +103,40 @@ function GroupCard({
     }
   }
 
+  const handleCopyFrom = async (src: UserGroup) => {
+    setCopyOpen(false)
+    setCopying(true)
+    const fields = {
+      extraction_instructions: src.extraction_instructions,
+      sizing_strategy:         src.sizing_strategy,
+      management_strategy:     src.management_strategy,
+      deletion_strategy:       src.deletion_strategy,
+      range_entry_pct:         src.range_entry_pct,
+      entry_if_favorable:      src.entry_if_favorable,
+    }
+    try {
+      await api.updateUserGroup(userId, group.group_id, fields)
+      patch(fields)
+      setCopyOk(true)
+      setTimeout(() => setCopyOk(false), 2000)
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setCopying(false)
+    }
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!copyOpen) return
+    const handler = (e: MouseEvent) => {
+      if (copyRef.current && !copyRef.current.contains(e.target as Node))
+        setCopyOpen(false)
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [copyOpen])
+
   return (
     <div className="rounded-xl border border-white/[0.07] bg-card/40 overflow-hidden">
       {/* Header */}
@@ -106,6 +147,48 @@ function GroupCard({
           <p className="text-xs text-muted-foreground font-mono">ID: {group.group_id}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* Copy-from dropdown (only when multiple groups exist) */}
+          {otherGroups.length > 0 && (
+            <div className="relative" ref={copyRef}>
+              <button
+                onClick={() => setCopyOpen(o => !o)}
+                disabled={copying}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all disabled:opacity-40 ${
+                  copyOk
+                    ? "border-emerald-500/30 text-emerald-400 bg-emerald-600/8"
+                    : "border-white/[0.08] text-muted-foreground hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05]"
+                }`}
+                title="Copia impostazioni da un altro canale"
+              >
+                {copying ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : copyOk ? (
+                  <Check className="w-3 h-3" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+                {copyOk ? "Copiato" : "Copia da…"}
+              </button>
+              {copyOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-20 w-52 rounded-xl border border-white/[0.1] bg-[#0f0f1e] shadow-xl overflow-hidden">
+                  <p className="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Copia impostazioni da
+                  </p>
+                  {otherGroups.map(src => (
+                    <button
+                      key={src.group_id}
+                      onClick={() => handleCopyFrom(src)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-white/[0.05] transition-colors"
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                      <span className="truncate text-xs text-foreground/80">{src.group_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {canRemove && (
             <button
               onClick={handleRemove}
