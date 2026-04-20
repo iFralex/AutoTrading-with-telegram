@@ -5,11 +5,12 @@ import {
   Play, RefreshCw, Trash2, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Minus, AlertTriangle,
   Clock, BarChart2, Users, Target, Zap, DollarSign,
-  CheckCircle, XCircle, AlertCircle,
+  CheckCircle, XCircle, AlertCircle, X,
 } from "lucide-react"
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell,
+  ReferenceLine, ReferenceDot, ComposedChart, Area,
 } from "recharts"
 import { api, type BacktestRun, type BacktestTrade, type DashboardUser } from "@/src/lib/api"
 
@@ -340,10 +341,11 @@ function RunProgress({ run, onRefresh }: { run: BacktestRun; onRefresh: () => vo
 // ── Full results ──────────────────────────────────────────────────────────────
 
 function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
-  const [trades, setTrades]         = useState<BacktestTrade[] | null>(null)
-  const [loadingTrades, setLT]      = useState(false)
-  const [showTrades, setShowTrades]  = useState(false)
-  const [equityMode, setEquityMode]  = useState<"pips" | "usd">("pips")
+  const [trades, setTrades]           = useState<BacktestTrade[] | null>(null)
+  const [loadingTrades, setLT]        = useState(false)
+  const [showTrades, setShowTrades]   = useState(false)
+  const [equityMode, setEquityMode]   = useState<"pips" | "usd">("pips")
+  const [selectedTrade, setSelected]  = useState<BacktestTrade | null>(null)
   const hasUsdEquity = run.equity_curve_json?.some((p: any) => p.cumul_usd !== undefined)
 
   async function loadTrades() {
@@ -362,6 +364,11 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
 
   return (
     <div className="space-y-5">
+
+      {/* Trade chart modal */}
+      {selectedTrade && (
+        <TradeChartModal trade={selectedTrade} onClose={() => setSelected(null)} />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -674,7 +681,11 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
               </thead>
               <tbody>
                 {trades.map(t => (
-                  <tr key={t.id} className="border-t border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                  <tr
+                    key={t.id}
+                    onClick={() => setSelected(t)}
+                    className="border-t border-white/[0.04] hover:bg-indigo-600/5 cursor-pointer transition-colors"
+                  >
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTs(t.actual_entry_ts ?? t.msg_ts)}</td>
                     <td className="px-3 py-2 max-w-[80px] truncate text-muted-foreground">{t.sender_name ?? "—"}</td>
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{t.symbol ?? "—"}</td>
@@ -706,6 +717,196 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Trade chart modal ─────────────────────────────────────────────────────────
+
+type Bar = { time: number; open: number; high: number; low: number; close: number }
+
+function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: () => void }) {
+  const bars = trade.chart_bars_json
+  const isBuy = trade.order_type === "BUY"
+
+  const entryUnix  = trade.actual_entry_ts ? new Date(trade.actual_entry_ts).getTime() / 1000 : null
+  const exitUnix   = trade.exit_ts         ? new Date(trade.exit_ts).getTime()         / 1000 : null
+
+  const chartData = (bars ?? []).map((b: Bar) => ({
+    time:  b.time,
+    close: b.close,
+    high:  b.high,
+    low:   b.low,
+    label: new Date(b.time * 1000).toLocaleString("it-IT", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    }),
+  }))
+
+  const entryIdx = entryUnix ? chartData.findIndex(d => d.time >= entryUnix) : -1
+  const exitIdx  = exitUnix  ? chartData.findIndex(d => d.time >= exitUnix)  : -1
+
+  const priceMin = bars ? Math.min(...bars.map((b: Bar) => b.low),
+    trade.stop_loss ?? Infinity, trade.take_profit ?? Infinity, trade.actual_entry ?? Infinity)
+    * 0.9999 : 0
+  const priceMax = bars ? Math.max(...bars.map((b: Bar) => b.high),
+    trade.stop_loss ?? -Infinity, trade.take_profit ?? -Infinity, trade.actual_entry ?? -Infinity)
+    * 1.0001 : 1
+
+  const pnlPos = (trade.pnl_pips ?? 0) >= 0
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-[#0a0a14] border border-white/[0.08] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${isBuy ? "bg-emerald-600/10 text-emerald-400" : "bg-red-600/10 text-red-400"}`}>
+              {trade.order_type ?? "—"}
+            </span>
+            <span className="font-mono font-semibold text-foreground">{trade.symbol ?? "—"}</span>
+            <OutcomeBadge outcome={trade.outcome} />
+            <span className={`text-sm font-mono font-bold ${pnlPos ? "text-emerald-400" : "text-red-400"}`}>
+              {trade.pnl_pips !== null ? fmtPips(trade.pnl_pips) : ""}
+              {trade.pnl_usd  !== null ? ` · ${fmtUsd(trade.pnl_usd)}` : ""}
+            </span>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Levels legend */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1 px-5 pt-3 text-[11px]">
+          {trade.actual_entry != null && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-0.5 bg-amber-400 inline-block" />
+              Entry {trade.actual_entry.toFixed(5)}
+            </span>
+          )}
+          {trade.stop_loss != null && (
+            <span className="flex items-center gap-1.5 text-red-400">
+              <span className="w-5 h-0.5 bg-red-400 inline-block border-dashed border-t border-red-400" style={{borderStyle:"dashed"}} />
+              SL {trade.stop_loss.toFixed(5)}
+            </span>
+          )}
+          {trade.take_profit != null && (
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <span className="w-5 h-0.5 bg-emerald-400 inline-block" style={{borderStyle:"dashed"}} />
+              TP {trade.take_profit.toFixed(5)}
+            </span>
+          )}
+          {trade.exit_price != null && (
+            <span className="flex items-center gap-1.5 text-violet-400">
+              <span className="w-5 h-0.5 bg-violet-400 inline-block" />
+              Exit {trade.exit_price.toFixed(5)}
+            </span>
+          )}
+        </div>
+
+        {/* Chart */}
+        <div className="px-5 pt-2 pb-4">
+          {!bars || bars.length === 0 ? (
+            <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+              Dati grafico non disponibili (backtest eseguito prima di questo aggiornamento)
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: "#6b7280" }}
+                  interval={Math.floor(chartData.length / 6)}
+                />
+                <YAxis
+                  domain={[priceMin, priceMax]}
+                  tick={{ fontSize: 9, fill: "#6b7280" }}
+                  tickFormatter={(v: number) => v.toFixed(4)}
+                  width={70}
+                />
+                <Tooltip
+                  contentStyle={{ background: "#0a0a14", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }}
+                  formatter={(v: unknown) => [(v as number).toFixed(5), "Close"]}
+                  labelFormatter={l => String(l)}
+                />
+
+                {/* Price line */}
+                <Line
+                  type="monotone"
+                  dataKey="close"
+                  stroke="#6366f1"
+                  dot={false}
+                  strokeWidth={1.5}
+                  name="Close"
+                />
+
+                {/* Entry line */}
+                {trade.actual_entry != null && (
+                  <ReferenceLine y={trade.actual_entry} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
+                )}
+                {/* SL line */}
+                {trade.stop_loss != null && (
+                  <ReferenceLine y={trade.stop_loss} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" />
+                )}
+                {/* TP line */}
+                {trade.take_profit != null && (
+                  <ReferenceLine y={trade.take_profit} stroke="#10b981" strokeWidth={1.5} strokeDasharray="4 2" />
+                )}
+
+                {/* Entry dot */}
+                {entryIdx >= 0 && trade.actual_entry != null && (
+                  <ReferenceDot
+                    x={chartData[entryIdx]?.label}
+                    y={trade.actual_entry}
+                    r={5}
+                    fill="#f59e0b"
+                    stroke="#0a0a14"
+                    strokeWidth={2}
+                  />
+                )}
+                {/* Exit dot */}
+                {exitIdx >= 0 && trade.exit_price != null && (
+                  <ReferenceDot
+                    x={chartData[exitIdx]?.label}
+                    y={trade.exit_price}
+                    r={5}
+                    fill={pnlPos ? "#10b981" : "#ef4444"}
+                    stroke="#0a0a14"
+                    strokeWidth={2}
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Trade details */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 pb-5 text-xs">
+          {[
+            { label: "Entry time",  v: fmtTs(trade.actual_entry_ts) },
+            { label: "Exit time",   v: fmtTs(trade.exit_ts) },
+            { label: "Durata",      v: fmtDur(trade.duration_min) },
+            { label: "Lot size",    v: trade.lot_size?.toFixed(2) ?? "—" },
+            { label: "Mittente",    v: trade.sender_name ?? "—" },
+            { label: "Modalità",    v: trade.order_mode ?? "—" },
+          ].map(({ label, v }) => (
+            <div key={label} className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/[0.05]">
+              <p className="text-muted-foreground mb-0.5">{label}</p>
+              <p className="font-mono font-semibold truncate">{v}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Message text */}
+        {trade.message_text && (
+          <div className="mx-5 mb-5 p-3 bg-white/[0.02] rounded-lg border border-white/[0.05] text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
+            {trade.message_text}
           </div>
         )}
       </div>

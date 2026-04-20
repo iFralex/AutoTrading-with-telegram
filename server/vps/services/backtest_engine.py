@@ -80,6 +80,42 @@ def _bars_bisect(bars: list[dict], from_unix: int) -> int:
     return bisect.bisect_left(times, from_unix)
 
 
+_CHART_BARS_PADDING = 30   # barre prima/dopo il trade da includere nel grafico
+_CHART_BARS_MAX     = 400  # cap totale per non gonfiare il DB
+
+def _extract_chart_bars(
+    bars: list[dict],
+    signal_ts: datetime,
+    exit_ts_iso: str | None,
+) -> list[dict] | None:
+    """
+    Ritorna lo slice di barre M1 attorno al trade (signal → exit + padding).
+    Restituisce None se bars è vuoto.
+    """
+    if not bars:
+        return None
+
+    sig_unix  = int(signal_ts.timestamp())
+    start_idx = max(0, _bars_bisect(bars, sig_unix) - _CHART_BARS_PADDING)
+
+    if exit_ts_iso:
+        try:
+            from datetime import datetime as _dt
+            exit_dt  = _dt.fromisoformat(exit_ts_iso.replace("Z", "+00:00"))
+            exit_unix = int(exit_dt.timestamp())
+            end_idx  = min(len(bars), _bars_bisect(bars, exit_unix) + _CHART_BARS_PADDING + 1)
+        except Exception:
+            end_idx = min(len(bars), start_idx + _CHART_BARS_MAX)
+    else:
+        end_idx = min(len(bars), start_idx + _CHART_BARS_MAX)
+
+    # Cap totale
+    if end_idx - start_idx > _CHART_BARS_MAX:
+        end_idx = start_idx + _CHART_BARS_MAX
+
+    return bars[start_idx:end_idx]
+
+
 # ── Simulazione singolo trade ─────────────────────────────────────────────────
 
 @dataclass
@@ -851,6 +887,9 @@ class BacktestEngine:
                     "duration_min":    result.duration_min,
                     "ai_approved":     ai_meta.get("ai_approved"),
                     "ai_reason":       ai_meta.get("ai_reason", ""),
+                    "chart_bars_json": _extract_chart_bars(
+                        bars, msg_dt or datetime.now(timezone.utc), result.exit_ts
+                    ),
                 })
 
             # Segnali rifiutati: teniamoli come trade "rejected" per statistiche

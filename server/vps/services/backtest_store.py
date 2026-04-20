@@ -138,6 +138,7 @@ _MIGRATIONS = [
     "ALTER TABLE backtest_runs ADD COLUMN max_drawdown_usd REAL",
     "ALTER TABLE backtest_runs ADD COLUMN final_balance_usd REAL",
     "ALTER TABLE backtest_trades ADD COLUMN pnl_usd REAL",
+    "ALTER TABLE backtest_trades ADD COLUMN chart_bars_json TEXT",
 ]
 
 
@@ -230,6 +231,8 @@ class BacktestStore:
                 t.get("outcome"), t.get("pnl_pips"), t.get("pnl_usd"), t.get("duration_min"),
                 int(t["ai_approved"]) if t.get("ai_approved") is not None else None,
                 t.get("ai_reason"),
+                json.dumps(t["chart_bars_json"], ensure_ascii=False)
+                    if t.get("chart_bars_json") else None,
             )
             for t in trades
         ]
@@ -241,8 +244,9 @@ class BacktestStore:
                      symbol, order_type, order_mode, entry_price_raw,
                      stop_loss, take_profit, lot_size,
                      actual_entry, actual_entry_ts, exit_price, exit_ts,
-                     outcome, pnl_pips, pnl_usd, duration_min, ai_approved, ai_reason)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     outcome, pnl_pips, pnl_usd, duration_min, ai_approved, ai_reason,
+                     chart_bars_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 rows,
             )
@@ -275,7 +279,16 @@ class BacktestStore:
                 (run_id,),
             )
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("chart_bars_json"):
+                try:
+                    d["chart_bars_json"] = json.loads(d["chart_bars_json"])
+                except Exception:
+                    d["chart_bars_json"] = None
+            result.append(d)
+        return result
 
     async def list_runs(self, user_id: str) -> list[dict]:
         async with aiosqlite.connect(self._db_path) as db:

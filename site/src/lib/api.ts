@@ -945,4 +945,5 @@ export interface BacktestTrade {
   duration_min:     number | null
   ai_approved:      number | null
   ai_reason:        string | null
+  chart_bars_json:  { time: number; open: number; high: number; low: number; close: number }[] | null
 }
