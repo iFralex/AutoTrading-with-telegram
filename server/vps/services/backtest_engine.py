@@ -503,6 +503,7 @@ class BacktestEngine:
         mt5_server: str,
         sizing_strategy: str | None,
         management_strategy: str | None,
+        extraction_instructions: str | None,
         starting_balance_usd: float = 1000.0,
     ) -> None:
         """
@@ -522,6 +523,7 @@ class BacktestEngine:
                 mt5_login=mt5_login, mt5_password=mt5_password, mt5_server=mt5_server,
                 sizing_strategy=sizing_strategy,
                 management_strategy=management_strategy,
+                extraction_instructions=extraction_instructions,
                 starting_balance_usd=starting_balance_usd,
                 t0=t0,
             )
@@ -532,7 +534,7 @@ class BacktestEngine:
     async def _run_inner(self, *, run_id, user_id, group_id, group_name,
                          mode, limit_value, use_ai,
                          mt5_login, mt5_password, mt5_server,
-                         sizing_strategy, management_strategy,
+                         sizing_strategy, management_strategy, extraction_instructions,
                          starting_balance_usd, t0) -> None:
 
         ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
@@ -627,6 +629,7 @@ class BacktestEngine:
                         "leverage":    100,
                     } if sizing_strategy else None,
                     user_id=user_id,
+                    extraction_instructions=extraction_instructions,
                     flex=True,
                 )
             except Exception as exc:

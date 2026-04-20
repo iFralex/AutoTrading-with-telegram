@@ -33,8 +33,6 @@ class RunRequest(BaseModel):
     limit_value:          str   # ISO date "2024-01-01" oppure numero "500"
 
     use_ai:               bool = False
-    sizing_strategy:      str | None = None
-    management_strategy:  str | None = None
     starting_balance_usd: float = 1000.0
 
 
@@ -63,6 +61,16 @@ async def start_backtest(body: RunRequest, request: Request):
     mt5_server   = user.get("mt5_server")
     if not (mt5_login and mt5_password and mt5_server):
         raise HTTPException(400, "Credenziali MT5 non configurate per questo utente")
+
+    # Legge le impostazioni specifiche del gruppo selezionato
+    group_settings = await user_store.get_user_group(body.user_id, int(body.group_id))
+    if group_settings is None:
+        # Fallback al primo gruppo attivo
+        groups = await user_store.get_user_groups(body.user_id)
+        group_settings = groups[0] if groups else {}
+    sizing_strategy         = group_settings.get("sizing_strategy")
+    management_strategy     = group_settings.get("management_strategy")
+    extraction_instructions = group_settings.get("extraction_instructions")
 
     # Blocca il trading live per questo utente durante il backtest
     backtesting_users: set = request.app.state.backtesting_users
@@ -98,8 +106,9 @@ async def start_backtest(body: RunRequest, request: Request):
                 mt5_login=int(mt5_login),
                 mt5_password=mt5_password,
                 mt5_server=mt5_server,
-                sizing_strategy=body.sizing_strategy or user.get("sizing_strategy"),
-                management_strategy=body.management_strategy or user.get("management_strategy"),
+                sizing_strategy=sizing_strategy,
+                management_strategy=management_strategy,
+                extraction_instructions=extraction_instructions,
                 starting_balance_usd=body.starting_balance_usd,
             )
         finally:
