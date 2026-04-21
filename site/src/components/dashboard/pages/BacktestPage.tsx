@@ -131,7 +131,8 @@ function RunForm({ user, onStarted, disabled }: {
     groups[0]?.group_id ?? 0
   )
   const [mode, setMode]           = useState<"date_limit" | "message_count">("message_count")
-  const [dateVal, setDateVal]     = useState("")
+  const [dateFrom, setDateFrom]   = useState("")
+  const [dateTo, setDateTo]       = useState("")
   const [countVal, setCountVal]   = useState("1000")
   const [useAi, setUseAi]         = useState(false)
   const [balance, setBalance]     = useState("1000")
@@ -142,8 +143,10 @@ function RunForm({ user, onStarted, disabled }: {
 
   async function submit() {
     setErr(null)
-    const limitValue = mode === "date_limit" ? dateVal : countVal
-    if (!limitValue) { setErr("Inserisci un valore"); return }
+    const limitValue = mode === "date_limit" ? `${dateFrom}/${dateTo}` : countVal
+    if (mode === "date_limit" && (!dateFrom || !dateTo)) { setErr("Inserisci entrambe le date"); return }
+    if (mode === "date_limit" && dateFrom > dateTo) { setErr("La data iniziale deve essere prima di quella finale"); return }
+    if (mode === "message_count" && !countVal) { setErr("Inserisci un valore"); return }
     if (!selectedGroup) { setErr("Seleziona un gruppo"); return }
     setLoading(true)
     try {
@@ -230,15 +233,27 @@ function RunForm({ user, onStarted, disabled }: {
           <p className="text-[11px] text-muted-foreground mt-1">Scarica gli ultimi N messaggi dal gruppo</p>
         </div>
       ) : (
-        <div>
-          <label className="text-xs text-muted-foreground">Fino a questa data (inclusa)</label>
-          <input
-            type="date"
-            value={dateVal}
-            onChange={e => setDateVal(e.target.value)}
-            className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
-          />
-          <p className="text-[11px] text-muted-foreground mt-1">Scarica tutti i messaggi dal più recente fino alla data scelta</p>
+        <div className="space-y-2">
+          <div>
+            <label className="text-xs text-muted-foreground">Dal (incluso)</label>
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={e => setDateFrom(e.target.value)}
+              className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Al (incluso)</label>
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={e => setDateTo(e.target.value)}
+              className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
+            />
+          </div>
         </div>
       )}
 

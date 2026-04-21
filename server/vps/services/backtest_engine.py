@@ -627,11 +627,15 @@ class BacktestEngine:
         await self._store.update_run(run_id, status="running:telegram_fetch")
 
         until_date: datetime | None = None
+        from_date: datetime | None = None
         msg_limit: int | None = None
 
         if mode == "date_limit":
-            # +1 day so the selected date is included (Telethon offset_date is exclusive)
-            until_date = datetime.fromisoformat(limit_value).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            # format: "YYYY-MM-DD/YYYY-MM-DD" (from/to, both inclusive)
+            parts = limit_value.split("/")
+            from_date  = datetime.fromisoformat(parts[0]).replace(tzinfo=timezone.utc)
+            # +1 day so the end date is included (Telethon offset_date is exclusive)
+            until_date = datetime.fromisoformat(parts[1]).replace(tzinfo=timezone.utc) + timedelta(days=1)
         else:
             msg_limit = int(limit_value)
 
@@ -643,6 +647,7 @@ class BacktestEngine:
                 group_id=int(group_id),
                 limit=msg_limit,
                 until_date=until_date,
+                from_date=from_date,
             ),
         )
 

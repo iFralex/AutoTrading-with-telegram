@@ -228,6 +228,7 @@ class TelegramManager:
         group_id: int,
         limit: int | None = None,
         until_date=None,
+        from_date=None,
         on_progress=None,
     ) -> list[dict]:
         """
@@ -237,14 +238,15 @@ class TelegramManager:
             user_id:    ID utente registrato nel manager.
             group_id:   ID del gruppo/canale da cui scaricare.
             limit:      Numero massimo di messaggi (None = fino a until_date).
-            until_date: datetime (timezone-aware UTC) — scarica messaggi fino a questa data.
+            until_date: datetime UTC — scarica messaggi fino a questa data (esclusiva).
+            from_date:  datetime UTC — scarta messaggi precedenti a questa data.
             on_progress: callable(fetched: int) invocato ogni 100 messaggi.
 
         Returns:
             Lista di dict [{id, date_iso, sender_name, text}] ordinati dal più vecchio.
         """
         return self._call(
-            self._async_get_history(user_id, group_id, limit, until_date, on_progress),
+            self._async_get_history(user_id, group_id, limit, until_date, from_date, on_progress),
             timeout=3600,
         )
 
@@ -359,6 +361,7 @@ class TelegramManager:
         group_id: int,
         limit: int | None,
         until_date,
+        from_date,
         on_progress,
     ) -> list[dict]:
         client = self._clients.get(user_id)
@@ -384,6 +387,15 @@ class TelegramManager:
             if not text:
                 continue
 
+            date = getattr(msg, "date", None)
+
+            # Se c'è un from_date, fermiamo l'iterazione appena usciamo dall'intervallo
+            # (i messaggi arrivano dal più recente al più vecchio)
+            if from_date and date and date < from_date:
+                break
+
+            date_iso = date.isoformat() if date else None
+
             sender = await msg.get_sender()
             if sender is None:
                 sender_name = "?"
@@ -393,9 +405,6 @@ class TelegramManager:
                     or getattr(sender, "title", None)
                     or "?"
                 )
-
-            date = getattr(msg, "date", None)
-            date_iso = date.isoformat() if date else None
 
             messages.append({
                 "id":          msg.id,
