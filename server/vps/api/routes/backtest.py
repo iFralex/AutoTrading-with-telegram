@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -92,6 +93,7 @@ async def start_backtest(body: RunRequest, request: Request):
     )
 
     backtesting_users.add(body.user_id)
+    backtest_tasks: dict = request.app.state.backtest_tasks
 
     async def _run_and_cleanup():
         try:
@@ -113,8 +115,10 @@ async def start_backtest(body: RunRequest, request: Request):
             )
         finally:
             backtesting_users.discard(body.user_id)
+            backtest_tasks.pop(run_id, None)
 
-    asyncio.create_task(_run_and_cleanup())
+    task = asyncio.create_task(_run_and_cleanup())
+    backtest_tasks[run_id] = task
 
     return {"run_id": run_id, "status": "running"}
 
@@ -152,6 +156,30 @@ async def get_backtest_trades(run_id: str, request: Request):
         raise HTTPException(404, f"Run {run_id} non trovato")
     trades = await bt_store.get_trades(run_id)
     return {"run_id": run_id, "trades": trades, "total": len(trades)}
+
+
+@router.post("/{run_id}/cancel")
+async def cancel_backtest(run_id: str, user_id: str, request: Request):
+    """Interrompe un backtest in corso."""
+    bt_store = getattr(request.app.state, "backtest_store", None)
+    if bt_store is None:
+        raise HTTPException(503, "BacktestStore non disponibile")
+    run = await bt_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Run {run_id} non trovato")
+    if run["user_id"] != user_id:
+        raise HTTPException(403, "Non autorizzato")
+    if not run["status"].startswith("running"):
+        raise HTTPException(409, "Il backtest non è in esecuzione")
+
+    task = request.app.state.backtest_tasks.get(run_id)
+    if task:
+        task.cancel()
+    else:
+        # Task non trovato (riavvio server?): segna comunque come cancellato
+        await bt_store.update_run(run_id, status="cancelled",
+                                  completed_at=datetime.now(timezone.utc).isoformat())
+    return {"cancelled": run_id}
 
 
 @router.delete("/{run_id}")

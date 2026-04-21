@@ -608,6 +608,11 @@ class BacktestEngine:
                 starting_balance_usd=starting_balance_usd,
                 t0=t0,
             )
+        except asyncio.CancelledError:
+            logger.info("Backtest %s interrotto dall'utente", run_id, extra=_u)
+            await self._store.update_run(run_id, status="cancelled",
+                                         completed_at=datetime.now(timezone.utc).isoformat())
+            raise
         except Exception as exc:
             logger.error("Backtest %s errore: %s", run_id, exc, exc_info=True, extra=_u)
             await self._store.fail_run(run_id, str(exc))

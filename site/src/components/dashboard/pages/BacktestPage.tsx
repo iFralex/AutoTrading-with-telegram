@@ -67,17 +67,20 @@ const STATUS_LABELS: Record<string, string> = {
   "running:simulation":         "⚡ Simulazione trade…",
   "done":                       "✅ Completato",
   "error":                      "❌ Errore",
+  "cancelled":                  "⛔ Interrotto",
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const isRunning = status.startsWith("running")
-  const isDone    = status === "done"
-  const isError   = status === "error"
+  const isRunning   = status.startsWith("running")
+  const isDone      = status === "done"
+  const isError     = status === "error"
+  const isCancelled = status === "cancelled"
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border ${
-      isDone  ? "bg-emerald-600/10 text-emerald-400 border-emerald-500/20" :
-      isError ? "bg-red-600/10 text-red-400 border-red-500/20" :
-                "bg-indigo-600/10 text-indigo-400 border-indigo-500/20"
+      isDone      ? "bg-emerald-600/10 text-emerald-400 border-emerald-500/20" :
+      isError     ? "bg-red-600/10 text-red-400 border-red-500/20" :
+      isCancelled ? "bg-orange-600/10 text-orange-400 border-orange-500/20" :
+                    "bg-indigo-600/10 text-indigo-400 border-indigo-500/20"
     }`}>
       {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />}
       {STATUS_LABELS[status] ?? status}
@@ -316,19 +319,41 @@ function RunForm({ user, onStarted, disabled }: {
 
 // ── Active run progress ───────────────────────────────────────────────────────
 
-function RunProgress({ run, onRefresh }: { run: BacktestRun; onRefresh: () => void }) {
+function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: () => void; userId: string }) {
   const isRunning = run.status.startsWith("running")
+  const [cancelling, setCancelling] = useState(false)
+
+  async function handleCancel() {
+    setCancelling(true)
+    try { await api.cancelBacktest(run.id, userId) } catch { /* ignore */ }
+    finally { setCancelling(false); setTimeout(onRefresh, 800) }
+  }
+
   return (
     <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <StatusBadge status={run.status} />
-        <button
-          onClick={onRefresh}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          title="Aggiorna stato"
-        >
-          <RefreshCw className={`w-4 h-4 ${isRunning ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          {isRunning && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-red-600/10 text-red-400 border border-red-500/20 hover:bg-red-600/20 transition-colors disabled:opacity-50"
+            >
+              {cancelling
+                ? <RefreshCw className="w-3 h-3 animate-spin" />
+                : <X className="w-3 h-3" />}
+              Interrompi
+            </button>
+          )}
+          <button
+            onClick={onRefresh}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Aggiorna stato"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRunning ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {run.error_msg && (
@@ -1267,8 +1292,8 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
             <div className="flex items-center justify-center h-48">
               <RefreshCw className="w-6 h-6 text-muted-foreground animate-spin" />
             </div>
-          ) : activeRun.status.startsWith("running") || activeRun.status === "error" ? (
-            <RunProgress run={activeRun} onRefresh={() => refreshActiveRun(activeRunId)} />
+          ) : activeRun.status.startsWith("running") || activeRun.status === "error" || activeRun.status === "cancelled" ? (
+            <RunProgress run={activeRun} onRefresh={() => refreshActiveRun(activeRunId)} userId={userId} />
           ) : (
             <RunResults key={activeRun.id} run={activeRun} userId={userId} />
           )}

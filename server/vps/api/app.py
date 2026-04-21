@@ -157,6 +157,8 @@ async def lifespan(app: FastAPI):
 
     # Utenti attualmente in backtest: blocca il trading live durante la simulazione
     app.state.backtesting_users: set[str] = set()
+    # Task asyncio attivi per run_id (usato per la cancellazione)
+    app.state.backtest_tasks: dict[str, object] = {}
 
     # Range order watcher
     range_watcher = RangeOrderWatcher()

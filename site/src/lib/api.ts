@@ -653,6 +653,14 @@ export const api = {
       `/api/backtest/${encodeURIComponent(runId)}?user_id=${encodeURIComponent(userId)}`
     )
   },
+
+  /** Interrompe un backtest in corso. */
+  cancelBacktest(runId: string, userId: string) {
+    return call<{ cancelled: string }>(
+      "POST",
+      `/api/backtest/${encodeURIComponent(runId)}/cancel?user_id=${encodeURIComponent(userId)}`
+    )
+  },
 }
 
 // ── AI Logs types ─────────────────────────────────────────────────────────────
