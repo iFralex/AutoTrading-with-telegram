@@ -329,10 +329,70 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
     finally { setCancelling(false); setTimeout(onRefresh, 800) }
   }
 
+  // Ordine delle fasi e loro status string
+  const PHASES: { key: string; label: string; aiOnly?: boolean }[] = [
+    { key: "running:telegram_fetch",    label: "Scaricamento messaggi Telegram" },
+    { key: "running:signal_detection",  label: "Rilevamento segnali (Flash AI)" },
+    { key: "running:signal_extraction", label: "Estrazione segnali (Pro AI)" },
+    { key: "running:ai_pretrade",       label: "Decisioni AI pre-trade", aiOnly: true },
+    { key: "running:mt5_bars",          label: "Download barre MT5" },
+    { key: "running:simulation",        label: "Simulazione trade" },
+  ]
+
+  const phases = PHASES.filter(p => !p.aiOnly || run.use_ai)
+  const currentIdx = phases.findIndex(p => p.key === run.status)
+  // Se status non è una fase nota (es. "running" iniziale), -1 = nessuna attiva
+  const activeIdx = currentIdx
+
+  function phaseState(idx: number): "done" | "active" | "pending" {
+    if (activeIdx === -1) return idx === 0 ? "active" : "pending"
+    if (idx < activeIdx) return "done"
+    if (idx === activeIdx) return "active"
+    return "pending"
+  }
+
+  // Sub-info per fase completata
+  function phaseDetail(key: string): string | null {
+    switch (key) {
+      case "running:telegram_fetch":
+        return run.total_messages != null
+          ? `${run.total_messages} messaggi${run.period_from ? ` · ${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}`
+          : null
+      case "running:signal_detection":
+        return run.signals_detected != null
+          ? `${run.signals_detected} segnali rilevati (${run.signal_detection_rate?.toFixed(1) ?? "—"}%)` +
+            (run.flash_cost_usd ? ` · $${run.flash_cost_usd.toFixed(4)}` : "")
+          : null
+      case "running:signal_extraction":
+        return run.signals_extracted != null
+          ? `${run.signals_extracted} segnali estratti` +
+            (run.pro_cost_usd ? ` · $${run.pro_cost_usd.toFixed(4)}` : "")
+          : null
+      case "running:ai_pretrade":
+        return run.ai_approved != null
+          ? `${run.ai_approved} approvati · ${run.ai_rejected} rifiutati · ${run.ai_modified} modificati` +
+            (run.pretrade_cost_usd ? ` · $${run.pretrade_cost_usd.toFixed(4)}` : "")
+          : null
+      case "running:mt5_bars":
+        return null
+      case "running:simulation":
+        return run.total_trades != null
+          ? `${run.total_trades} trade · ${run.winning_trades}W / ${run.losing_trades}L`
+          : null
+      default:
+        return null
+    }
+  }
+
   return (
-    <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-4">
+    <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-5">
+
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <StatusBadge status={run.status} />
+        <div>
+          {run.group_name && <p className="text-sm font-semibold text-foreground mb-0.5">{run.group_name}</p>}
+          <StatusBadge status={run.status} />
+        </div>
         <div className="flex items-center gap-2">
           {isRunning && (
             <button
@@ -340,17 +400,11 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
               disabled={cancelling}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-red-600/10 text-red-400 border border-red-500/20 hover:bg-red-600/20 transition-colors disabled:opacity-50"
             >
-              {cancelling
-                ? <RefreshCw className="w-3 h-3 animate-spin" />
-                : <X className="w-3 h-3" />}
+              {cancelling ? <RefreshCw className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
               Interrompi
             </button>
           )}
-          <button
-            onClick={onRefresh}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            title="Aggiorna stato"
-          >
+          <button onClick={onRefresh} className="text-muted-foreground hover:text-foreground transition-colors" title="Aggiorna">
             <RefreshCw className={`w-4 h-4 ${isRunning ? "animate-spin" : ""}`} />
           </button>
         </div>
@@ -362,29 +416,54 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-        <div className="bg-white/[0.02] rounded-lg p-3 border border-white/[0.05]">
-          <p className="text-muted-foreground mb-1">Messaggi</p>
-          <p className="font-mono font-semibold">{run.total_messages ?? "…"}</p>
-        </div>
-        <div className="bg-white/[0.02] rounded-lg p-3 border border-white/[0.05]">
-          <p className="text-muted-foreground mb-1">Segnali rilevati</p>
-          <p className="font-mono font-semibold">{run.signals_detected ?? "…"}</p>
-        </div>
-        <div className="bg-white/[0.02] rounded-lg p-3 border border-white/[0.05]">
-          <p className="text-muted-foreground mb-1">Segnali estratti</p>
-          <p className="font-mono font-semibold">{run.signals_extracted ?? "…"}</p>
-        </div>
-        <div className="bg-white/[0.02] rounded-lg p-3 border border-white/[0.05]">
-          <p className="text-muted-foreground mb-1">Trade simulati</p>
-          <p className="font-mono font-semibold">{run.total_trades ?? "…"}</p>
-        </div>
+      {/* Stepper */}
+      <div className="space-y-0">
+        {phases.map((phase, idx) => {
+          const state = phaseState(idx)
+          const detail = state === "done" ? phaseDetail(phase.key) : null
+          const isLast = idx === phases.length - 1
+          return (
+            <div key={phase.key} className="flex gap-3">
+              {/* Icon + vertical line */}
+              <div className="flex flex-col items-center">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 border ${
+                  state === "done"    ? "bg-emerald-600/15 border-emerald-500/40" :
+                  state === "active"  ? "bg-indigo-600/20 border-indigo-500/50" :
+                                        "bg-white/[0.03] border-white/[0.08]"
+                }`}>
+                  {state === "done"
+                    ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    : state === "active"
+                      ? <RefreshCw className="w-3 h-3 text-indigo-400 animate-spin" />
+                      : <div className="w-1.5 h-1.5 rounded-full bg-white/20" />}
+                </div>
+                {!isLast && (
+                  <div className={`w-px flex-1 my-1 ${state === "done" ? "bg-emerald-500/20" : "bg-white/[0.06]"}`} style={{ minHeight: 16 }} />
+                )}
+              </div>
+
+              {/* Text */}
+              <div className={`pb-4 ${isLast ? "pb-0" : ""} min-w-0`}>
+                <p className={`text-xs font-medium leading-6 ${
+                  state === "done"   ? "text-foreground" :
+                  state === "active" ? "text-indigo-300" :
+                                       "text-muted-foreground/50"
+                }`}>{phase.label}</p>
+                {detail && (
+                  <p className="text-[11px] text-emerald-400/80 font-mono -mt-1 mb-1">{detail}</p>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
-      {run.period_from && (
-        <p className="text-[11px] text-muted-foreground">
-          Periodo: {fmtTs(run.period_from)} → {fmtTs(run.period_to)}
-        </p>
+      {/* Costo AI totale */}
+      {(run.total_ai_cost_usd > 0 || run.total_ai_seconds > 0) && (
+        <div className="flex gap-4 pt-1 border-t border-white/[0.05] text-[11px] text-muted-foreground">
+          {run.total_ai_cost_usd > 0 && <span>Costo AI totale: <span className="font-mono text-foreground">${run.total_ai_cost_usd.toFixed(4)}</span></span>}
+          {run.total_ai_seconds > 0 && <span>Tempo AI: <span className="font-mono text-foreground">{run.total_ai_seconds.toFixed(1)}s</span></span>}
+        </div>
       )}
     </div>
   )
