@@ -88,11 +88,12 @@ function StatusBadge({ status }: { status: string }) {
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
   const o = outcome ?? "—"
   const map: Record<string, string> = {
-    TP:          "bg-emerald-600/10 text-emerald-400 border-emerald-500/20",
-    SL:          "bg-red-600/10 text-red-400 border-red-500/20",
-    open_at_end: "bg-amber-600/10 text-amber-400 border-amber-500/20",
-    not_filled:  "bg-white/[0.04] text-muted-foreground border-white/10",
-    ai_rejected: "bg-orange-600/10 text-orange-400 border-orange-500/20",
+    TP:             "bg-emerald-600/10 text-emerald-400 border-emerald-500/20",
+    SL:             "bg-red-600/10 text-red-400 border-red-500/20",
+    open_at_end:    "bg-amber-600/10 text-amber-400 border-amber-500/20",
+    not_filled:     "bg-white/[0.04] text-muted-foreground border-white/10",
+    ai_rejected:    "bg-orange-600/10 text-orange-400 border-orange-500/20",
+    invalid_signal: "bg-rose-600/10 text-rose-400 border-rose-500/20",
   }
   return (
     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${map[o] ?? "bg-white/[0.04] text-muted-foreground border-white/10"}`}>

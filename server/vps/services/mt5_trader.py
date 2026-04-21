@@ -893,6 +893,21 @@ class MT5Trader:
             round(lot / sym_info.volume_step) * sym_info.volume_step,
         )
 
+        # ── Valida che entry sia tra SL e TP ─────────────────────────────────
+        if sig.stop_loss is not None and sig.take_profit is not None:
+            lo, hi = min(sig.stop_loss, sig.take_profit), max(sig.stop_loss, sig.take_profit)
+            if not (lo < price < hi):
+                err_msg = (
+                    f"Segnale scartato: entry {price:.5f} non è tra "
+                    f"SL {sig.stop_loss:.5f} e TP {sig.take_profit:.5f}"
+                )
+                logger.warning(
+                    "Utente %s | %s %s | %s",
+                    user_id, sig.order_type, sig.symbol, err_msg,
+                    extra={"user_id": user_id},
+                )
+                return TradeResult(success=False, error=err_msg, signal=sig)
+
         comment = f"TgBot:{signal_group_id}" if signal_group_id else "TgBot"
 
         # ── Filling mode: letta dal bitmask del simbolo ───────────────────────

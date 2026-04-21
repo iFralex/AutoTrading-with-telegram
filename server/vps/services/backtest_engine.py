@@ -206,6 +206,12 @@ def _simulate_trade(
     sl = signal.stop_loss
     tp = signal.take_profit
 
+    # Valida che entry_price sia compreso tra SL e TP (quando entrambi presenti)
+    if sl is not None and tp is not None:
+        lo, hi = min(sl, tp), max(sl, tp)
+        if not (lo < entry_price < hi):
+            return SimResult("invalid_signal", None, None, None, None, None, None)
+
     # Se non ci sono né SL né TP non possiamo simulare la chiusura
     if sl is None and tp is None:
         entry_dt = _ts_to_dt(bars[entry_bar_idx]["time"])
@@ -291,14 +297,15 @@ def _sample_equity_curve(curve: list[dict], max_points: int) -> list[dict]:
 def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
                        starting_balance_usd: float = 1000.0) -> dict:
     """Calcola tutte le statistiche aggregate dal set di trade simulati."""
-    filled = [t for t in trades if t["outcome"] not in ("not_filled",)]
+    _excluded = ("not_filled", "invalid_signal")
+    filled = [t for t in trades if t["outcome"] not in _excluded]
     closed = [t for t in filled if t["outcome"] in ("TP", "SL")]
     wins   = [t for t in closed if (t["pnl_pips"] or 0) > 0]
     losses = [t for t in closed if (t["pnl_pips"] or 0) <= 0]
 
     total     = len(trades)
     n_filled  = len(filled)
-    n_nf      = len([t for t in trades if t["outcome"] == "not_filled"])
+    n_nf      = len([t for t in trades if t["outcome"] in _excluded])
     n_open    = len([t for t in filled if t["outcome"] == "open_at_end"])
     n_wins    = len(wins)
     n_losses  = len(losses)
