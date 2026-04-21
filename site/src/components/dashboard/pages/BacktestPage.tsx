@@ -385,6 +385,9 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
+          {run.group_name && (
+            <p className="text-sm font-semibold text-foreground mb-0.5">{run.group_name}</p>
+          )}
           <p className="text-xs text-muted-foreground">
             {fmtTs(run.started_at)} · {run.total_messages ?? 0} messaggi · {run.period_from ? `${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}
           </p>
@@ -1102,6 +1105,9 @@ function RunHistoryRow({ run, onSelect, onDelete, isActive }: {
             <span className="text-[10px] px-1.5 py-0.5 bg-violet-600/10 text-violet-400 rounded border border-violet-500/20">AI</span>
           )}
         </div>
+        {run.group_name && (
+          <p className="text-[11px] font-medium text-foreground/70 truncate">{run.group_name}</p>
+        )}
         <p className="text-[11px] text-muted-foreground">
           {fmtTs(run.started_at)} · {run.mode === "message_count" ? `${run.limit_value} msg` : `fino al ${run.limit_value}`}
           {run.total_messages !== null && ` · ${run.total_messages} scaricati`}
@@ -1249,7 +1255,7 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
           ) : activeRun.status.startsWith("running") || activeRun.status === "error" ? (
             <RunProgress run={activeRun} onRefresh={() => refreshActiveRun(activeRunId)} />
           ) : (
-            <RunResults run={activeRun} userId={userId} />
+            <RunResults key={activeRun.id} run={activeRun} userId={userId} />
           )}
         </div>
       </div>
