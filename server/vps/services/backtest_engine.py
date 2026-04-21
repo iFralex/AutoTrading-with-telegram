@@ -630,7 +630,8 @@ class BacktestEngine:
         msg_limit: int | None = None
 
         if mode == "date_limit":
-            until_date = datetime.fromisoformat(limit_value).replace(tzinfo=timezone.utc)
+            # +1 day so the selected date is included (Telethon offset_date is exclusive)
+            until_date = datetime.fromisoformat(limit_value).replace(tzinfo=timezone.utc) + timedelta(days=1)
         else:
             msg_limit = int(limit_value)
 
