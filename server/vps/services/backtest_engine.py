@@ -380,10 +380,14 @@ def _compute_aggregate(trades: list[dict], cost_info: dict, telegram_meta: dict,
             point["cumul_usd"] = round(cumul_usd, 2)
         equity_curve.append(point)
 
-    # Prepend starting point (balance = 0 pip / starting_balance_usd)
-    # so the chart always begins from the simulation start date
+    # Prepend starting point al timestamp della PRIMA OPERAZIONE (entry/messaggio),
+    # non dall'inizio della cronologia Telegram che può essere mesi prima.
+    first_trade_ts = next(
+        (t.get("actual_entry_ts") or t.get("msg_ts") for t in sorted_trades),
+        telegram_meta.get("period_from"),
+    )
     start_point: dict = {
-        "ts":    telegram_meta.get("period_from"),
+        "ts":    first_trade_ts,
         "trade": 0.0,
         "cumul": 0.0,
     }
