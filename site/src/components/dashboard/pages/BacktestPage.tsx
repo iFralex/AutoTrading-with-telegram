@@ -399,6 +399,21 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
   const hasUsdEquity = run.equity_curve_json?.some((p: any) => p.cumul_usd !== undefined)
   const [equityMode, setEquityMode]   = useState<"pips" | "usd">(hasUsdEquity ? "usd" : "pips")
   const [selectedTrade, setSelected]  = useState<BacktestTrade | null>(null)
+  const [sortKey, setSortKey]         = useState<keyof BacktestTrade | null>(null)
+  const [sortDir, setSortDir]         = useState<"asc" | "desc">("asc")
+
+  function handleSort(key: keyof BacktestTrade) {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc")
+    else { setSortKey(key); setSortDir("asc") }
+  }
+
+  const sortedTrades = trades ? [...trades].sort((a, b) => {
+    if (!sortKey) return 0
+    const av = a[sortKey] ?? ""
+    const bv = b[sortKey] ?? ""
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0
+    return sortDir === "asc" ? cmp : -cmp
+  }) : null
 
   async function loadTrades() {
     if (trades) { setShowTrades(v => !v); return }
@@ -795,13 +810,39 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-t border-white/[0.05] bg-white/[0.02]">
-                  {["Data", "Mittente", "Simbolo", "Tipo", "Entry", "SL", "TP", "Esito", "P&L (pip)", "P&L (USD)", "Durata", "AI"].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                  {([
+                    ["Data",      "actual_entry_ts"],
+                    ["Mittente",  "sender_name"],
+                    ["Simbolo",   "symbol"],
+                    ["Tipo",      "order_type"],
+                    ["Entry",     "actual_entry"],
+                    ["SL",        "stop_loss"],
+                    ["TP",        "take_profit"],
+                    ["Esito",     "outcome"],
+                    ["P&L (pip)", "pnl_pips"],
+                    ["P&L (USD)", "pnl_usd"],
+                    ["Durata",    "duration_min"],
+                    ["AI",        "ai_approved"],
+                  ] as [string, keyof BacktestTrade][]).map(([label, key]) => (
+                    <th
+                      key={key}
+                      onClick={() => handleSort(key)}
+                      className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors"
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        {sortKey === key
+                          ? sortDir === "asc"
+                            ? <ChevronUp className="w-3 h-3 text-indigo-400" />
+                            : <ChevronDown className="w-3 h-3 text-indigo-400" />
+                          : <ChevronUp className="w-3 h-3 opacity-20" />}
+                      </span>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {trades.map(t => (
+                {(sortedTrades ?? trades).map(t => (
                   <tr
                     key={t.id}
                     onClick={() => setSelected(t)}
