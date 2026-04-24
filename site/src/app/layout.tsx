@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SignalFlow AI — Automazione trading dalle sale segnali Telegram",
-  description: "SignalFlow AI esegue automaticamente ogni segnale delle tue sale Telegram sul tuo conto di trading — in meno di un secondo, senza emozioni, 24/7. Setup in 3 minuti, nessuna competenza tecnica richiesta.",
+  title: "SignalFlow AI — Automate Your Telegram Trading Signals",
+  description: "SignalFlow AI automatically executes every signal from your Telegram rooms on your trading account — in under a second, no emotion, 24/7. Setup in 3 minutes, no technical skills required.",
 };
 
 export default function RootLayout({
