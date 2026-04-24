@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trading Bot — Setup",
-  description: "Configura il tuo bot di trading automatico su Telegram e MetaTrader 5",
+  title: "SignalFlow AI — Telegram to MT5 Trading Automation",
+  description: "SignalFlow AI bridges your Telegram signal channels to MetaTrader 5 in real time. AI reads every message, parses the trade, and executes it on your live account — 24/7, fully automated.",
 };
 
 export default function RootLayout({
