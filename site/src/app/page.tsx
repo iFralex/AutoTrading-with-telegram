@@ -102,14 +102,14 @@ function Nav() {
         </Link>
 
         <div className="hidden md:flex items-center gap-8 text-sm text-white/55">
-          {[["#features", "Features"], ["#how-it-works", "How it works"], ["#pricing", "Pricing"], ["#faq", "FAQ"]].map(([href, label]) => (
+          {[["#features", "Funzionalità"], ["#how-it-works", "Come funziona"], ["#pricing", "Prezzi"], ["#faq", "FAQ"]].map(([href, label]) => (
             <a key={href} href={href} className="hover:text-white transition-colors">{label}</a>
           ))}
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <Link href="/dashboard" className="text-sm text-white/50 hover:text-white transition-colors px-4 py-2">Log in</Link>
-          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2">Get Started</PrimaryBtn>
+          <Link href="/dashboard" className="text-sm text-white/50 hover:text-white transition-colors px-4 py-2">Accedi</Link>
+          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2">Inizia ora</PrimaryBtn>
         </div>
 
         <button className="md:hidden text-white/60 hover:text-white" onClick={() => setOpen(!open)}>
@@ -120,10 +120,10 @@ function Nav() {
       </div>
       {open && (
         <div className="md:hidden px-6 pb-4 text-sm text-white/70 flex flex-col gap-3 border-t border-white/5">
-          {[["#features", "Features"], ["#how-it-works", "How it works"], ["#pricing", "Pricing"], ["#faq", "FAQ"]].map(([href, label]) => (
+          {[["#features", "Funzionalità"], ["#how-it-works", "Come funziona"], ["#pricing", "Prezzi"], ["#faq", "FAQ"]].map(([href, label]) => (
             <a key={href} href={href} className="hover:text-white py-1" onClick={() => setOpen(false)}>{label}</a>
           ))}
-          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2.5 mt-2 text-center w-full" onClick={() => setOpen(false)}>Get Started</PrimaryBtn>
+          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2.5 mt-2 text-center w-full" onClick={() => setOpen(false)}>Inizia ora</PrimaryBtn>
         </div>
       )}
     </nav>
@@ -145,28 +145,28 @@ function Hero() {
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z" />
             </svg>
-            Powered by Gemini 2.5 AI · Live MT5 Execution
+            Zero emozioni · Esecuzione istantanea · Sempre attivo
           </Badge>
         </div>
 
         <h1 className="text-5xl sm:text-6xl md:text-7xl font-black leading-tight tracking-tight mb-6 text-white">
-          Trade Smarter.<br />
-          <GradientText>Never Miss a Signal.</GradientText>
+          Smetti di perdere trade.<br />
+          <GradientText>Inizia a guadagnare in automatico.</GradientText>
         </h1>
 
         <p className="text-lg sm:text-xl text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
-          SignalFlow AI bridges your Telegram signal channels to MetaTrader 5 in real time.
-          AI reads every message, parses the trade, and executes it on your live account —{" "}
-          <strong className="text-white/75">24/7, fully automated.</strong>
+          Segui le tue sale segnali su Telegram e lascia che la nostra AI esegua ogni trade per te —
+          in meno di un secondo, senza esitazioni, senza emozioni,{" "}
+          <strong className="text-white/75">24 ore su 24.</strong>
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
-          <PrimaryBtn href="#pricing" className="text-base px-8 py-4 w-full sm:w-auto">Start in 3 Minutes →</PrimaryBtn>
-          <OutlineBtn href="#how-it-works" className="text-base px-8 py-4 w-full sm:w-auto">See how it works</OutlineBtn>
+          <PrimaryBtn href="#pricing" className="text-base px-8 py-4 w-full sm:w-auto">Inizia in 3 minuti →</PrimaryBtn>
+          <OutlineBtn href="#how-it-works" className="text-base px-8 py-4 w-full sm:w-auto">Come funziona</OutlineBtn>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-14 text-center">
-          {[["24/7", "Always Active"], ["<1s", "Signal to Order"], ["100%", "Automated"], ["3 min", "Setup Time"]].map(([val, label], i) => (
+          {[["24/7", "Sempre Attivo"], ["<1s", "Segnale → Ordine"], ["0", "Emozioni"], ["3 min", "Setup Guidato"]].map(([val, label], i) => (
             <div key={i} className="flex items-center gap-8 sm:gap-14">
               {i > 0 && <div className="w-px h-8 bg-white/10 hidden sm:block" />}
               <div>
@@ -244,18 +244,18 @@ function Ticker() {
 // ─── How It Works ──────────────────────────────────────────────────────────
 function HowItWorks() {
   const steps = [
-    { num: "1", from: "from-emerald-400", to: "to-cyan-400", title: "Connect in 3 Minutes", body: "Run through the guided 10-step wizard. Link your Telegram account, choose which signal channels to monitor, and enter your MT5 broker credentials.", tags: [["Telegram Auth","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["MT5 Verify","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["2FA Support","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"]] },
-    { num: "2", from: "from-cyan-400", to: "to-violet-500", title: "AI Reads Every Signal", body: "Gemini 2.5 Flash instantly classifies each message. If it's a signal, Gemini 2.5 Pro extracts symbol, direction, entry, SL, TP, and lot size — even from messy text.", tags: [["Flash Detection","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Pro Extraction","text-violet-400 bg-violet-400/10 border-violet-400/20"],["AI Filter","text-violet-400 bg-violet-400/10 border-violet-400/20"]] },
-    { num: "3", from: "from-violet-500", to: "to-red-500", title: "Orders Execute Instantly", body: "The parsed signal is placed on your live MT5 account as a market or pending order. The AI agent monitors open positions and reacts to events 24/7.", tags: [["Live Execution","text-red-400 bg-red-400/10 border-red-400/20"],["Position Watch","text-red-400 bg-red-400/10 border-red-400/20"],["24/7 VPS","text-red-400 bg-red-400/10 border-red-400/20"]] },
+    { num: "1", from: "from-emerald-400", to: "to-cyan-400", title: "Collega le tue sale segnali", body: "In pochi minuti colleghi il tuo account Telegram e scegli quali gruppi segnali monitorare. Poi inserisci i dati del tuo conto di trading. Nessuna programmazione, nessuna competenza tecnica richiesta.", tags: [["Telegram","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Conto trading","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Guidato passo per passo","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"]] },
+    { num: "2", from: "from-cyan-400", to: "to-violet-500", title: "La AI legge ogni messaggio", body: "Il nostro motore AI analizza ogni messaggio in tempo reale. Riconosce i segnali di trading — anche quelli scritti in modo informale — ed estrae automaticamente direzione, entry, stop loss e take profit.", tags: [["Rilevamento segnali","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Parsing automatico","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Filtro anti-rumore","text-violet-400 bg-violet-400/10 border-violet-400/20"]] },
+    { num: "3", from: "from-violet-500", to: "to-red-500", title: "Il trade si apre in automatico", body: "In meno di un secondo il tuo ordine è aperto sul conto, con stop loss e take profit già impostati. Nessuna esitazione, nessuna emozione: solo esecuzione precisa, ogni volta.", tags: [["Esecuzione istantanea","text-red-400 bg-red-400/10 border-red-400/20"],["Zero emozioni","text-red-400 bg-red-400/10 border-red-400/20"],["Attivo 24/7","text-red-400 bg-red-400/10 border-red-400/20"]] },
   ]
   return (
     <section id="how-it-works" className="relative py-28 px-6 overflow-hidden bg-[#07090f]">
       <div className="absolute w-[500px] h-[500px] rounded-full blur-[120px] top-1/2 -left-48 -translate-y-1/2 bg-violet-600/15 pointer-events-none" />
       <div className="max-w-6xl mx-auto relative z-10">
         <Reveal className="text-center mb-16">
-          <Badge>How It Works</Badge>
-          <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">Three steps. Zero effort.</h2>
-          <p className="text-lg text-white/45 max-w-xl mx-auto">From Telegram message to live MT5 order in under a second — fully automatic, always on.</p>
+          <Badge>Come funziona</Badge>
+          <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">Tre passi. Zero fatica.</h2>
+          <p className="text-lg text-white/45 max-w-xl mx-auto">Dal segnale Telegram all&apos;ordine aperto in meno di un secondo — in automatico, sempre attivo.</p>
         </Reveal>
         <div className="grid md:grid-cols-3 gap-6">
           {steps.map(({ num, from, to, title, body, tags }, i) => (
@@ -280,15 +280,15 @@ function HowItWorks() {
 
 // ─── Features ──────────────────────────────────────────────────────────────
 const FEATURES = [
-  { path: "M13 10V3L4 14h7v7l9-11h-7z", color: "text-emerald-400 bg-emerald-400/10", title: "Dual-AI Signal Pipeline", body: "Gemini 2.5 Flash for instant classification, then Gemini 2.5 Pro for structured extraction. Fast, accurate, cost-efficient." },
-  { path: "M12 2a10 10 0 100 20A10 10 0 0012 2zM12 8v4l3 3", color: "text-cyan-400 bg-cyan-400/10", title: "Real-Time Position Management", body: "An AI agent continuously watches open positions and reacts to events — close, modify, break-even — based on your natural-language strategy." },
-  { path: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z", color: "text-violet-400 bg-violet-400/10", title: "Advanced Analytics Dashboard", body: "Win rate, profit factor, Sharpe ratio, daily P&L charts, per-symbol breakdowns, equity curves, hourly distributions — all filterable by group." },
-  { path: "M4 6h16M4 12h16M4 18h7", color: "text-amber-400 bg-amber-400/10", title: "Historical Backtesting", body: "Download historical Telegram messages, simulate on real MT5 price bars. Get equity curves, Sharpe ratio, and per-trade candlestick charts." },
-  { path: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75", color: "text-red-400 bg-red-400/10", title: "Multi-Group Monitoring", body: "Monitor unlimited Telegram channels simultaneously. Each group gets its own AI configuration, sizing strategy, and extraction rules." },
-  { path: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", color: "text-green-400 bg-green-400/10", title: "Encrypted & Secure", body: "MT5 credentials stored with Fernet symmetric encryption. Sessions persist on your VPS. Your data never leaves your server." },
-  { path: "M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z", color: "text-emerald-400 bg-emerald-400/10", title: "Message Deletion Detection", body: "When a signal provider deletes a message, the bot automatically reacts — close positions, move to break-even, or reduce volume." },
-  { path: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2", color: "text-cyan-400 bg-cyan-400/10", title: "Full Signal Audit Trail", body: "Every Telegram message is logged with timestamp, sender, AI decision, extracted signal data, MT5 ticket numbers, and error details." },
-  { path: "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z", color: "text-violet-400 bg-violet-400/10", title: "Tools & Simulators", body: "Test any Telegram message through the AI pipeline risk-free, or place direct JSON orders on MT5 to verify connectivity before going live." },
+  { path: "M13 10V3L4 14h7v7l9-11h-7z", color: "text-emerald-400 bg-emerald-400/10", title: "Esecuzione istantanea dei segnali", body: "Ogni segnale viene eseguito in meno di un secondo, prima ancora che tu abbia il tempo di leggerlo. Nessuna perdita di entry per distrazione o ritardo." },
+  { path: "M12 2a10 10 0 100 20A10 10 0 0012 2zM12 8v4l3 3", color: "text-cyan-400 bg-cyan-400/10", title: "Gestione automatica delle posizioni", body: "Puoi istruire il sistema su come gestire le posizioni aperte: spostare lo stop loss in pareggio, ridurre il rischio, o chiudere automaticamente al raggiungimento di obiettivi." },
+  { path: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z", color: "text-violet-400 bg-violet-400/10", title: "Statistiche complete sulle performance", body: "Win rate, profitto netto, profit factor, drawdown massimo, curve di equity — per ogni sala segnali che segui. Sai esattamente chi porta risultati e chi no." },
+  { path: "M4 6h16M4 12h16M4 18h7", color: "text-amber-400 bg-amber-400/10", title: "Backtest storico dei segnali", body: "Prima di seguire una nuova sala segnali, metti alla prova i suoi segnali passati sui dati storici del mercato. Scopri se avrebbe guadagnato o perso soldi — senza rischiare nulla." },
+  { path: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75", color: "text-red-400 bg-red-400/10", title: "Segui più sale segnali contemporaneamente", body: "Monitora quanti gruppi Telegram vuoi allo stesso tempo. Ogni sala ha le sue impostazioni indipendenti: diversa gestione del rischio, diversa dimensione delle posizioni." },
+  { path: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", color: "text-green-400 bg-green-400/10", title: "I tuoi dati sono al sicuro", body: "Le credenziali del tuo conto trading non escono mai dai tuoi sistemi. L'accesso al tuo Telegram è in sola lettura: non può inviare messaggi né modificare nulla." },
+  { path: "M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z", color: "text-emerald-400 bg-emerald-400/10", title: "Protezione automatica dal rischio", body: "Se un analista cancella un segnale, il sistema reagisce in automatico: chiude la posizione, sposta lo stop, o riduce il volume — in base alle tue preferenze." },
+  { path: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2", color: "text-cyan-400 bg-cyan-400/10", title: "Storico completo di ogni trade", body: "Ogni segnale ricevuto, ogni ordine aperto, ogni risultato: tutto registrato con data, ora e dettagli completi. Sai sempre cosa è successo e perché." },
+  { path: "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z", color: "text-violet-400 bg-violet-400/10", title: "Testa qualsiasi segnale senza rischi", body: "Incolla un messaggio di segnale e guarda come il sistema lo interpreterebbe, prima ancora di attivarlo sul tuo conto. Perfetto per valutare nuovi analisti." },
 ]
 
 function Features() {
@@ -297,12 +297,12 @@ function Features() {
       <div className="absolute w-[600px] h-[600px] rounded-full blur-[120px] -top-24 -right-48 bg-emerald-500/12 pointer-events-none" />
       <div className="max-w-6xl mx-auto relative z-10">
         <Reveal className="text-center mb-16">
-          <Badge>Platform Features</Badge>
+          <Badge>Funzionalità</Badge>
           <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">
-            Everything you need.<br />
-            <GradientText>Nothing you don&apos;t.</GradientText>
+            Tutto quello che ti serve.<br />
+            <GradientText>Niente di superfluo.</GradientText>
           </h2>
-          <p className="text-lg text-white/45 max-w-xl mx-auto">A complete suite of trading automation tools built for serious traders.</p>
+          <p className="text-lg text-white/45 max-w-xl mx-auto">Ogni funzione è pensata per un trader che vuole smettere di perdere tempo e opportunità.</p>
         </Reveal>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
           {FEATURES.map(({ path, color, title, body }, i) => (
@@ -327,10 +327,10 @@ function Features() {
 // ─── AI Pipeline ───────────────────────────────────────────────────────────
 function AIPipeline() {
   const steps = [
-    { letter: "F", gradient: "from-emerald-400 to-cyan-400", textBlack: true, title: "Flash Detection", model: "Gemini 2.5 Flash", body: "Instantly classifies: signal or noise? <200ms latency, minimal cost per call.", tag: <><span className="px-2 py-0.5 rounded text-xs bg-emerald-400/10 text-emerald-400">Signal ✓</span><span className="px-2 py-0.5 rounded text-xs bg-white/5 text-white/40">Noise ✗</span></> },
-    { letter: "P", gradient: "from-violet-700 to-violet-500", textBlack: false, title: "Pro Extraction", model: "Gemini 2.5 Pro", body: "Parses symbol, direction, entry (market/exact/range), SL, TP, and lot size from any format.", tag: <span className="font-mono px-2 py-0.5 rounded text-xs bg-white/5 text-emerald-400">{"{ BUY XAUUSD @ 2342 | SL 2330 | TP 2360 }"}</span> },
-    { letter: "A", gradient: "from-amber-500 to-red-500", textBlack: false, title: "AI Pre-trade Filter", model: "Elite only", elite: true, body: "The AI evaluates the signal against your strategy. It can approve, reject, or modify before any order is placed." },
-    { letter: "✓", gradient: "from-green-500 to-green-700", textBlack: true, title: "MT5 Order Execution", body: "Order placed on your live brokerage account. Ticket logged. Position watcher activated." },
+    { letter: "1", gradient: "from-emerald-400 to-cyan-400", textBlack: true, title: "Rilevamento del segnale", body: "Il sistema legge ogni messaggio in tempo reale e riconosce immediatamente se è un segnale di trading — anche scritto in modo informale o in lingue diverse.", tag: <><span className="px-2 py-0.5 rounded text-xs bg-emerald-400/10 text-emerald-400">Segnale ✓</span><span className="px-2 py-0.5 rounded text-xs bg-white/5 text-white/40">Rumore ✗</span></> },
+    { letter: "2", gradient: "from-violet-700 to-violet-500", textBlack: false, title: "Parsing automatico", body: "Il motore AI estrae da ogni segnale la direzione, il prezzo di entrata, lo stop loss e il take profit — in qualsiasi formato, anche non strutturato.", tag: <span className="font-mono px-2 py-0.5 rounded text-xs bg-white/5 text-emerald-400">{"BUY XAUUSD @ 2342 · SL 2330 · TP 2360"}</span> },
+    { letter: "3", gradient: "from-amber-500 to-red-500", textBlack: false, title: "Filtro personalizzato", model: "Solo Elite", elite: true, body: "Puoi definire le tue regole di trading in linguaggio naturale. Il sistema le applica ad ogni segnale: approva, ignora o modifica prima di aprire l'ordine." },
+    { letter: "✓", gradient: "from-green-500 to-green-700", textBlack: true, title: "Ordine aperto in automatico", body: "L'ordine viene aperto sul tuo conto in meno di un secondo, con stop loss e take profit già impostati. La posizione viene monitorata finché non si chiude." },
   ]
   const dividerGrads = ["from-emerald-400/40 to-violet-500/40","from-violet-500/40 to-red-500/40","from-red-500/40 to-green-500/40"]
 
@@ -341,7 +341,7 @@ function AIPipeline() {
         {/* Pipeline visual */}
         <Reveal>
           <GlassCard className="p-6 border-violet-500/20">
-            <p className="text-xs font-semibold uppercase tracking-wider text-white/35 mb-6">AI Signal Pipeline</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-white/35 mb-6">Come lavora il motore AI</p>
             {steps.map(({ letter, gradient, textBlack, title, model, body, tag, elite }, i) => (
               <div key={i}>
                 <div className="flex items-start gap-4 mb-5">
@@ -362,11 +362,16 @@ function AIPipeline() {
         </Reveal>
         {/* Copy */}
         <Reveal delay={200}>
-          <Badge>Gemini 2.5 AI</Badge>
-          <h2 className="text-4xl font-black mt-6 mb-6 text-white">Two models.<br />One perfect pipeline.</h2>
-          <p className="text-white/50 leading-relaxed mb-6">A two-stage AI architecture: a fast Flash model pre-filters noise so the expensive Pro model only runs on real signals. Maximum accuracy at minimal cost.</p>
+          <Badge>Motore AI proprietario</Badge>
+          <h2 className="text-4xl font-black mt-6 mb-6 text-white">Legge qualsiasi segnale.<br />Esegue in millisecondi.</h2>
+          <p className="text-white/50 leading-relaxed mb-6">Il nostro motore AI è addestrato per capire i segnali di trading in qualsiasi formato — non solo quelli strutturati. Funziona anche con analisti che scrivono in modo informale, cambiano formato o usano abbreviazioni.</p>
           <ul className="space-y-4">
-            {["Natural-language strategy instructions — no code needed","Works with unstructured, messy signal formats from any channel","Custom extraction rules per group (symbol suffixes, format quirks)","Full AI cost tracking — token usage and cost per call, per day"].map(t => (
+            {[
+              "Capisce segnali scritti in qualsiasi lingua o stile",
+              "Zero configurazione: nessun codice, nessuna formula",
+              "Puoi impostare regole di rischio in linguaggio naturale",
+              "Ogni decisione è tracciata e consultabile nella dashboard",
+            ].map(t => (
               <li key={t} className="flex items-start gap-3">
                 <CheckIcon /><span className="text-sm text-white/70">{t}</span>
               </li>
@@ -384,50 +389,49 @@ type Plan = { name: string; price: string; tagline: string; popular?: boolean; e
 
 const PLANS: Plan[] = [
   {
-    name: "Core", price: "€79", tagline: "Perfect for solo traders getting started with signal automation.",
-    ctaLabel: "Get Started",
+    name: "Core", price: "€79", tagline: "Ideale per chi inizia a seguire le sale segnali e vuole automatizzare subito.",
+    ctaLabel: "Inizia ora",
     features: [
-      { label: "1 Telegram group / channel" },
-      { label: "AI signal detection (Gemini Flash)" },
-      { label: "Live MT5 order execution" },
-      { label: "Market & pending order types" },
-      { label: "Dashboard overview & KPIs" },
-      { label: "Signal log & audit trail" },
-      { label: "Recent trades table" },
-      { label: "Message simulator (risk-free)" },
-      { label: "3-minute guided setup wizard" },
-      { label: "Encrypted credential storage" },
+      { label: "1 sala segnali Telegram" },
+      { label: "Rilevamento automatico dei segnali" },
+      { label: "Esecuzione istantanea degli ordini" },
+      { label: "Stop loss e take profit automatici" },
+      { label: "Dashboard con statistiche base" },
+      { label: "Storico completo dei segnali" },
+      { label: "Storico dei trade recenti" },
+      { label: "Test segnali senza rischio" },
+      { label: "Setup guidato passo per passo" },
+      { label: "Credenziali protette e crittografate" },
     ],
-    notIncluded: ["Pro AI extraction (Gemini Pro)", "Analytics & backtesting", "AI pre-trade filter"],
+    notIncluded: ["Analisi avanzata dei segnali", "Statistiche avanzate e backtest", "Regole di trading personalizzate"],
   },
   {
-    name: "Pro", price: "€149", tagline: "For active traders who want full analytics and multi-group coverage.",
-    popular: true, ctaLabel: "Get Started →", prevPlan: "Core",
+    name: "Pro", price: "€149", tagline: "Per i trader attivi che vogliono dati, statistiche e seguire più analisti contemporaneamente.",
+    popular: true, ctaLabel: "Inizia ora →", prevPlan: "Core",
     features: [
-      { label: "Up to 5 Telegram groups", bold: true },
-      { label: "AI signal extraction (Gemini 2.5 Pro)" },
-      { label: "Per-group configuration & strategies" },
-      { label: "Range entry orders with % slider" },
-      { label: "Full statistics & chart analytics" },
-      { label: "Historical backtesting engine" },
-      { label: "AI & API cost tracking dashboard" },
-      { label: "Performance metrics (Sharpe, PF, drawdown)" },
-      { label: "Copy settings between groups" },
+      { label: "Fino a 5 sale segnali Telegram", bold: true },
+      { label: "Analisi avanzata dei segnali (zero falsi positivi)" },
+      { label: "Configurazione separata per ogni sala" },
+      { label: "Ordini a range con entrata ottimizzata" },
+      { label: "Statistiche complete e grafici" },
+      { label: "Backtest storico dei segnali" },
+      { label: "Dashboard performance (win rate, drawdown, P&L)" },
+      { label: "Metriche avanzate (profit factor, Sharpe ratio)" },
+      { label: "Copia impostazioni tra sale diverse" },
     ],
-    notIncluded: ["AI pre-trade filter", "AI position management agent", "Signal propagation to followers"],
+    notIncluded: ["Regole di trading personalizzate", "Gestione automatica delle posizioni", "Copy trading su più conti"],
   },
   {
-    name: "Elite", price: "€299", tagline: "For professional traders and fund managers who need the full AI suite.",
-    elite: true, ctaLabel: "Contact Sales", prevPlan: "Pro",
+    name: "Elite", price: "€299", tagline: "Per trader professionisti e chi gestisce più conti. Il controllo totale.",
+    elite: true, ctaLabel: "Contatta il team", prevPlan: "Pro",
     features: [
-      { label: "Unlimited Telegram groups", bold: true },
-      { label: "AI pre-trade filter (approve / reject / modify)", bold: true },
-      { label: "AI position management agent", bold: true },
-      { label: "AI deletion strategy", bold: true },
-      { label: "Signal propagation to followers", bold: true },
-      { label: "Multi-user isolated MT5 terminals", bold: true },
-      { label: "Priority support & onboarding", bold: true },
-      { label: "Custom strategy configuration session", bold: true },
+      { label: "Sale segnali illimitate", bold: true },
+      { label: "Regole di trading personalizzate (approva / ignora / modifica)", bold: true },
+      { label: "Gestione automatica delle posizioni aperte", bold: true },
+      { label: "Chiusura automatica quando un segnale viene cancellato", bold: true },
+      { label: "Copy trading su più conti", bold: true },
+      { label: "Supporto prioritario con onboarding dedicato", bold: true },
+      { label: "Sessione di configurazione strategia personalizzata", bold: true },
     ],
   },
 ]
@@ -492,11 +496,11 @@ function Pricing() {
       <div className="absolute w-[700px] h-[700px] rounded-full blur-[120px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-emerald-500/8 pointer-events-none" />
       <div className="max-w-6xl mx-auto relative z-10">
         <Reveal className="text-center mb-16">
-          <Badge>Pricing</Badge>
+          <Badge>Piani e prezzi</Badge>
           <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">
-            Choose your plan.<br /><GradientText>Trade at your level.</GradientText>
+            Scegli il tuo piano.<br /><GradientText>Inizia ad automatizzare.</GradientText>
           </h2>
-          <p className="text-lg text-white/45 max-w-xl mx-auto">All plans include the core engine, dashboard, and 3-minute setup. No contract. Cancel anytime.</p>
+          <p className="text-lg text-white/45 max-w-xl mx-auto">Tutti i piani includono il motore di automazione, la dashboard e il setup guidato. Nessun contratto. Disdici quando vuoi.</p>
         </Reveal>
         <div className="grid md:grid-cols-3 gap-6 items-stretch">
           {PLANS.map((plan, i) => (
@@ -505,7 +509,7 @@ function Pricing() {
             </Reveal>
           ))}
         </div>
-        <p className="text-center text-xs mt-8 text-white/28">All prices exclude VAT. Gemini API costs billed separately by Google. No contract — cancel anytime.</p>
+        <p className="text-center text-xs mt-8 text-white/28">Prezzi IVA esclusa. L&apos;abbonamento include tutta l&apos;infrastruttura necessaria. Nessun contratto — disdici in qualsiasi momento.</p>
       </div>
     </section>
   )
@@ -513,17 +517,17 @@ function Pricing() {
 
 // ─── Comparison Table ──────────────────────────────────────────────────────
 const TABLE: { label: string; core: boolean | string; pro: boolean | string; elite: boolean | string }[] = [
-  { label: "Telegram groups monitored",            core: "1",    pro: "5",   elite: "Unlimited" },
-  { label: "AI signal detection (Gemini Flash)",   core: true,   pro: true,  elite: true },
-  { label: "AI signal extraction (Gemini Pro)",    core: false,  pro: true,  elite: true },
-  { label: "MT5 order execution",                  core: true,   pro: true,  elite: true },
-  { label: "Range entry orders",                   core: false,  pro: true,  elite: true },
-  { label: "Full analytics & statistics",          core: false,  pro: true,  elite: true },
-  { label: "Historical backtesting engine",        core: false,  pro: true,  elite: true },
-  { label: "AI pre-trade filter",                  core: false,  pro: false, elite: true },
-  { label: "AI position management agent",         core: false,  pro: false, elite: true },
-  { label: "AI deletion strategy",                 core: false,  pro: false, elite: true },
-  { label: "Signal propagation to followers",      core: false,  pro: false, elite: true },
+  { label: "Sale segnali monitorate",              core: "1",    pro: "5",         elite: "Illimitate" },
+  { label: "Rilevamento automatico dei segnali",   core: true,   pro: true,        elite: true },
+  { label: "Analisi avanzata dei segnali",         core: false,  pro: true,        elite: true },
+  { label: "Esecuzione ordini automatica",         core: true,   pro: true,        elite: true },
+  { label: "Ordini a range con entrata ottimale",  core: false,  pro: true,        elite: true },
+  { label: "Statistiche e grafici avanzati",       core: false,  pro: true,        elite: true },
+  { label: "Backtest storico dei segnali",         core: false,  pro: true,        elite: true },
+  { label: "Regole di trading personalizzate",     core: false,  pro: false,       elite: true },
+  { label: "Gestione automatica delle posizioni",  core: false,  pro: false,       elite: true },
+  { label: "Auto-chiusura su segnale cancellato",  core: false,  pro: false,       elite: true },
+  { label: "Copy trading su più conti",            core: false,  pro: false,       elite: true },
 ]
 
 function Cell({ val, gold }: { val: boolean | string; gold?: boolean }) {
@@ -536,7 +540,7 @@ function ComparisonTable() {
   return (
     <section className="py-16 px-6 bg-[#07090f]">
       <Reveal className="max-w-4xl mx-auto">
-        <h3 className="text-2xl font-black text-center mb-10 text-white">Full feature comparison</h3>
+        <h3 className="text-2xl font-black text-center mb-10 text-white">Confronto completo tra i piani</h3>
         <GlassCard className="overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -566,13 +570,14 @@ function ComparisonTable() {
 
 // ─── FAQ ───────────────────────────────────────────────────────────────────
 const FAQ_ITEMS = [
-  { q: "What brokers are supported?", a: "Any broker that offers a MetaTrader 5 account works with SignalFlow AI. This includes IC Markets, Pepperstone, Exness, Tickmill, FP Markets, XM, and hundreds more. You simply provide your MT5 login, password, and broker server address — we verify the connection and display your account balance." },
-  { q: "Do I need a Windows VPS?", a: "Yes. MetaTrader 5 is Windows-only, so SignalFlow AI runs on a Windows VPS. A basic VPS (4 GB RAM, 2 cores) from providers like Contabo or Vultr costs roughly €5–€15/month. Our guided PowerShell setup script installs everything automatically." },
-  { q: "Is my Telegram account safe?", a: "SignalFlow uses Telethon, an official MTProto client, with your own Telegram API credentials from my.telegram.org. The bot only reads messages from the groups you select — it never sends messages, modifies your account, or accesses private chats. Your session is stored locally on your own VPS and never transmitted externally." },
-  { q: "What does the AI pre-trade filter do?", a: "Available on Elite. Write a natural-language strategy (e.g., \"Only take BUY trades on XAUUSD if price is above the 200 EMA\"). Before every signal reaches MT5, a Gemini AI agent evaluates it and can approve it as-is, reject it entirely, or modify it (e.g., adjust lot size or SL)." },
-  { q: "How does backtesting work?", a: "The engine downloads historical Telegram messages, runs the full AI pipeline (Flash → Pro → optional pre-trade filter), then simulates trades on real MT5 historical price bars (M1 with H1 fallback). Results include equity curve, win rate, profit factor, Sharpe ratio, max drawdown, AI cost breakdown, and a full sortable trade table." },
-  { q: "What is signal propagation?", a: "Elite plan only. A source user can link multiple follower accounts. When a signal executes on the source, it propagates to all followers — each executes it with their own MT5 credentials and lot-sizing strategy. Followers' live trading is automatically paused during backtests." },
-  { q: "Are there additional costs beyond the subscription?", a: "Two extra costs apply: (1) Windows VPS — typically €5–€15/month. (2) Gemini API costs — AI calls are billed at your Google Cloud usage rate. For a typical trader monitoring 1–3 groups, Gemini costs stay under €5–€20/month. SignalFlow tracks all API costs in the dashboard." },
+  { q: "Devo essere davanti al computer per eseguire i segnali?", a: "No. SignalFlow AI lavora in automatico, 24 ore su 24. Appena arriva un segnale dalla tua sala Telegram, il sistema lo riconosce e apre l'ordine sul tuo conto — anche mentre dormi, lavori o sei in vacanza. Non devi fare nulla." },
+  { q: "Cosa succede se un segnale arriva di notte?", a: "Il sistema è sempre attivo. Non ci sono orari di pausa. Ogni segnale che arriva — di giorno o di notte, nei weekend o durante le festività — viene elaborato e il trade viene aperto in automatico in meno di un secondo." },
+  { q: "Con quali broker funziona?", a: "SignalFlow AI funziona con qualsiasi broker che offre un conto MetaTrader 5: IC Markets, Pepperstone, Exness, XM, Tickmill, FP Markets e centinaia di altri. Durante il setup inserisci semplicemente i dati del tuo conto — il sistema verifica tutto automaticamente." },
+  { q: "Il mio account Telegram è al sicuro?", a: "Sì. Il sistema legge i messaggi delle sale segnali solo in lettura — non invia mai messaggi, non modifica il tuo account e non accede alle tue chat private. Vede solo i gruppi che scegli tu. I tuoi dati di accesso non escono mai dai tuoi sistemi." },
+  { q: "Cos'è il backtest dei segnali?", a: "Il backtest ti permette di testare i segnali passati di un analista sui dati storici del mercato, senza rischiare soldi veri. Puoi vedere quanti trade avrebbe vinto, il profitto totale, il massimo drawdown e la curva di equity. Ottimo per valutare un nuovo analista prima di seguirlo." },
+  { q: "Come funzionano le regole di trading personalizzate? (Solo Elite)", a: "Puoi scrivere le tue regole in linguaggio semplice — ad esempio \"entra solo su BUY sull'oro\" o \"non aprire nuovi trade il venerdì sera\". Il sistema applica queste regole ad ogni segnale prima di eseguirlo. Nessun codice richiesto." },
+  { q: "Il piano include tutto o ci sono costi nascosti?", a: "L'abbonamento include tutto: il motore di automazione, la dashboard, le statistiche e l'infrastruttura necessaria per far funzionare il sistema. Non ci sono costi aggiuntivi a sorpresa. Il prezzo che vedi è quello che paghi ogni mese." },
+  { q: "Posso usare SignalFlow AI senza esperienza tecnica?", a: "Assolutamente sì. È pensato proprio per chi non ha competenze tecniche. Il setup è guidato passo per passo e richiede meno di 3 minuti. Non devi installare nulla, non devi scrivere codice e non devi capire come funziona la tecnologia dietro. Ti connetti e funziona." },
 ]
 
 function FaqItem({ q, a }: { q: string; a: string }) {
@@ -597,8 +602,8 @@ function FAQ() {
     <section id="faq" className="py-28 px-6 bg-[#07090f]">
       <div className="max-w-3xl mx-auto">
         <Reveal className="text-center mb-16">
-          <Badge>FAQ</Badge>
-          <h2 className="text-4xl font-black mt-4 text-white">Common questions</h2>
+          <Badge>Domande frequenti</Badge>
+          <h2 className="text-4xl font-black mt-4 text-white">Hai domande? Abbiamo le risposte.</h2>
         </Reveal>
         <Reveal delay={100} className="space-y-3">
           {FAQ_ITEMS.map(item => <FaqItem key={item.q} {...item} />)}
@@ -615,14 +620,14 @@ function FinalCTA() {
       <div className="absolute w-[800px] h-[800px] rounded-full blur-[120px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-emerald-500/8 pointer-events-none" />
       <div className="absolute w-[500px] h-[500px] rounded-full blur-[120px] top-1/2 left-1/3 -translate-y-1/2 bg-violet-600/8 pointer-events-none" />
       <Reveal className="relative z-10 max-w-3xl mx-auto text-center">
-        <Badge>Ready to automate?</Badge>
+        <Badge>Pronto ad automatizzare?</Badge>
         <h2 className="text-4xl md:text-5xl font-black mt-6 mb-6 text-white">
-          Start trading on autopilot.<br /><GradientText>In 3 minutes.</GradientText>
+          Smetti di perdere trade.<br /><GradientText>Inizia in 3 minuti.</GradientText>
         </h2>
-        <p className="text-lg text-white/48 mb-10 max-w-xl mx-auto">Connect your Telegram signal channels to MetaTrader 5. Let AI handle the rest — 24 hours a day, 7 days a week.</p>
+        <p className="text-lg text-white/48 mb-10 max-w-xl mx-auto">Connetti le tue sale segnali Telegram e lascia che il sistema esegua ogni trade per te — senza emozioni, senza ritardi, 24 ore su 24.</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <PrimaryBtn href="#pricing" className="text-base px-10 py-4 w-full sm:w-auto">Choose Your Plan →</PrimaryBtn>
-          <OutlineBtn href="#faq" className="text-base px-8 py-4 w-full sm:w-auto">Read the FAQ</OutlineBtn>
+          <PrimaryBtn href="#pricing" className="text-base px-10 py-4 w-full sm:w-auto">Scegli il tuo piano →</PrimaryBtn>
+          <OutlineBtn href="#faq" className="text-base px-8 py-4 w-full sm:w-auto">Leggi le FAQ</OutlineBtn>
         </div>
       </Reveal>
     </section>
@@ -644,12 +649,12 @@ function Footer() {
               </span>
               <GradientText>SignalFlow</GradientText><span className="text-white/30 font-light text-sm -ml-1">AI</span>
             </Link>
-            <p className="text-sm text-white/40 max-w-xs leading-relaxed">Telegram signal automation for MetaTrader 5. Powered by Google Gemini 2.5 AI.</p>
+            <p className="text-sm text-white/40 max-w-xs leading-relaxed">Automazione del trading per chi segue sale segnali su Telegram. I tuoi trade, eseguiti in automatico.</p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-white/28 mb-4">Product</p>
             <ul className="space-y-2.5 text-sm text-white/50">
-              {[["#features","Features"],["#pricing","Pricing"],["#how-it-works","How it works"],["#faq","FAQ"]].map(([href,label]) => (
+              {[["#features","Funzionalità"],["#pricing","Prezzi"],["#how-it-works","Come funziona"],["#faq","FAQ"]].map(([href,label]) => (
                 <li key={href}><a href={href} className="hover:text-white transition-colors">{label}</a></li>
               ))}
             </ul>
