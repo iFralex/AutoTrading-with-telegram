@@ -30,6 +30,40 @@ function ErrBox({ msg }: { msg: string }) {
   )
 }
 
+// ─── Plan helpers ─────────────────────────────────────────────────────────────
+
+const PLAN_ORDER: PlanId[] = ["core", "pro", "elite"]
+
+const FIELD_PLAN_MAP: { field: keyof SetupData; label: string; minPlan: PlanId }[] = [
+  { field: "extractionInstructions", label: "AI extraction instructions", minPlan: "pro"   },
+  { field: "managementStrategy",     label: "Position management",        minPlan: "elite" },
+  { field: "deletionStrategy",       label: "Signal deletion handling",   minPlan: "elite" },
+]
+
+function getMinPlan(data: SetupData): PlanId {
+  if ((data.managementStrategy || data.deletionStrategy).trim()) return "elite"
+  if (data.extractionInstructions.trim()) return "pro"
+  return "core"
+}
+
+function getAffectedFields(plan: PlanId, data: SetupData) {
+  const planIdx = PLAN_ORDER.indexOf(plan)
+  return FIELD_PLAN_MAP.filter(f => PLAN_ORDER.indexOf(f.minPlan) > planIdx && (data[f.field] as string).trim())
+}
+
+function PlanBadge({ plan }: { plan: PlanId }) {
+  const styles: Record<PlanId, string> = {
+    core:  "bg-white/[0.05] text-white/40 border-white/10",
+    pro:   "bg-emerald-500/[0.08] text-emerald-400/90 border-emerald-500/20",
+    elite: "bg-amber-500/[0.08] text-amber-400/90 border-amber-500/20",
+  }
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-widest ${styles[plan]}`}>
+      {plan}
+    </span>
+  )
+}
+
 function PrimaryBtn({ onClick, disabled, loading = false, children, className = "" }: {
   onClick?: () => void; disabled?: boolean; loading?: boolean; children: React.ReactNode; className?: string
 }) {
@@ -65,7 +99,7 @@ const lbl  = "block text-xs font-semibold text-white/45 uppercase tracking-wider
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
-const STEP_LABELS = ["Plan", "Telegram", "MT5", "AI Rules", "Payment", "Launch"]
+const STEP_LABELS = ["Telegram", "MT5", "AI Rules", "Payment", "Launch"]
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -181,64 +215,8 @@ const PLANS = [
   },
 ]
 
-function PlanStep({ data, update, onNext }: StepProps) {
-  return (
-    <div>
-      <div className="text-center mb-8">
-        <h2 className="text-2xl font-black text-white mb-2">Choose your plan</h2>
-        <p className="text-sm text-white/40">Cancel anytime · No contracts · All plans include everything to run</p>
-      </div>
-
-      <div className="grid sm:grid-cols-3 gap-4 mb-8">
-        {PLANS.map(plan => {
-          const sel = data.plan === plan.id
-          return (
-            <button
-              key={plan.id}
-              onClick={() => update({ plan: plan.id })}
-              className={`relative p-5 rounded-2xl border text-left transition-all duration-200 ${
-                sel ? `${plan.borderSel} ${plan.bgSel}` : "border-white/8 bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.03]"
-              }`}
-            >
-              {plan.popular && (
-                <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
-                  <span className="px-3 py-0.5 rounded-full text-[10px] font-bold text-black bg-gradient-to-r from-emerald-400 to-cyan-400 whitespace-nowrap">Most Popular</span>
-                </div>
-              )}
-              {sel && (
-                <div className={`absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center ${plan.id === "elite" ? "bg-amber-400" : "bg-gradient-to-br from-emerald-400 to-cyan-400"}`}>
-                  <svg className="w-3 h-3 text-black" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                </div>
-              )}
-              <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${plan.labelColor}`}>{plan.name}</div>
-              <div className="flex items-end gap-1 mb-1">
-                <span className="text-3xl font-black text-white">{plan.price}</span>
-                <span className="text-white/30 text-xs mb-1">/mo</span>
-              </div>
-              <p className="text-xs text-white/40 mb-4 leading-relaxed">{plan.tagline}</p>
-              <ul className="space-y-2">
-                {plan.features.map(f => (
-                  <li key={f} className="flex items-start gap-2 text-xs text-white/55">
-                    <svg className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${sel ? plan.checkColor : "text-white/18"}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </button>
-          )
-        })}
-      </div>
-
-      <PrimaryBtn onClick={onNext} disabled={!data.plan} className="w-full">
-        Continue with {data.plan ? PLANS.find(p => p.id === data.plan)?.name ?? "" : "a plan"} →
-      </PrimaryBtn>
-      <p className="text-center text-xs text-white/22 mt-3">Prices ex. VAT · Includes all infrastructure · No hidden costs</p>
-    </div>
-  )
-}
-
 // ════════════════════════════════════════════════════════════════════════════════
-// STEP 1 — Telegram (phone → credentials → OTP → 2FA)
+// STEP 0 — Telegram (phone → credentials → OTP → 2FA → group)
 // ════════════════════════════════════════════════════════════════════════════════
 
 type TgSub = "phone" | "session_found" | "creds" | "otp" | "2fa" | "group"
@@ -325,9 +303,9 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
     const s = foundSession
     if (s.user_id) {
       if (s.group_id && s.mt5_login) {
-        jumpTo?.(s.sizing_strategy ? 4 : 3)
+        jumpTo?.(s.sizing_strategy ? 3 : 2)
       } else if (s.group_id) {
-        jumpTo?.(2)
+        jumpTo?.(1)
       } else {
         setSub("group")
       }
@@ -465,9 +443,8 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
             <p className="text-xs text-white/22 mt-1.5">International format without +. Example: <span className="font-mono text-white/35">393331234567</span></p>
           </div>
           {err && <ErrBox msg={err} />}
-          <div className="flex gap-3 pt-1">
-            <GhostBtn onClick={() => { jumpTo?.(0) }}>← Back</GhostBtn>
-            <PrimaryBtn onClick={handlePhone} disabled={!data.phone.trim()} loading={loading} className="flex-1">
+          <div className="pt-1">
+            <PrimaryBtn onClick={handlePhone} disabled={!data.phone.trim()} loading={loading} className="w-full">
               {!loading && "Continue →"}
             </PrimaryBtn>
           </div>
@@ -632,15 +609,9 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
               <p className="text-xs text-white/22 text-center">{groups.length} rooms available</p>
             </>
           )}
-          {data.plan === "core" ? (
-            <div className="rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 text-xs text-white/38 leading-relaxed">
-              Il piano <span className="text-white/60 font-medium">Core</span> include 1 signal room. Potrai cambiarla dalla dashboard in qualsiasi momento.
-            </div>
-          ) : (
-            <div className="rounded-xl bg-emerald-500/[0.04] border border-emerald-500/15 px-4 py-3 text-xs text-emerald-300/70 leading-relaxed">
-              Stai configurando la prima room. Con il piano <span className="text-emerald-300 font-medium">{data.plan === "pro" ? "Pro" : "Elite"}</span> potrai aggiungerne {data.plan === "pro" ? "fino a 5" : "illimitate"} dalla dashboard dopo il setup.
-            </div>
-          )}
+          <div className="rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 text-xs text-white/38 leading-relaxed">
+            Stai configurando la prima signal room. Potrai aggiungerne altre dalla dashboard in base al piano scelto.
+          </div>
           <div className="flex gap-3">
             <GhostBtn onClick={onBack}>← Back</GhostBtn>
             <PrimaryBtn onClick={handleGroupNext} disabled={!data.groupId || groupsLoading} className="flex-1">Continue →</PrimaryBtn>
@@ -800,7 +771,7 @@ function TA({ id, value, onChange, placeholder }: { id: string; value: string; o
 }
 
 function RulesStep({ data, update, onNext, onBack }: StepProps) {
-  const [showAdv, setShowAdv] = useState(data.plan === "elite")
+  const [showAdv, setShowAdv] = useState(false)
 
   return (
     <div className={`${card} p-8`}>
@@ -817,9 +788,13 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       </div>
 
       <div className="space-y-5">
-        {/* Sizing — required */}
+        {/* Sizing — Core */}
         <div>
-          <label className={lbl}>Position sizing <span className="text-emerald-400 normal-case font-normal tracking-normal">Required</span></label>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Position sizing</span>
+            <span className="text-emerald-400 text-xs normal-case font-normal">Required</span>
+            <PlanBadge plan="core" />
+          </div>
           <TA id="sizing" value={data.sizingStrategy} onChange={v => update({ sizingStrategy: v })} placeholder={"Example: " + SIZING_EX[0]} />
           <p className="text-xs text-white/22 mt-1.5">The AI uses this with your account balance, equity, and leverage to calculate lot size at each signal.</p>
           <div className="space-y-1.5 mt-2">
@@ -837,7 +812,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" />
             </svg>
             Advanced rules
-            <span className="text-xs text-white/22">(optional)</span>
+            <span className="text-xs text-white/22">— Pro &amp; Elite</span>
           </span>
           <svg className={`w-4 h-4 transition-transform ${showAdv ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -847,21 +822,33 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         {showAdv && (
           <div className="space-y-6 pt-1">
             <div>
-              <label className={lbl}>AI extraction instructions <span className="text-white/22 normal-case font-normal tracking-normal">Optional</span></label>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI extraction instructions</span>
+                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+                <PlanBadge plan="pro" />
+              </div>
               <TA id="extract" value={data.extractionInstructions} onChange={v => update({ extractionInstructions: v })} placeholder={"Example: " + EXTRACT_EX[0]} />
               <p className="text-xs text-white/22 mt-1.5">Injected into the AI signal parsing prompt. Use to normalize broker symbol names.</p>
               <div className="space-y-1.5 mt-2">{EXTRACT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ extractionInstructions: p })} />)}</div>
             </div>
 
             <div>
-              <label className={lbl}>Position management <span className="text-white/22 normal-case font-normal tracking-normal">Optional</span></label>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Position management</span>
+                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+                <PlanBadge plan="elite" />
+              </div>
               <TA id="mgmt" value={data.managementStrategy} onChange={v => update({ managementStrategy: v })} placeholder={"Example: " + MGMT_EX[0]} />
               <p className="text-xs text-white/22 mt-1.5">How the AI manages open trades: break-even, trailing stop, partial close, etc.</p>
               <div className="space-y-1.5 mt-2">{MGMT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ managementStrategy: p })} />)}</div>
             </div>
 
             <div>
-              <label className={lbl}>When a signal is deleted <span className="text-white/22 normal-case font-normal tracking-normal">Optional</span></label>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">When a signal is deleted</span>
+                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+                <PlanBadge plan="elite" />
+              </div>
               <div className="rounded-xl bg-amber-500/8 border border-amber-500/15 px-4 py-3 text-xs text-amber-300/75 mb-3 leading-relaxed">
                 Signal rooms often delete messages to hide bad trades. Define what the AI should do when that happens.
               </div>
@@ -887,20 +874,55 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
 function fmtCard(v: string) { const d = v.replace(/\D/g, "").slice(0, 16); return d.replace(/(.{4})/g, "$1 ").trim() }
 function fmtExp(v: string)  { const d = v.replace(/\D/g, "").slice(0, 4);  return d.length > 2 ? d.slice(0, 2) + "/" + d.slice(2) : d }
 
-function PaymentStep({ data, onNext, onBack }: StepProps) {
-  const plan = PLANS.find(p => p.id === data.plan) ?? PLANS[1]
+function PaymentStep({ data, update, onNext, onBack }: StepProps) {
+  const minPlan = getMinPlan(data)
+  const minIdx  = PLAN_ORDER.indexOf(minPlan)
+
+  const [selectedPlan,    setSelectedPlan]    = useState<PlanId>(minPlan)
+  const [pendingDowngrade, setPendingDowngrade] = useState<PlanId | null>(null)
   const [name,    setName]    = useState("")
   const [cardNum, setCardNum] = useState("")
   const [expiry,  setExpiry]  = useState("")
   const [cvc,     setCvc]     = useState("")
   const [loading, setLoading] = useState(false)
 
-  const canPay = name.trim() && cardNum.replace(/\s/g, "").length === 16 && expiry.length === 5 && cvc.length >= 3
+  const plan     = PLANS.find(p => p.id === selectedPlan)!
+  const canPay   = name.trim() && cardNum.replace(/\s/g, "").length === 16 && expiry.length === 5 && cvc.length >= 3
+  const affected = pendingDowngrade ? getAffectedFields(pendingDowngrade, data) : []
+
+  function handleSelectPlan(p: PlanId) {
+    if (PLAN_ORDER.indexOf(p) < minIdx) {
+      const aff = getAffectedFields(p, data)
+      if (aff.length > 0) { setPendingDowngrade(p); return }
+    }
+    setSelectedPlan(p); setPendingDowngrade(null)
+  }
+
+  function confirmDowngrade() {
+    if (!pendingDowngrade) return
+    const updates: Partial<SetupData> = {}
+    getAffectedFields(pendingDowngrade, data).forEach(f => { (updates as Record<string, string>)[f.field] = "" })
+    update(updates)
+    setSelectedPlan(pendingDowngrade); setPendingDowngrade(null)
+  }
 
   function handlePay() {
     setLoading(true)
+    update({ plan: selectedPlan })
     setTimeout(() => { setLoading(false); onNext() }, 1400)
   }
+
+  const configFeatures = [
+    { label: "Telegram account",    value: `+${data.phone}`,                                         minPlan: "core"  as PlanId, show: !!data.phone },
+    { label: "Signal room",         value: data.groupName,                                            minPlan: "core"  as PlanId, show: !!data.groupId },
+    { label: "MT5 account",         value: data.mt5AccountName || data.mt5Login,                     minPlan: "core"  as PlanId, show: !!data.mt5Login },
+    { label: "Position sizing",     value: "Configured",                                             minPlan: "core"  as PlanId, show: !!data.sizingStrategy },
+    { label: "AI extraction rules", value: "Configured",                                             minPlan: "pro"   as PlanId, show: !!data.extractionInstructions },
+    { label: "Position management", value: "Configured",                                             minPlan: "elite" as PlanId, show: !!data.managementStrategy },
+    { label: "Deletion handling",   value: "Configured",                                             minPlan: "elite" as PlanId, show: !!data.deletionStrategy },
+  ].filter(f => f.show)
+
+  const minPlanObj = PLANS.find(p => p.id === minPlan)!
 
   return (
     <div className={`${card} p-8`}>
@@ -916,18 +938,94 @@ function PaymentStep({ data, onNext, onBack }: StepProps) {
         </div>
       </div>
 
-      {/* Plan summary pill */}
-      <div className="rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 mb-6 flex items-center justify-between">
-        <div>
-          <p className="text-[10px] text-white/35 uppercase tracking-wider mb-0.5">Selected plan</p>
-          <p className="text-sm font-bold text-white">{plan.name} <span className={`text-xs font-normal ${plan.labelColor}`}>· All features included</span></p>
-        </div>
-        <div className="text-right">
-          <p className="text-xl font-black text-white">{plan.price}</p>
-          <p className="text-xs text-white/28">/month</p>
+      {/* Configuration summary */}
+      <div className="mb-6">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Your configuration</p>
+        <div className="rounded-xl border border-white/8 overflow-hidden">
+          {configFeatures.map(({ label, value, minPlan: fp }, i) => (
+            <div key={label} className={`flex items-center gap-3 px-4 py-2.5 ${i > 0 ? "border-t border-white/5" : ""}`}>
+              <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+              <span className="text-xs text-white/55 flex-1 min-w-0 truncate">
+                <span className="text-white/80">{label}</span>{value !== "Configured" ? ` · ${value}` : ""}
+              </span>
+              <PlanBadge plan={fp} />
+            </div>
+          ))}
         </div>
       </div>
 
+      {/* Plan selection */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">Choose plan</p>
+          <span className="text-xs text-white/30">
+            Minimum: <span className={minPlanObj.labelColor}>{minPlanObj.name}</span>
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {PLANS.map(p => {
+            const sel       = selectedPlan === p.id
+            const isLower   = PLAN_ORDER.indexOf(p.id) < minIdx
+            const isPending = pendingDowngrade === p.id
+            return (
+              <button
+                key={p.id}
+                onClick={() => handleSelectPlan(p.id)}
+                className={`relative p-3 rounded-xl border text-left transition-all duration-200 ${
+                  sel       ? `${p.borderSel} ${p.bgSel}`
+                  : isPending ? "border-amber-400/30 bg-amber-500/[0.04]"
+                  : isLower   ? "border-white/6 bg-white/[0.015] opacity-55 hover:opacity-75"
+                  :             "border-white/8 bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.03]"
+                }`}
+              >
+                {p.id === minPlan && (
+                  <div className="absolute -top-2 left-1/2 -translate-x-1/2">
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap ${
+                      p.id === "elite" ? "bg-amber-400/20 text-amber-300" : "bg-emerald-400/20 text-emerald-300"
+                    }`}>Recommended</span>
+                  </div>
+                )}
+                <div className={`text-[9px] font-bold uppercase tracking-widest mb-0.5 ${p.labelColor}`}>{p.name}</div>
+                <div className="text-base font-black text-white leading-tight">{p.price}<span className="text-white/25 text-[10px] font-normal">/mo</span></div>
+                {isLower && <p className="text-[9px] text-amber-400/65 mt-1 leading-tight">Removes features</p>}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Downgrade warning */}
+        {pendingDowngrade && affected.length > 0 && (
+          <div className="mt-3 rounded-xl bg-amber-500/8 border border-amber-500/20 p-4">
+            <p className="text-sm font-semibold text-amber-300 mb-1">
+              Downgrade to {PLANS.find(p => p.id === pendingDowngrade)?.name}?
+            </p>
+            <p className="text-xs text-white/45 mb-3 leading-relaxed">
+              Le seguenti regole configurate verranno <strong className="text-amber-300">rimosse</strong>:
+            </p>
+            <ul className="space-y-1 mb-4">
+              {affected.map(f => (
+                <li key={f.field} className="flex items-center gap-2 text-xs text-amber-300/70">
+                  <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  {f.label}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <GhostBtn onClick={() => setPendingDowngrade(null)} className="flex-1 !py-2 text-xs">Cancel</GhostBtn>
+              <button
+                onClick={confirmDowngrade}
+                className="flex-1 text-xs font-semibold py-2 rounded-xl bg-amber-500/15 border border-amber-500/25 text-amber-300 hover:bg-amber-500/25 transition-all"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Payment form */}
       <div className="space-y-4">
         <div>
           <label className={lbl}>Name on card</label>
@@ -947,7 +1045,6 @@ function PaymentStep({ data, onNext, onBack }: StepProps) {
             <input className={`${inp} font-mono tracking-widest`} placeholder="123" maxLength={4} value={cvc} onChange={e => setCvc(e.target.value.replace(/\D/g, "").slice(0, 4))} />
           </div>
         </div>
-
         <div className="flex items-center justify-center gap-5 py-1">
           {[
             ["M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", "SSL secured"],
@@ -960,8 +1057,7 @@ function PaymentStep({ data, onNext, onBack }: StepProps) {
             </div>
           ))}
         </div>
-
-        <PrimaryBtn onClick={handlePay} disabled={!canPay} loading={loading} className="w-full mt-2">
+        <PrimaryBtn onClick={handlePay} disabled={!canPay || !!pendingDowngrade} loading={loading} className="w-full mt-2">
           {!loading && `Subscribe — ${plan.price}/month →`}
         </PrimaryBtn>
         <GhostBtn onClick={onBack} className="w-full">← Back</GhostBtn>
@@ -1111,23 +1207,23 @@ export function SetupWizard() {
   const goNext = async () => {
     try {
       switch (step) {
-        // step 1 (Telegram+Group): session save handled inside TelegramStep
-        case 2:
+        // step 0 (Telegram+Group): session save handled inside TelegramStep
+        case 1:
           await api.saveSession({ phone: data.phone, mt5_login: Number(data.mt5Login), mt5_server: data.mt5Server, mt5_password: data.mt5Password }); break
-        case 3:
+        case 2:
           await api.saveSession({ phone: data.phone, sizing_strategy: data.sizingStrategy, extraction_instructions: data.extractionInstructions || undefined, management_strategy: data.managementStrategy || undefined, deletion_strategy: data.deletionStrategy || undefined }); break
       }
     } catch { /* non-blocking */ }
-    setStep(s => Math.min(s + 1, 5))
+    setStep(s => Math.min(s + 1, 4))
   }
 
   const goBack = async () => {
     try {
       switch (step) {
-        case 2:
+        case 1:
           await api.clearSessionFields(data.phone, ["mt5_login", "mt5_password", "mt5_server"])
           update({ mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "" }); break
-        case 3:
+        case 2:
           await api.clearSessionFields(data.phone, ["sizing_strategy", "extraction_instructions", "management_strategy", "deletion_strategy"])
           update({ sizingStrategy: "", extractionInstructions: "", managementStrategy: "", deletionStrategy: "" }); break
       }
@@ -1136,18 +1232,16 @@ export function SetupWizard() {
   }
 
   const props: StepProps = { data, update, onNext: goNext, onBack: goBack, jumpTo }
-  const wide = step === 0
 
   return (
-    <div className={`w-full mx-auto transition-[max-width] duration-300 ${wide ? "max-w-3xl" : "max-w-xl"}`}>
+    <div className="w-full mx-auto max-w-xl">
       <StepIndicator current={step} />
       <div key={step} className="step-enter">
-        {step === 0 && <PlanStep     {...props} />}
-        {step === 1 && <TelegramStep {...props} />}
-        {step === 2 && <MT5Step      {...props} />}
-        {step === 3 && <RulesStep    {...props} />}
-        {step === 4 && <PaymentStep  {...props} />}
-        {step === 5 && <LaunchStep   {...props} />}
+        {step === 0 && <TelegramStep {...props} />}
+        {step === 1 && <MT5Step      {...props} />}
+        {step === 2 && <RulesStep    {...props} />}
+        {step === 3 && <PaymentStep  {...props} />}
+        {step === 4 && <LaunchStep   {...props} />}
       </div>
     </div>
   )
