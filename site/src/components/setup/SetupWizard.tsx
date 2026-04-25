@@ -65,7 +65,7 @@ const lbl  = "block text-xs font-semibold text-white/45 uppercase tracking-wider
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
-const STEP_LABELS = ["Plan", "Telegram", "Signal Room", "MT5", "AI Rules", "Payment", "Launch"]
+const STEP_LABELS = ["Plan", "Telegram", "MT5", "AI Rules", "Payment", "Launch"]
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -241,24 +241,45 @@ function PlanStep({ data, update, onNext }: StepProps) {
 // STEP 1 — Telegram (phone → credentials → OTP → 2FA)
 // ════════════════════════════════════════════════════════════════════════════════
 
-type TgSub = "phone" | "session_found" | "creds" | "otp" | "2fa" | "done"
+type TgSub = "phone" | "session_found" | "creds" | "otp" | "2fa" | "group"
 
-function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
+function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
   const router = useRouter()
 
   const initSub = (): TgSub => {
-    if (data.userId) return "done"
+    if (data.userId) return "group"
     if (data.apiId) return "creds"
     return "phone"
   }
 
-  const [sub, setSub]         = useState<TgSub>(initSub)
-  const [loading, setLoading] = useState(false)
-  const [err, setErr]         = useState<string | null>(null)
+  const [sub, setSub]               = useState<TgSub>(initSub)
+  const [loading, setLoading]       = useState(false)
+  const [err, setErr]               = useState<string | null>(null)
   const [foundSession, setFoundSession] = useState<SetupSession | null>(null)
-  const [twoFaPw, setTwoFaPw] = useState("")
+  const [twoFaPw, setTwoFaPw]       = useState("")
+  const [groups, setGroups]         = useState<Group[]>([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupsErr, setGroupsErr]   = useState<string | null>(null)
+  const [search, setSearch]         = useState("")
 
   const clrErr = () => setErr(null)
+  const filtered = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()))
+
+  async function loadGroups() {
+    setGroupsLoading(true); setGroupsErr(null)
+    try {
+      const res = await api.getGroups(data.loginKey)
+      setGroups(res.groups)
+    } catch (ex) {
+      setGroupsErr(ex instanceof ApiError ? ex.message : "Failed to load rooms.")
+    } finally {
+      setGroupsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (sub === "group") loadGroups()
+  }, [sub]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phone ─────────────────────────────────────────────────────────────────
   async function handlePhone() {
@@ -303,13 +324,13 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
     if (!foundSession) return
     const s = foundSession
     if (s.user_id) {
-      let target = 2 // group
       if (s.group_id && s.mt5_login) {
-        target = s.sizing_strategy ? 5 : 4 // payment or rules
+        jumpTo?.(s.sizing_strategy ? 4 : 3)
       } else if (s.group_id) {
-        target = 3 // MT5
+        jumpTo?.(2)
+      } else {
+        setSub("group")
       }
-      jumpTo?.(target)
     } else {
       setSub("creds")
     }
@@ -354,7 +375,7 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
       const v = res as VerifyCodeResponse
       update({ userId: v.user_id })
       await api.saveSession({ phone: data.phone, user_id: v.user_id })
-      onNext()
+      setSub("group")
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Invalid code.")
     } finally {
@@ -369,12 +390,20 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
       const res = await api.verifyPassword(data.loginKey, twoFaPw)
       update({ userId: res.user_id })
       await api.saveSession({ phone: data.phone, user_id: res.user_id })
-      onNext()
+      setSub("group")
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Incorrect password.")
     } finally {
       setLoading(false)
     }
+  }
+
+  // ── Group continue ────────────────────────────────────────────────────────
+  async function handleGroupNext() {
+    try {
+      await api.saveSession({ phone: data.phone, group_id: data.groupId, group_name: data.groupName })
+    } catch { /* non-blocking */ }
+    onNext()
   }
 
   const subTitle: Record<TgSub, string> = {
@@ -383,21 +412,37 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
     creds:         "Telegram API credentials",
     otp:           "Verify your identity",
     "2fa":         "Two-step verification",
-    done:          "Already connected",
+    group:         "Select signal room",
   }
 
   return (
     <div className={`${card} p-8`}>
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-400/10 border border-emerald-400/20">
-          <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-        </div>
-        <div>
-          <h3 className="font-bold text-white">Connect Telegram</h3>
-          <p className="text-xs text-white/40">{subTitle[sub]}</p>
-        </div>
+        {sub === "group" ? (
+          <>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-violet-400/10 border border-violet-400/20">
+              <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-white">Select signal room</h3>
+              <p className="text-xs text-white/40">Choose the Telegram channel or group to monitor</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-400/10 border border-emerald-400/20">
+              <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-white">Connect Telegram</h3>
+              <p className="text-xs text-white/40">{subTitle[sub]}</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ── Phone ── */}
@@ -421,7 +466,7 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
           </div>
           {err && <ErrBox msg={err} />}
           <div className="flex gap-3 pt-1">
-            <GhostBtn onClick={() => { /* back to plan */ jumpTo?.(0) }}>← Back</GhostBtn>
+            <GhostBtn onClick={() => { jumpTo?.(0) }}>← Back</GhostBtn>
             <PrimaryBtn onClick={handlePhone} disabled={!data.phone.trim()} loading={loading} className="flex-1">
               {!loading && "Continue →"}
             </PrimaryBtn>
@@ -530,127 +575,69 @@ function TelegramStep({ data, update, onNext, jumpTo }: StepProps) {
         </div>
       )}
 
-      {/* ── Done (resumed with userId already set) ── */}
-      {sub === "done" && (
+      {/* ── Group (sub-step) ── */}
+      {sub === "group" && (
         <div className="space-y-4">
-          <div className="rounded-xl bg-emerald-500/8 border border-emerald-500/20 p-4 flex items-center gap-3">
-            <svg className="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-sm text-emerald-300">Telegram account already authenticated. You can continue.</p>
-          </div>
+          {groupsLoading && (
+            <div className="flex items-center justify-center gap-2 py-12 text-white/35">
+              <Spin /><span className="text-sm">Loading your rooms…</span>
+            </div>
+          )}
+          {!groupsLoading && groupsErr && (
+            <div className="space-y-3 py-2">
+              <ErrBox msg={groupsErr} />
+              <GhostBtn onClick={loadGroups} className="w-full">Try again</GhostBtn>
+            </div>
+          )}
+          {!groupsLoading && !groupsErr && (
+            <>
+              <div className="relative">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input className={`${inp} pl-10`} placeholder="Search channels and groups…" value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
+              <div className="space-y-1 max-h-56 overflow-y-auto -mx-1 px-1">
+                {filtered.map(g => {
+                  const sel = data.groupId === g.id
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => update({ groupId: g.id, groupName: g.name })}
+                      className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border ${
+                        sel ? "border-emerald-400/25 bg-emerald-400/[0.06] text-white" : "border-transparent hover:bg-white/[0.03] text-white/55 hover:text-white"
+                      }`}
+                    >
+                      <div className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center transition-colors ${sel ? "bg-emerald-400/12" : "bg-white/[0.04]"}`}>
+                        <svg className={`w-4 h-4 ${sel ? "text-emerald-400" : "text-white/25"}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          {g.type === "channel"
+                            ? <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+                            : <path strokeLinecap="round" strokeLinejoin="round" d="M17 20H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v13a2 2 0 01-2 2z" />}
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{g.name}</p>
+                        <p className="text-xs text-white/28">{g.members > 0 ? `${g.members.toLocaleString()} members · ` : ""}{g.type === "channel" ? "Channel" : "Group"}</p>
+                      </div>
+                      {sel && (
+                        <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+                      )}
+                    </button>
+                  )
+                })}
+                {filtered.length === 0 && (
+                  <p className="text-center text-sm text-white/28 py-8">{search ? `No results for "${search}"` : "No channels or groups found"}</p>
+                )}
+              </div>
+              <p className="text-xs text-white/22 text-center">{groups.length} rooms available</p>
+            </>
+          )}
           <div className="flex gap-3">
-            <GhostBtn onClick={() => setSub("creds")}>← Change credentials</GhostBtn>
-            <PrimaryBtn onClick={onNext} className="flex-1">Continue →</PrimaryBtn>
+            <GhostBtn onClick={onBack}>← Back</GhostBtn>
+            <PrimaryBtn onClick={handleGroupNext} disabled={!data.groupId || groupsLoading} className="flex-1">Continue →</PrimaryBtn>
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// STEP 2 — Signal room
-// ════════════════════════════════════════════════════════════════════════════════
-
-function GroupStep({ data, update, onNext, onBack }: StepProps) {
-  const [groups, setGroups] = useState<Group[]>([])
-  const [loading, setLoading] = useState(true)
-  const [err, setErr]         = useState<string | null>(null)
-  const [search, setSearch]   = useState("")
-
-  async function load() {
-    setLoading(true); setErr(null)
-    try {
-      const res = await api.getGroups(data.loginKey)
-      setGroups(res.groups)
-    } catch (ex) {
-      setErr(ex instanceof ApiError ? ex.message : "Failed to load rooms.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const filtered = groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()))
-
-  return (
-    <div className={`${card} p-8`}>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-violet-400/10 border border-violet-400/20">
-          <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-          </svg>
-        </div>
-        <div>
-          <h3 className="font-bold text-white">Select signal room</h3>
-          <p className="text-xs text-white/40">Choose the Telegram channel or group to monitor</p>
-        </div>
-      </div>
-
-      {loading && (
-        <div className="flex items-center justify-center gap-2 py-12 text-white/35">
-          <Spin /><span className="text-sm">Loading your rooms…</span>
-        </div>
-      )}
-
-      {!loading && err && (
-        <div className="space-y-3 py-2">
-          <ErrBox msg={err} />
-          <GhostBtn onClick={load} className="w-full">Try again</GhostBtn>
-        </div>
-      )}
-
-      {!loading && !err && (
-        <>
-          <div className="relative mb-3">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input className={`${inp} pl-10`} placeholder="Search channels and groups…" value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-
-          <div className="space-y-1 max-h-56 overflow-y-auto -mx-1 px-1 mb-3">
-            {filtered.map(g => {
-              const sel = data.groupId === g.id
-              return (
-                <button
-                  key={g.id}
-                  onClick={() => update({ groupId: g.id, groupName: g.name })}
-                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border ${
-                    sel ? "border-emerald-400/25 bg-emerald-400/[0.06] text-white" : "border-transparent hover:bg-white/[0.03] text-white/55 hover:text-white"
-                  }`}
-                >
-                  <div className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center transition-colors ${sel ? "bg-emerald-400/12" : "bg-white/[0.04]"}`}>
-                    <svg className={`w-4 h-4 ${sel ? "text-emerald-400" : "text-white/25"}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      {g.type === "channel"
-                        ? <path strokeLinecap="round" strokeLinejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-                        : <path strokeLinecap="round" strokeLinejoin="round" d="M17 20H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v13a2 2 0 01-2 2z" />}
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{g.name}</p>
-                    <p className="text-xs text-white/28">{g.members > 0 ? `${g.members.toLocaleString()} members · ` : ""}{g.type === "channel" ? "Channel" : "Group"}</p>
-                  </div>
-                  {sel && (
-                    <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                  )}
-                </button>
-              )
-            })}
-            {filtered.length === 0 && (
-              <p className="text-center text-sm text-white/28 py-8">{search ? `No results for "${search}"` : "No channels or groups found"}</p>
-            )}
-          </div>
-          <p className="text-xs text-white/22 text-center mb-4">{groups.length} rooms available</p>
-        </>
-      )}
-
-      <div className="flex gap-3">
-        <GhostBtn onClick={onBack}>← Back</GhostBtn>
-        <PrimaryBtn onClick={onNext} disabled={!data.groupId || loading} className="flex-1">Continue →</PrimaryBtn>
-      </div>
     </div>
   )
 }
@@ -1097,24 +1084,23 @@ export function SetupWizard() {
   const goNext = async () => {
     try {
       switch (step) {
+        // step 1 (Telegram+Group): session save handled inside TelegramStep
         case 2:
-          await api.saveSession({ phone: data.phone, group_id: data.groupId, group_name: data.groupName }); break
-        case 3:
           await api.saveSession({ phone: data.phone, mt5_login: Number(data.mt5Login), mt5_server: data.mt5Server, mt5_password: data.mt5Password }); break
-        case 4:
+        case 3:
           await api.saveSession({ phone: data.phone, sizing_strategy: data.sizingStrategy, extraction_instructions: data.extractionInstructions || undefined, management_strategy: data.managementStrategy || undefined, deletion_strategy: data.deletionStrategy || undefined }); break
       }
     } catch { /* non-blocking */ }
-    setStep(s => Math.min(s + 1, 6))
+    setStep(s => Math.min(s + 1, 5))
   }
 
   const goBack = async () => {
     try {
       switch (step) {
-        case 3:
+        case 2:
           await api.clearSessionFields(data.phone, ["mt5_login", "mt5_password", "mt5_server"])
           update({ mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "" }); break
-        case 4:
+        case 3:
           await api.clearSessionFields(data.phone, ["sizing_strategy", "extraction_instructions", "management_strategy", "deletion_strategy"])
           update({ sizingStrategy: "", extractionInstructions: "", managementStrategy: "", deletionStrategy: "" }); break
       }
@@ -1129,13 +1115,12 @@ export function SetupWizard() {
     <div className={`w-full mx-auto transition-[max-width] duration-300 ${wide ? "max-w-3xl" : "max-w-xl"}`}>
       <StepIndicator current={step} />
       <div key={step} className="step-enter">
-        {step === 0 && <PlanStep    {...props} />}
+        {step === 0 && <PlanStep     {...props} />}
         {step === 1 && <TelegramStep {...props} />}
-        {step === 2 && <GroupStep   {...props} />}
-        {step === 3 && <MT5Step     {...props} />}
-        {step === 4 && <RulesStep   {...props} />}
-        {step === 5 && <PaymentStep {...props} />}
-        {step === 6 && <LaunchStep  {...props} />}
+        {step === 2 && <MT5Step      {...props} />}
+        {step === 3 && <RulesStep    {...props} />}
+        {step === 4 && <PaymentStep  {...props} />}
+        {step === 5 && <LaunchStep   {...props} />}
       </div>
     </div>
   )
