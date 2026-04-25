@@ -632,6 +632,15 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
               <p className="text-xs text-white/22 text-center">{groups.length} rooms available</p>
             </>
           )}
+          {data.plan === "core" ? (
+            <div className="rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 text-xs text-white/38 leading-relaxed">
+              Il piano <span className="text-white/60 font-medium">Core</span> include 1 signal room. Potrai cambiarla dalla dashboard in qualsiasi momento.
+            </div>
+          ) : (
+            <div className="rounded-xl bg-emerald-500/[0.04] border border-emerald-500/15 px-4 py-3 text-xs text-emerald-300/70 leading-relaxed">
+              Stai configurando la prima room. Con il piano <span className="text-emerald-300 font-medium">{data.plan === "pro" ? "Pro" : "Elite"}</span> potrai aggiungerne {data.plan === "pro" ? "fino a 5" : "illimitate"} dalla dashboard dopo il setup.
+            </div>
+          )}
           <div className="flex gap-3">
             <GhostBtn onClick={onBack}>← Back</GhostBtn>
             <PrimaryBtn onClick={handleGroupNext} disabled={!data.groupId || groupsLoading} className="flex-1">Continue →</PrimaryBtn>
@@ -791,7 +800,7 @@ function TA({ id, value, onChange, placeholder }: { id: string; value: string; o
 }
 
 function RulesStep({ data, update, onNext, onBack }: StepProps) {
-  const [showAdv, setShowAdv] = useState(false)
+  const [showAdv, setShowAdv] = useState(data.plan === "elite")
 
   return (
     <div className={`${card} p-8`}>
@@ -1056,6 +1065,24 @@ function LaunchStep({ data, onBack }: StepProps) {
             <svg className="w-4 h-4 text-emerald-400/60 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
           </div>
         ))}
+      </div>
+
+      <div className={`rounded-xl border px-4 py-3 mb-4 ${
+        plan.id === "elite" ? "border-amber-400/20 bg-amber-500/[0.03]"
+        : plan.id === "pro"  ? "border-emerald-400/20 bg-emerald-500/[0.03]"
+        :                      "border-white/10 bg-white/[0.02]"
+      }`}>
+        <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${plan.labelColor}`}>
+          {plan.name} — funzionalità attive
+        </p>
+        <ul className="space-y-1.5">
+          {plan.features.slice(0, 3).map(f => (
+            <li key={f} className="flex items-center gap-2 text-xs text-white/50">
+              <svg className={`w-3.5 h-3.5 shrink-0 ${plan.checkColor}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+              {f}
+            </li>
+          ))}
+        </ul>
       </div>
 
       {err && <div className="mb-4"><ErrBox msg={err} /></div>}
