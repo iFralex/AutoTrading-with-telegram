@@ -187,7 +187,8 @@ class TelegramManager:
         dei messaggi su tutti i gruppi indicati.
         """
         self._call(
-            self._async_add_user(user_id, api_id, api_hash, group_ids, login_key)
+            self._async_add_user(user_id, api_id, api_hash, group_ids, login_key),
+            timeout=120,
         )
 
     def remove_user(self, user_id: str) -> None:

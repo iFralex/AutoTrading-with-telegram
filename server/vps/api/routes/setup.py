@@ -355,7 +355,6 @@ def _mt5_login_sync(
             _kill_mt5_for_dir(user_dir)
 
             # STEP 3 (diagnostica): avvia MT5 + invia server via SendKeys
-            # MT5 rimane in esecuzione (senza chiuderlo)
             logger.info(
                 "verify_mt5 — avvio MT5 utente %s + configurazione server '%s' via GUI...",
                 user_id, server,

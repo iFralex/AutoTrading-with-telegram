@@ -106,27 +106,32 @@ def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
     """
     if _sys.platform != "win32":
         return False
-    target = str(mt5_dir).lower().rstrip("\\")
-    killed = False
+    # Path esatto dell'eseguibile atteso — confronto preciso per evitare
+    # falsi positivi tra directory con prefisso comune (es. user1/user10).
+    expected_exe = str(mt5_dir / "terminal64.exe").lower()
+    procs_killed: list = []
     try:
         import psutil
         for proc in psutil.process_iter(["pid", "name", "exe"]):
             try:
                 if (proc.info["name"] or "").lower() != "terminal64.exe":
                     continue
-                exe = (proc.info["exe"] or "").lower().rstrip("\\")
-                if exe.startswith(target):
+                exe = (proc.info["exe"] or "").lower()
+                if exe == expected_exe:
                     proc.kill()
                     logger.info("MT5 PID %s terminato (dir: %s)", proc.pid, mt5_dir)
-                    killed = True
+                    procs_killed.append(proc)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
     except Exception as exc:
         logger.warning("_kill_mt5_for_dir(%s): %s", mt5_dir, exc)
         return False
-    if killed:
-        time.sleep(2.0)   # attende che il processo rilasci tutti gli handle
-    return killed
+    for proc in procs_killed:
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+    return bool(procs_killed)
 
 
 def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:
