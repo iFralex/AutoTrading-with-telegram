@@ -610,7 +610,7 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
             </>
           )}
           <div className="rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 text-xs text-white/38 leading-relaxed">
-            Stai configurando la prima signal room. Potrai aggiungerne altre dalla dashboard in base al piano scelto.
+            You are setting up your first signal room. More rooms can be added from the dashboard based on your plan.
           </div>
           <div className="flex gap-3">
             <GhostBtn onClick={onBack}>← Back</GhostBtn>
@@ -1000,7 +1000,7 @@ function PaymentStep({ data, update, onNext, onBack }: StepProps) {
               Downgrade to {PLANS.find(p => p.id === pendingDowngrade)?.name}?
             </p>
             <p className="text-xs text-white/45 mb-3 leading-relaxed">
-              Le seguenti regole configurate verranno <strong className="text-amber-300">rimosse</strong>:
+              The following configured rules will be <strong className="text-amber-300">removed</strong>:
             </p>
             <ul className="space-y-1 mb-4">
               {affected.map(f => (
@@ -1009,6 +1009,19 @@ function PaymentStep({ data, update, onNext, onBack }: StepProps) {
                     <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                   {f.label}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-white/30 mb-2">
+              Still available in the {PLANS.find(p => p.id === pendingDowngrade)?.name} dashboard:
+            </p>
+            <ul className="space-y-1 mb-4">
+              {PLANS.find(p => p.id === pendingDowngrade)!.features.map(f => (
+                <li key={f} className="flex items-center gap-2 text-xs text-white/40">
+                  <svg className="w-3 h-3 shrink-0 text-emerald-400/60" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  {f}
                 </li>
               ))}
             </ul>
@@ -1169,7 +1182,7 @@ function LaunchStep({ data, onBack }: StepProps) {
         :                      "border-white/10 bg-white/[0.02]"
       }`}>
         <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${plan.labelColor}`}>
-          {plan.name} — funzionalità attive
+          {plan.name} — active features
         </p>
         <ul className="space-y-1.5">
           {plan.features.slice(0, 3).map(f => (
