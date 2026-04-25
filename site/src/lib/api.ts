@@ -516,6 +516,14 @@ export const api = {
     )
   },
 
+  /** Elimina l'account utente e tutti i dati associati (Telegram, MT5, log, backtest, sessione). */
+  deleteUser(userId: string) {
+    return call<{ ok: boolean }>(
+      "DELETE",
+      `/api/dashboard/user/${encodeURIComponent(userId)}`
+    )
+  },
+
   // ── Gestione gruppi multi-canale ──────────────────────────────────────────
 
   /** Ritorna i gruppi/canali Telegram disponibili (non ancora configurati) per un utente. */

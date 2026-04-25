@@ -25,15 +25,20 @@ function formatTs(iso: string, short = false): string {
 
 export function OverviewPage({
   data,
+  onUserDelete,
 }: {
   data: DashboardUserResponse
   onUserUpdate: (d: DashboardUserResponse) => void
+  onUserDelete?: () => void
 }) {
   const { user, logs, total_logs } = data
   const firstGroup = user.groups?.[0]
   const [resetConfirm, setResetConfirm] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   async function handleReset() {
     setResetLoading(true)
@@ -44,6 +49,19 @@ export function OverviewPage({
     } catch {
       setResetError("Errore durante il reset. Riprova.")
       setResetLoading(false)
+    }
+  }
+
+  async function handleDelete() {
+    setDeleteLoading(true)
+    setDeleteError(null)
+    try {
+      await api.deleteUser(user.user_id)
+      try { await api.deleteSession(user.phone) } catch { /* best-effort */ }
+      onUserDelete?.()
+    } catch {
+      setDeleteError("Errore durante l'eliminazione. Riprova.")
+      setDeleteLoading(false)
     }
   }
 
@@ -146,55 +164,119 @@ export function OverviewPage({
       {/* Danger zone */}
       <div>
         <SectionHeading>Zona pericolosa</SectionHeading>
-        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 px-5 py-4 space-y-3">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="size-4 text-red-400 shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">Reimposta statistiche</p>
-              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                Elimina tutti i log segnali, i log AI e le operazioni chiuse. Le impostazioni,
-                le strategie e le credenziali non vengono modificate.
-              </p>
+        <div className="mt-3 space-y-3">
+
+          {/* Reset stats */}
+          <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-5 py-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="size-4 text-red-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">Reimposta statistiche</p>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                  Elimina tutti i log segnali, i log AI e le operazioni chiuse. Le impostazioni,
+                  le strategie e le credenziali non vengono modificate.
+                </p>
+              </div>
             </div>
+
+            {resetError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {resetError}
+              </p>
+            )}
+
+            {!resetConfirm ? (
+              <button
+                type="button"
+                onClick={() => setResetConfirm(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                <Trash2 className="size-3.5" />
+                Reimposta statistiche
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-red-300 font-medium">Sei sicuro? Questa azione è irreversibile.</p>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={resetLoading}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-60 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  {resetLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                  {resetLoading ? "Reset…" : "Conferma reset"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setResetConfirm(false); setResetError(null) }}
+                  disabled={resetLoading}
+                  className="text-xs text-muted-foreground hover:text-foreground border border-white/[0.07] hover:border-white/[0.15] rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  Annulla
+                </button>
+              </div>
+            )}
           </div>
 
-          {resetError && (
-            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-              {resetError}
-            </p>
-          )}
-
-          {!resetConfirm ? (
-            <button
-              type="button"
-              onClick={() => setResetConfirm(true)}
-              className="flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded-lg px-3 py-1.5 transition-colors"
-            >
-              <Trash2 className="size-3.5" />
-              Reimposta statistiche
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-red-300 font-medium">Sei sicuro? Questa azione è irreversibile.</p>
-              <button
-                type="button"
-                onClick={handleReset}
-                disabled={resetLoading}
-                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 disabled:opacity-60 rounded-lg px-3 py-1.5 transition-colors"
-              >
-                {resetLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                {resetLoading ? "Reset…" : "Conferma reset"}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setResetConfirm(false); setResetError(null) }}
-                disabled={resetLoading}
-                className="text-xs text-muted-foreground hover:text-foreground border border-white/[0.07] hover:border-white/[0.15] rounded-lg px-3 py-1.5 transition-colors"
-              >
-                Annulla
-              </button>
+          {/* Delete account */}
+          <div className="rounded-xl border border-red-600/40 bg-red-900/10 px-5 py-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <Trash2 className="size-4 text-red-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-red-400">Elimina account</p>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                  Rimuove definitivamente l'account e tutti i dati associati: sessione Telegram,
+                  credenziali MT5, log segnali, log AI, backtest e configurazioni.
+                  Questa operazione è irreversibile.
+                </p>
+              </div>
             </div>
-          )}
+
+            {deleteError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                {deleteError}
+              </p>
+            )}
+
+            {!deleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-400 border border-red-600/40 hover:border-red-500/60 bg-red-600/5 hover:bg-red-600/10 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                <Trash2 className="size-3.5" />
+                Elimina account e tutti i dati
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-red-300 font-medium">
+                  Questa azione eliminerà{" "}
+                  <span className="font-bold text-red-200">{user.phone}</span>{" "}
+                  e tutti i suoi dati in modo permanente. Non è possibile annullare.
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleteLoading}
+                    className="flex items-center gap-1.5 text-xs font-bold text-white bg-red-700 hover:bg-red-600 disabled:opacity-60 rounded-lg px-4 py-1.5 transition-colors border border-red-600"
+                  >
+                    {deleteLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                    {deleteLoading ? "Eliminazione…" : "Sì, elimina tutto"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDeleteConfirm(false); setDeleteError(null) }}
+                    disabled={deleteLoading}
+                    className="text-xs text-muted-foreground hover:text-foreground border border-white/[0.07] hover:border-white/[0.15] rounded-lg px-3 py-1.5 transition-colors"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>

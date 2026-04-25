@@ -39,6 +39,7 @@ from vps.services.signal_processor import SignalProcessor
 from vps.services.mt5_trader import MT5Trader
 from vps.services.mt5_range_watcher import RangeOrderWatcher, WatchedOrder
 from vps.services.mt5_position_watcher import PositionWatcher
+from vps.services.mt5_price_watcher import PriceLevelWatcher, WatchedPriceLevel
 from vps.services.signal_log_store import SignalLogStore
 from vps.services.strategy_executor import StrategyExecutor, PreTradeDecision
 from vps.services.strategy_log_store import StrategyLogStore
@@ -72,6 +73,10 @@ _mt5_users_dir   = _bot_dir / "mt5_users"
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     logger.info("Avvio Trading Bot API...")
+
+    # Percorsi esposti per gli endpoint che ne hanno bisogno
+    app.state.sessions_dir  = _sessions_dir
+    app.state.mt5_users_dir = _mt5_users_dir
 
     # Database utenti
     store = UserStore(_db_path)
@@ -164,6 +169,65 @@ async def lifespan(app: FastAPI):
     range_watcher = RangeOrderWatcher()
     range_watcher.start()
 
+    # ── Price level watcher + callback al StrategyExecutor ───────────────────
+    async def on_price_level_event(
+        user_id: str,
+        event_data: dict,
+        management_strategy: str,
+        mt5_login: int,
+        mt5_password: str,
+        mt5_server: str,
+    ) -> None:
+        """
+        Callback invocato dal PriceLevelWatcher quando un livello prezzo viene raggiunto.
+        Delega direttamente al StrategyExecutor con la management_strategy memorizzata
+        al momento dell'estrazione del segnale.
+        """
+        if strategy_executor is None:
+            return
+        ulog = logging.LoggerAdapter(logger, {"user_id": user_id})
+        ulog.info(
+            "StrategyExecutor utente %s: price_level_reached (ticket #%s, prezzo %s) — avvio agent...",
+            user_id, event_data.get("ticket"), event_data.get("trigger_price"),
+        )
+        try:
+            result = await strategy_executor.on_event(
+                user_id             = user_id,
+                event_type          = "price_level_reached",
+                event_data          = event_data,
+                management_strategy = management_strategy,
+                mt5_login           = mt5_login,
+                mt5_password        = mt5_password,
+                mt5_server          = mt5_server,
+            )
+        except Exception as exc:
+            ulog.error("StrategyExecutor on_event price_level_reached errore: %s", exc, exc_info=True)
+            await strategy_log_store.insert(
+                user_id             = user_id,
+                event_type          = "price_level_reached",
+                event_data          = event_data,
+                management_strategy = management_strategy,
+                error_msg           = str(exc),
+            )
+            return
+
+        ulog.info(
+            "StrategyExecutor utente %s: price_level_reached completato — %d tool call, risposta: %.120s",
+            user_id, len(result.tool_calls), result.final_response,
+        )
+        await strategy_log_store.insert(
+            user_id             = user_id,
+            event_type          = "price_level_reached",
+            event_data          = event_data,
+            management_strategy = management_strategy,
+            tool_calls          = result.tool_calls,
+            final_response      = result.final_response,
+            error_msg           = result.error,
+        )
+
+    price_level_watcher = PriceLevelWatcher(on_event=on_price_level_event)
+    price_level_watcher.start()
+
     # ── Position watcher + callback al StrategyExecutor ──────────────────────
     async def on_position_event(user_id: str, event_type: str, event_data: dict) -> None:
         """
@@ -178,6 +242,10 @@ async def lifespan(app: FastAPI):
                 await closed_trade_store.insert(user_id=user_id, event_data=event_data)
             except Exception as exc:
                 ulog.warning("closed_trade_store.insert utente %s: %s", user_id, exc)
+            # Rimuove i livelli prezzo pendenti per questa posizione
+            ticket = event_data.get("ticket")
+            if ticket:
+                price_level_watcher.remove_by_ticket(user_id, int(ticket))
 
         if strategy_executor is None:
             return
@@ -424,6 +492,7 @@ async def lifespan(app: FastAPI):
                 account_info=log_account_info,
                 user_id=user_id,
                 extraction_instructions=extraction_instructions,
+                management_strategy=management_strategy,
             )
         except Exception as exc:
             ulog.error("Gemini Pro errore: %s", exc)
@@ -567,6 +636,31 @@ async def lifespan(app: FastAPI):
                     mt5_password = mt5_password,
                     mt5_server   = mt5_server,
                 ))
+
+        # ── Step 8: registra price levels della management strategy ───────────
+        if management_strategy:
+            for result in results:
+                sig = result.signal
+                if (
+                    result.success
+                    and result.order_id is not None
+                    and sig is not None
+                    and sig.prices
+                ):
+                    for price in sig.prices:
+                        price_level_watcher.add(WatchedPriceLevel(
+                            ticket              = result.order_id,
+                            symbol              = sig.symbol,
+                            order_type          = sig.order_type,
+                            price               = price,
+                            management_strategy = management_strategy,
+                            user_id             = user_id,
+                            user_dir            = _mt5_users_dir / user_id,
+                            mt5_login           = int(mt5_login),
+                            mt5_password        = mt5_password,
+                            mt5_server          = mt5_server,
+                            signal_group_id     = signal_group_id,
+                        ))
 
     async def on_message_deleted(
         user_id: str,
@@ -723,6 +817,7 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
     await range_watcher.stop()
+    await price_level_watcher.stop()
     await position_watcher.stop()
     tm.stop()
     logger.info("Trading Bot API fermata")

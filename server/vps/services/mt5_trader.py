@@ -358,6 +358,15 @@ class MT5Trader:
         self._users_dir   = mt5_users_dir
         self._default_lot = default_lot
 
+    def kill_user_process(self, user_id: str) -> bool:
+        """Termina il processo terminal64.exe dell'utente, se in esecuzione.
+
+        Ritorna True se almeno un processo è stato terminato.
+        Da chiamare prima di eliminare la directory MT5 dell'utente.
+        """
+        user_dir = self._users_dir / user_id
+        return _kill_mt5_for_dir(user_dir)
+
     async def get_account_info(
         self,
         user_id: str,

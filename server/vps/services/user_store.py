@@ -342,6 +342,12 @@ class UserStore:
             )
             await db.commit()
 
+    async def delete_all_user_groups(self, user_id: str) -> None:
+        """Rimuove tutti i gruppi di un utente."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute("DELETE FROM user_groups WHERE user_id = ?", (user_id,))
+            await db.commit()
+
     async def update_sizing_strategy(self, user_id: str, sizing_strategy: str | None) -> None:
         """Aggiorna solo il campo sizing_strategy per l'utente."""
         async with aiosqlite.connect(self._db_path) as db:

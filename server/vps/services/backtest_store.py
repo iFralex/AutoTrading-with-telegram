@@ -316,3 +316,21 @@ class BacktestStore:
             await db.execute("DELETE FROM backtest_trades WHERE run_id = ?", (run_id,))
             await db.execute("DELETE FROM backtest_runs WHERE id = ?", (run_id,))
             await db.commit()
+
+    async def delete_all_runs_for_user(self, user_id: str) -> int:
+        """Elimina tutti i run e i relativi trade per un utente. Ritorna il numero di run eliminati."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                "SELECT id FROM backtest_runs WHERE user_id = ?", (user_id,)
+            )
+            run_ids = [row[0] for row in await cur.fetchall()]
+            if run_ids:
+                placeholders = ",".join("?" * len(run_ids))
+                await db.execute(
+                    f"DELETE FROM backtest_trades WHERE run_id IN ({placeholders})", run_ids
+                )
+                await db.execute(
+                    f"DELETE FROM backtest_runs WHERE id IN ({placeholders})", run_ids
+                )
+                await db.commit()
+        return len(run_ids)

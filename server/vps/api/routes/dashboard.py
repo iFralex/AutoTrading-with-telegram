@@ -18,12 +18,16 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
+import shutil
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from vps.services.signal_processor import TradeSignal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -477,6 +481,90 @@ async def get_ai_stats(
     ai_log_store = request.app.state.ai_log_store
     stats = await ai_log_store.get_stats(user_id)
     return stats
+
+
+@router.delete("/user/{user_id}")
+async def delete_user(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Eliminazione completa dell'account utente e di tutti i dati associati:
+      - Disconnette e rimuove il listener Telegram attivo
+      - Elimina il file di sessione Telegram (.session) dal filesystem
+      - Elimina la directory MT5 dell'utente (istanza locale)
+      - Elimina tutti i log segnali, log AI, trade chiusi, backtest
+      - Elimina la voce utente e i gruppi dal DB
+      - Elimina eventuali signal_links
+      - Elimina la sessione di setup temporanea (setup_sessions.db)
+    """
+    store              = request.app.state.user_store
+    log_store          = request.app.state.signal_log_store
+    ai_log_store       = request.app.state.ai_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+    backtest_store     = request.app.state.backtest_store
+    session_store      = request.app.state.setup_session_store
+    tm                 = request.app.state.telegram_manager
+    mt5_trader         = request.app.state.mt5_trader
+    sessions_dir       = request.app.state.sessions_dir
+    mt5_users_dir      = request.app.state.mt5_users_dir
+
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    phone = user.get("phone", "")
+
+    # 1. Ferma e disconnette il client Telegram attivo
+    try:
+        tm.remove_user(user_id)
+        logger.info("delete_user %s: listener Telegram fermato", user_id)
+    except Exception as exc:
+        logger.warning("delete_user %s: errore rimozione listener Telegram: %s", user_id, exc)
+
+    # 2. Elimina il file di sessione Telegram dal filesystem
+    session_file = sessions_dir / f"{user_id}.session"
+    if session_file.exists():
+        try:
+            session_file.unlink()
+            logger.info("delete_user %s: file sessione Telegram eliminato", user_id)
+        except Exception as exc:
+            logger.warning("delete_user %s: errore eliminazione file sessione: %s", user_id, exc)
+
+    # 3. Termina il processo MT5 dell'utente (se aperto) e poi elimina la directory
+    mt5_user_dir = mt5_users_dir / user_id
+    if mt5_user_dir.exists():
+        try:
+            killed = mt5_trader.kill_user_process(user_id)
+            if killed:
+                logger.info("delete_user %s: processo MT5 terminato", user_id)
+        except Exception as exc:
+            logger.warning("delete_user %s: errore chiusura processo MT5: %s", user_id, exc)
+        try:
+            shutil.rmtree(mt5_user_dir)
+            logger.info("delete_user %s: directory MT5 eliminata", user_id)
+        except Exception as exc:
+            logger.warning("delete_user %s: errore eliminazione directory MT5: %s", user_id, exc)
+
+    # 4. Elimina tutti i dati dal DB
+    await log_store.delete_by_user_id(user_id)
+    await ai_log_store.delete_by_user_id(user_id)
+    await closed_trade_store.delete_by_user_id(user_id)
+    await backtest_store.delete_all_runs_for_user(user_id)
+    await store.delete_all_links_for_user(user_id)
+    await store.delete_all_user_groups(user_id)
+    await store.delete(user_id)
+    logger.info("delete_user %s: tutti i record DB eliminati", user_id)
+
+    # 5. Elimina la sessione di setup temporanea (best-effort)
+    if phone:
+        try:
+            await session_store.delete(phone)
+            logger.info("delete_user %s: sessione setup eliminata (phone=%s)", user_id, phone)
+        except Exception as exc:
+            logger.warning("delete_user %s: errore eliminazione sessione setup: %s", user_id, exc)
+
+    return {"ok": True}
 
 
 @router.delete("/user/{user_id}/stats")

@@ -247,7 +247,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
             <EmptyState onSearch={search} />
           ) : (
             <>
-              {section === "overview"  && <OverviewPage  data={data} onUserUpdate={setData} />}
+              {section === "overview"  && <OverviewPage  data={data} onUserUpdate={setData} onUserDelete={clearUser} />}
               {section === "analytics" && <AnalyticsPage userId={data.user.user_id} groups={data.user.groups} />}
               {section === "ai"        && <AIPage        userId={data.user.user_id} />}
               {section === "settings"  && <SettingsPage  data={data} onUserUpdate={setData} />}
