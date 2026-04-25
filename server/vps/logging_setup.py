@@ -9,6 +9,7 @@ File prodotti in {TRADING_BOT_DIR}/logs/:
   strategy.log     — StrategyExecutor (agent loop, tool call, decisioni)
   backtest.log     — BacktestEngine e routes backtest
   ai_calls.log     — chiamate Gemini complete (prompt + risposta + token)
+  performance.log  — snapshot risorse VPS (CPU, RAM, disco, rete, top-N processi)
   users/{uid}.log  — tutti gli eventi per utente (richiede extra user_id)
 """
 
@@ -138,6 +139,13 @@ def setup_logging(log_dir: Path) -> None:
         log_dir / "backtest.log",
         level=logging.DEBUG,
         filt=_NameFilter("backtest"),
+    ))
+
+    # ── performance.log: snapshot risorse VPS (VpsMonitor) ───────────────────
+    root.addHandler(_make_fh(
+        log_dir / "performance.log",
+        level=logging.DEBUG,
+        filt=_NameFilter("vps_monitor"),
     ))
 
     # ── ai_calls.log: logger dedicato "ai_calls", NON propaga al root ─────────

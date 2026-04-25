@@ -47,6 +47,7 @@ from vps.services.closed_trade_store import ClosedTradeStore
 from vps.services.ai_log_store import AILogStore
 from vps.services.backtest_store import BacktestStore
 from vps.services.backtest_engine import BacktestEngine
+from vps.services.vps_monitor import VpsMonitor
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -811,11 +812,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Nessun utente da ripristinare")
 
+    # VPS monitor (intervallo e top-N configurabili via env)
+    vps_monitor = VpsMonitor(
+        interval=int(os.environ.get("VPS_MONITOR_INTERVAL", "60")),
+        top_n=int(os.environ.get("VPS_MONITOR_TOP_N", "5")),
+    )
+    vps_monitor.start()
+    app.state.vps_monitor = vps_monitor
+
     logger.info("Trading Bot API pronta")
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
+    await vps_monitor.stop()
     await range_watcher.stop()
     await price_level_watcher.stop()
     await position_watcher.stop()
@@ -853,9 +863,11 @@ app.include_router(backtest_router)
 @app.get("/health")
 async def health():
     tm: TelegramManager = app.state.telegram_manager
+    monitor: VpsMonitor = app.state.vps_monitor
     return {
-        "status": "ok",
+        "status":       "ok",
         "active_users": len(tm.active_user_ids()),
+        "vps":          monitor.get_snapshot(),
     }
 
 
