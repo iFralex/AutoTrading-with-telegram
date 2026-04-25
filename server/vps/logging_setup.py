@@ -141,12 +141,12 @@ def setup_logging(log_dir: Path) -> None:
         filt=_NameFilter("backtest"),
     ))
 
-    # ── performance.log: snapshot risorse VPS (VpsMonitor) ───────────────────
-    root.addHandler(_make_fh(
-        log_dir / "performance.log",
-        level=logging.DEBUG,
-        filt=_NameFilter("vps_monitor"),
-    ))
+    # ── performance.log: VpsMonitor — NON propaga al root (non contamina bot.log) ──
+    perf_log = logging.getLogger("vps.services.vps_monitor")
+    perf_log.propagate = False
+    perf_log.setLevel(logging.DEBUG)
+    perf_log.handlers.clear()
+    perf_log.addHandler(_make_fh(log_dir / "performance.log", level=logging.DEBUG))
 
     # ── ai_calls.log: logger dedicato "ai_calls", NON propaga al root ─────────
     ai_log = logging.getLogger("ai_calls")
