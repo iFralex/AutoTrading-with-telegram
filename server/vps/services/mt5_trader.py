@@ -101,40 +101,32 @@ def _kill_mt5_for_dir(mt5_dir: Path) -> bool:
     esecuzione (0 ms) mantenendo lo stato precedente (algo trading off, server
     diverso, ecc.) e il successivo login() va in IPC timeout.
 
+    Usa psutil per trovare il processo (wmic è deprecato su Windows 11).
     Ritorna True se almeno un processo è stato terminato.
     """
     if _sys.platform != "win32":
         return False
+    target = str(mt5_dir).lower().rstrip("\\")
+    killed = False
     try:
-        result = _subprocess.run(
-            [
-                "wmic", "process", "where", "name='terminal64.exe'",
-                "get", "ProcessId,ExecutablePath", "/format:csv",
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        target = str(mt5_dir).lower().rstrip("\\")
-        killed = False
-        for line in result.stdout.splitlines():
-            parts = line.strip().split(",")
-            # formato CSV: Node,ExecutablePath,ProcessId
-            if len(parts) < 3:
-                continue
-            exe_path = parts[1].strip().lower().rstrip("\\")
-            pid_str = parts[2].strip()
-            if exe_path.startswith(target) and pid_str.isdigit():
-                _subprocess.run(
-                    ["taskkill", "/PID", pid_str, "/F"],
-                    capture_output=True, timeout=5,
-                )
-                logger.info("MT5 PID %s terminato (dir: %s)", pid_str, mt5_dir)
-                killed = True
-        if killed:
-            time.sleep(2.0)   # attende che il processo si chiuda completamente
-        return killed
+        import psutil
+        for proc in psutil.process_iter(["pid", "name", "exe"]):
+            try:
+                if (proc.info["name"] or "").lower() != "terminal64.exe":
+                    continue
+                exe = (proc.info["exe"] or "").lower().rstrip("\\")
+                if exe.startswith(target):
+                    proc.kill()
+                    logger.info("MT5 PID %s terminato (dir: %s)", proc.pid, mt5_dir)
+                    killed = True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
     except Exception as exc:
         logger.warning("_kill_mt5_for_dir(%s): %s", mt5_dir, exc)
         return False
+    if killed:
+        time.sleep(2.0)   # attende che il processo rilasci tutti gli handle
+    return killed
 
 
 def _get_mt5_pid_for_dir(mt5_dir: Path) -> int | None:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -483,6 +484,24 @@ async def get_ai_stats(
     return stats
 
 
+def _rmtree_retry(path, user_id: str, retries: int = 4, delay: float = 1.5) -> None:
+    """rmtree con retry per gestire WinError 32 (file bloccato da MT5 appena chiuso)."""
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path)
+            logger.info("delete_user %s: directory MT5 eliminata", user_id)
+            return
+        except OSError as exc:
+            if attempt < retries - 1:
+                logger.debug(
+                    "delete_user %s: rmtree tentativo %d fallito (%s) — riprovo tra %.1fs",
+                    user_id, attempt + 1, exc, delay,
+                )
+                time.sleep(delay)
+            else:
+                logger.warning("delete_user %s: errore eliminazione directory MT5: %s", user_id, exc)
+
+
 @router.delete("/user/{user_id}")
 async def delete_user(
     user_id: str,
@@ -540,11 +559,7 @@ async def delete_user(
                 logger.info("delete_user %s: processo MT5 terminato", user_id)
         except Exception as exc:
             logger.warning("delete_user %s: errore chiusura processo MT5: %s", user_id, exc)
-        try:
-            shutil.rmtree(mt5_user_dir)
-            logger.info("delete_user %s: directory MT5 eliminata", user_id)
-        except Exception as exc:
-            logger.warning("delete_user %s: errore eliminazione directory MT5: %s", user_id, exc)
+        _rmtree_retry(mt5_user_dir, user_id)
 
     # 4. Elimina tutti i dati dal DB
     await log_store.delete_by_user_id(user_id)
