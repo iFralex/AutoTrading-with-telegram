@@ -722,6 +722,7 @@ class BacktestEngine:
                     } if sizing_strategy else None,
                     user_id=user_id,
                     extraction_instructions=extraction_instructions,
+                    management_strategy=management_strategy,
                     flex=True,
                 )
             except Exception as exc:

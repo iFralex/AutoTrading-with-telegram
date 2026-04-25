@@ -133,6 +133,15 @@ _TOOLS_BY_EVENT: dict[str, set[str]] = {
         "cancel_pending_order", "cancel_all_pending_orders",
         "get_current_datetime",
     },
+    "price_level_reached": {
+        "get_open_positions", "get_pending_orders",
+        "close_position", "close_all_positions",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "move_stop_loss", "move_take_profit", "set_breakeven",
+        "get_account_info", "get_daily_pnl", "get_weekly_pnl", "get_monthly_pnl",
+        "get_current_price", "get_current_datetime", "get_symbol_info",
+        "calculate_lot_for_risk", "calculate_lot_for_risk_percent",
+    },
 }
 
 
@@ -1266,6 +1275,22 @@ def _format_event_prompt(event_type: str, event_data: dict) -> str:
             f"{signals_summary if signals_summary else '  (no details available)'}\n\n"
             "Use get_open_positions to check for any open positions correlated to this signal "
             "(filter by signal_group_id if available) and execute the configured strategy."
+        )
+
+    if event_type == "price_level_reached":
+        p = event_data
+        return (
+            f"EVENT: Price level reached.\n\n"
+            f"Details:\n"
+            f"  Ticket:        #{p.get('ticket')}\n"
+            f"  Symbol:        {p.get('symbol')}\n"
+            f"  Direction:     {p.get('order_type')}\n"
+            f"  Trigger price: {p.get('trigger_price')}\n"
+            f"  Signal group:  {p.get('signal_group_id', 'N/A')}\n\n"
+            "A price level computed from your strategy has been reached.\n"
+            "Use get_open_positions and get_account_info to evaluate the current conditions "
+            "(position status, account P&L, equity, etc.), then execute the strategy action "
+            "prescribed for this price level."
         )
 
     # Generic event

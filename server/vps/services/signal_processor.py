@@ -81,6 +81,7 @@ class TradeSignal:
     take_profit: float | None
     lot_size:    float | None               # None → usa il default dell'utente
     order_mode:  str                        # "MARKET" | "LIMIT" | "STOP"
+    prices:      list[float] | None = None  # livelli prezzo che triggerano la management_strategy
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -109,6 +110,8 @@ Each element must have these exact keys:
   "take_profit" : number|null          — one value per object
   "lot_size"    : number|null          — explicit lot/volume if stated, else null
   "order_mode"  : string               — "MARKET" if no entry price given, otherwise "LIMIT"
+  "prices"      : [number]|null        — price levels at which the management strategy should be
+                                         triggered for this specific signal; null if not applicable
 
 Rules:
 - If multiple Take Profit levels exist, emit one object per TP
@@ -116,7 +119,14 @@ Rules:
 - If an entry range is given (e.g. "4652 - 4656"), set entry_price to [4652, 4656]; do NOT average the values.
 - If a single entry price is given, set entry_price to that number (not an array).
 - Preserve all numeric values exactly as written; do not round or convert.
-{sizing_section}{custom_section}
+- "prices": if a management strategy is provided, derive any price levels expressible from
+  this signal's entry_price, stop_loss, and take_profit (e.g. "50% between entry and TP"
+  → entry + (take_profit - entry) * 0.5). Use the single numeric entry price for the
+  computation; if entry_price is a range, use the midpoint. Set to null when no price
+  trigger can be derived or no strategy is provided. Do NOT skip a level just because the
+  strategy also checks real-time conditions (like account P&L) — the strategy AI will
+  evaluate those conditions when the price is actually reached.
+{sizing_section}{management_section}{custom_section}
 Message:
 {message}"""
 
@@ -150,6 +160,7 @@ class SignalProcessor:
         account_info: dict | None = None,
         user_id: str | None = None,
         extraction_instructions: str | None = None,
+        management_strategy: str | None = None,
     ) -> list[TradeSignal]:
         """
         Punto di ingresso principale.
@@ -179,7 +190,7 @@ class SignalProcessor:
 
         # ── Step 2: estrazione strutturata (Pro) ──────────────────────────────
         try:
-            signals, _, _ = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions)
+            signals, _, _ = await self._extract(message, sizing_strategy, account_info, user_id=user_id, extraction_instructions=extraction_instructions, management_strategy=management_strategy)
         except Exception as exc:
             logger.error("Gemini Pro errore: %s", exc)
             return []
@@ -208,6 +219,7 @@ class SignalProcessor:
         account_info: dict | None = None,
         user_id: str | None = None,
         extraction_instructions: str | None = None,
+        management_strategy: str | None = None,
         flex: bool = False,
     ) -> tuple[list[TradeSignal], int, int]:
         """
@@ -220,6 +232,7 @@ class SignalProcessor:
                 message, sizing_strategy, account_info,
                 user_id=user_id,
                 extraction_instructions=extraction_instructions,
+                management_strategy=management_strategy,
                 flex=flex,
             )
         except Exception as exc:
@@ -298,14 +311,17 @@ class SignalProcessor:
         account_info: dict | None,
         user_id: str | None = None,
         extraction_instructions: str | None = None,
+        management_strategy: str | None = None,
         flex: bool = False,
     ) -> tuple[list[TradeSignal], int, int]:
         from vps.services.ai_log_store import make_timer
-        sizing_section = _build_sizing_section(sizing_strategy, account_info)
-        custom_section = _build_custom_section(extraction_instructions)
+        sizing_section      = _build_sizing_section(sizing_strategy, account_info)
+        management_section  = _build_management_section(management_strategy)
+        custom_section      = _build_custom_section(extraction_instructions)
         prompt = _EXTRACTION_PROMPT.format(
             message=message,
             sizing_section=sizing_section,
+            management_section=management_section,
             custom_section=custom_section,
         )
         timer = make_timer()
@@ -396,6 +412,7 @@ class SignalProcessor:
                     take_profit = _to_float(item.get("take_profit")),
                     lot_size    = _to_float(item.get("lot_size")),
                     order_mode  = str(item.get("order_mode", "LIMIT")).upper(),
+                    prices      = _parse_prices(item.get("prices")),
                 )
                 if sig.symbol and sig.order_type in ("BUY", "SELL"):
                     signals.append(sig)
@@ -446,6 +463,29 @@ def _build_sizing_section(
     return "\n".join(lines)
 
 
+def _build_management_section(management_strategy: str | None) -> str:
+    """
+    Costruisce il blocco della management strategy da iniettare nel prompt Pro
+    per guidare il calcolo del campo 'prices'.
+    """
+    if not management_strategy:
+        return ""
+    lines = [
+        "",
+        "Management strategy (use ONLY to compute the 'prices' field):",
+        f'  "{management_strategy}"',
+        "- Analyse the strategy rules and derive any price level that can be computed",
+        "  from this signal's entry_price, stop_loss, or take_profit.",
+        "- The strategy AI will evaluate all real-time conditions (account P&L, equity,",
+        "  number of open positions, etc.) when that price is actually reached.",
+        "  Therefore: always emit the computed price level even if the strategy also",
+        "  involves conditions that depend on live account data.",
+        "- Set 'prices' to null if no price trigger can be derived from the strategy.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _build_custom_section(extraction_instructions: str | None) -> str:
     """
     Costruisce il blocco di istruzioni custom da iniettare nel prompt Pro.
@@ -472,6 +512,15 @@ def _parse_entry(v) -> float | list[float] | None:
             return [parsed[0], parsed[1]]  # type: ignore[return-value]
         return None
     return _to_float(v)
+
+
+def _parse_prices(v) -> list[float] | None:
+    """Parsa prices: None o lista non-vuota di float."""
+    if not isinstance(v, list) or not v:
+        return None
+    result = [_to_float(x) for x in v]
+    parsed = [x for x in result if x is not None]
+    return parsed if parsed else None
 
 
 def _to_float(v) -> float | None:
