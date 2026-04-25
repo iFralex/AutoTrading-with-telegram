@@ -67,6 +67,8 @@ class SaveSessionBody(BaseModel):
     mt5_server: str | None = None
     sizing_strategy: str | None = None
     management_strategy: str | None = None
+    deletion_strategy: str | None = None
+    extraction_instructions: str | None = None
 
 
 class ClearSessionFieldsBody(BaseModel):

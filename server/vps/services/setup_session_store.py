@@ -16,10 +16,11 @@ Schema:
     mt5_login        INTEGER,
     mt5_password_enc TEXT,   -- cifrata con Fernet
     mt5_server       TEXT,
-    sizing_strategy     TEXT,
-    management_strategy TEXT,
-    deletion_strategy   TEXT,
-    updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sizing_strategy         TEXT,
+    management_strategy     TEXT,
+    deletion_strategy       TEXT,
+    extraction_instructions TEXT,
+    updated_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 """
 
@@ -43,10 +44,11 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     mt5_login        INTEGER,
     mt5_password_enc TEXT,
     mt5_server          TEXT,
-    sizing_strategy     TEXT,
-    management_strategy TEXT,
-    deletion_strategy   TEXT,
-    updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sizing_strategy         TEXT,
+    management_strategy     TEXT,
+    deletion_strategy       TEXT,
+    extraction_instructions TEXT,
+    updated_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -55,6 +57,7 @@ _ALLOWED_FIELDS = {
     "api_id", "api_hash", "login_key", "user_id",
     "group_id", "group_name", "mt5_login", "mt5_server",
     "sizing_strategy", "management_strategy", "deletion_strategy",
+    "extraction_instructions",
 }
 
 # Mappatura nomi frontend → colonne DB
@@ -107,6 +110,7 @@ class SetupSessionStore:
             for _sql in [
                 "ALTER TABLE setup_sessions ADD COLUMN management_strategy TEXT",
                 "ALTER TABLE setup_sessions ADD COLUMN deletion_strategy TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN extraction_instructions TEXT",
             ]:
                 try:
                     await db.execute(_sql)
@@ -143,9 +147,10 @@ class SetupSessionStore:
             "mt5_login":           row["mt5_login"],
             "has_mt5_password":    bool(row["mt5_password_enc"]),
             "mt5_server":          row["mt5_server"],
-            "sizing_strategy":     row["sizing_strategy"],
-            "management_strategy": row["management_strategy"],
-            "deletion_strategy":   row["deletion_strategy"],
+            "sizing_strategy":         row["sizing_strategy"],
+            "management_strategy":     row["management_strategy"],
+            "deletion_strategy":       row["deletion_strategy"],
+            "extraction_instructions": row["extraction_instructions"],
         }
 
     async def get_mt5_password(self, phone: str) -> str | None:
