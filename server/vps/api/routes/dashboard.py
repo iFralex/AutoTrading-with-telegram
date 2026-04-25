@@ -185,6 +185,10 @@ class UpdateGroupSettingsBody(BaseModel):
     entry_if_favorable:      bool | None = None
     deletion_strategy:       str | None = None
     extraction_instructions: str | None = None
+    trading_hours_enabled:   bool | None = None
+    trading_hours_start:     int | None = Field(None, ge=0, le=23)
+    trading_hours_end:       int | None = Field(None, ge=0, le=23)
+    trading_hours_days:      list[str] | None = None
 
 
 @router.patch("/user/{user_id}/groups/{group_id}")

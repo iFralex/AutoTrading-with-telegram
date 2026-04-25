@@ -159,6 +159,10 @@ export interface UserGroup {
   entry_if_favorable: boolean
   deletion_strategy: string | null
   extraction_instructions: string | null
+  trading_hours_enabled: boolean
+  trading_hours_start: number | null
+  trading_hours_end: number | null
+  trading_hours_days: string[] | null
   active: boolean
   created_at: string
 }
@@ -558,7 +562,8 @@ export const api = {
     settings: Partial<Pick<UserGroup,
       "group_name" | "sizing_strategy" | "management_strategy" |
       "range_entry_pct" | "entry_if_favorable" |
-      "deletion_strategy" | "extraction_instructions"
+      "deletion_strategy" | "extraction_instructions" |
+      "trading_hours_enabled" | "trading_hours_start" | "trading_hours_end" | "trading_hours_days"
     >>
   ) {
     return call<{ ok: boolean }>(

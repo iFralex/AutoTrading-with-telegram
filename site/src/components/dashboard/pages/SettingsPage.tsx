@@ -113,6 +113,10 @@ function GroupCard({
       deletion_strategy:       src.deletion_strategy,
       range_entry_pct:         src.range_entry_pct,
       entry_if_favorable:      src.entry_if_favorable,
+      trading_hours_enabled:   src.trading_hours_enabled,
+      trading_hours_start:     src.trading_hours_start,
+      trading_hours_end:       src.trading_hours_end,
+      trading_hours_days:      src.trading_hours_days,
     }
     try {
       await api.updateUserGroup(userId, group.group_id, fields)
@@ -300,6 +304,32 @@ function GroupCard({
               onSave={async v => {
                 await api.updateUserGroup(userId, group.group_id, { entry_if_favorable: v })
                 patch({ entry_if_favorable: v })
+              }}
+            />
+          </GroupSettingRow>
+
+          <GroupSettingRow title="Orari di trading" badge="filtro"
+            description="Limita l'esecuzione degli ordini a giorni e fasce orarie specifiche (UTC)">
+            <TradingHoursField
+              value={{
+                enabled: group.trading_hours_enabled ?? false,
+                start:   group.trading_hours_start   ?? 0,
+                end:     group.trading_hours_end      ?? 23,
+                days:    group.trading_hours_days     ?? ["MON","TUE","WED","THU","FRI"],
+              }}
+              onSave={async v => {
+                await api.updateUserGroup(userId, group.group_id, {
+                  trading_hours_enabled: v.enabled,
+                  trading_hours_start:   v.start,
+                  trading_hours_end:     v.end,
+                  trading_hours_days:    v.days,
+                })
+                patch({
+                  trading_hours_enabled: v.enabled,
+                  trading_hours_start:   v.start,
+                  trading_hours_end:     v.end,
+                  trading_hours_days:    v.days,
+                })
               }}
             />
           </GroupSettingRow>
@@ -735,6 +765,158 @@ function RangeField({ value, onSave }: { value: number; onSave: (v: number) => P
           <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
+          <X className="w-3 h-3" />Annulla
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Trading hours field ───────────────────────────────────────────────────────
+
+const ALL_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+const DAY_LABELS: Record<string, string> = {
+  MON: "Lun", TUE: "Mar", WED: "Mer", THU: "Gio", FRI: "Ven", SAT: "Sab", SUN: "Dom",
+}
+
+function TradingHoursField({
+  value,
+  onSave,
+}: {
+  value: { enabled: boolean; start: number; end: number; days: string[] }
+  onSave: (v: { enabled: boolean; start: number; end: number; days: string[] }) => Promise<void>
+}) {
+  const [editing,  setEditing]  = useState(false)
+  const [enabled,  setEnabled]  = useState(value.enabled)
+  const [start,    setStart]    = useState(value.start)
+  const [end,      setEnd]      = useState(value.end)
+  const [days,     setDays]     = useState(value.days)
+  const [loading,  setLoading]  = useState(false)
+  const [error,    setError]    = useState<string | null>(null)
+  const [saved,    setSaved]    = useState(false)
+
+  const startEdit = () => {
+    setEnabled(value.enabled); setStart(value.start); setEnd(value.end)
+    setDays(value.days); setError(null); setEditing(true)
+  }
+
+  const save = async () => {
+    setLoading(true); setError(null)
+    try {
+      await onSave({ enabled, start, end, days })
+      setEditing(false); setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleDay = (day: string) =>
+    setDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day])
+
+  const summaryLabel = () => {
+    if (!value.enabled) return "24/7 — nessun limite"
+    const daysStr = value.days.length === 7 ? "tutti i giorni"
+      : value.days.length === 0 ? "nessun giorno"
+      : value.days.map(d => DAY_LABELS[d] ?? d).join(", ")
+    return `${String(value.start).padStart(2,"0")}:00–${String(value.end).padStart(2,"0")}:59 UTC · ${daysStr}`
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 bg-black/15 border border-white/[0.07] rounded-lg px-3 py-2.5">
+          <p className={`text-sm font-mono ${value.enabled ? "text-foreground/80" : "text-muted-foreground/50 italic"}`}>
+            {summaryLabel()}
+          </p>
+        </div>
+        <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Enable/disable */}
+      <div className="space-y-2">
+        {[
+          { val: false, label: "Disattivo", desc: "Accetta segnali 24/7 senza restrizioni" },
+          { val: true,  label: "Attivo",    desc: "Blocca i segnali fuori dalla fascia configurata" },
+        ].map(opt => (
+          <button key={String(opt.val)} type="button" onClick={() => setEnabled(opt.val)}
+            className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
+              enabled === opt.val
+                ? "border-indigo-500/40 bg-indigo-600/8 text-foreground"
+                : "border-white/[0.07] text-muted-foreground hover:border-white/[0.15] hover:text-foreground hover:bg-white/[0.02]"
+            }`}>
+            <div className="flex items-center gap-2">
+              <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${enabled === opt.val ? "border-indigo-400 bg-indigo-400/30" : "border-white/20"}`} />
+              <span className="text-sm font-medium">{opt.label}</span>
+            </div>
+            <p className="text-xs mt-0.5 ml-[22px] opacity-65 leading-relaxed">{opt.desc}</p>
+          </button>
+        ))}
+      </div>
+
+      {enabled && (
+        <>
+          {/* Hour range */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground mb-1.5">Ora inizio (UTC)</p>
+              <input
+                type="number" min={0} max={23} value={start}
+                onChange={e => setStart(Math.min(23, Math.max(0, Number(e.target.value))))}
+                className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
+              />
+            </div>
+            <div className="pt-5 text-muted-foreground text-sm">→</div>
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground mb-1.5">Ora fine (UTC)</p>
+              <input
+                type="number" min={0} max={23} value={end}
+                onChange={e => setEnd(Math.min(23, Math.max(0, Number(e.target.value))))}
+                className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
+              />
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground -mt-1">
+            {start <= end
+              ? `Permesso dalle ${String(start).padStart(2,"0")}:00 alle ${String(end).padStart(2,"0")}:59 UTC`
+              : `Overnight: dalle ${String(start).padStart(2,"0")}:00 alle ${String(end).padStart(2,"0")}:59 UTC (+1g)`}
+          </p>
+
+          {/* Day selector */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">Giorni abilitati</p>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_DAYS.map(day => (
+                <button
+                  key={day} type="button" onClick={() => toggleDay(day)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                    days.includes(day)
+                      ? "border-indigo-500/40 bg-indigo-600/12 text-indigo-300"
+                      : "border-white/[0.08] text-muted-foreground hover:border-white/[0.15] hover:text-foreground"
+                  }`}
+                >
+                  {DAY_LABELS[day]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
+          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+        </button>
+        <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50">
           <X className="w-3 h-3" />Annulla
         </button>
       </div>

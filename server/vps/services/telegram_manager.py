@@ -223,6 +223,28 @@ class TelegramManager:
     def active_user_ids(self) -> list[str]:
         return list(self._clients.keys())
 
+    async def send_to_user(self, user_id: str, text: str) -> bool:
+        """
+        Invia un messaggio di testo all'utente tramite la sua sessione Telethon.
+        Da chiamare con await nel loop del TelegramManager (es. da on_message).
+        """
+        client = self._clients.get(user_id)
+        if not client:
+            return False
+        try:
+            await client.send_message(int(user_id), text)
+            return True
+        except Exception as exc:
+            logger.warning("Notifica a %s fallita: %s", user_id, exc)
+            return False
+
+    def notify_user(self, user_id: str, text: str) -> bool:
+        """
+        Thread-safe: invia un messaggio all'utente schedulando la coroutine
+        sul loop del TelegramManager. Da chiamare con run_in_executor dal loop FastAPI.
+        """
+        return self._call(self.send_to_user(user_id, text), timeout=10)
+
     def get_history(
         self,
         user_id: str,

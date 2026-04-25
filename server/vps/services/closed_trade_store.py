@@ -393,3 +393,34 @@ class ClosedTradeStore:
             "by_symbol":             by_symbol,
             "cumulative_pnl":        cumulative_pnl[-300:],  # max 300 punti per il grafico
         }
+
+    async def get_last_week_summary(self, user_id: str) -> dict:
+        """Ritorna un riepilogo dei trade degli ultimi 7 giorni per il report settimanale."""
+        from datetime import datetime, timezone, timedelta
+        since = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT
+                    COUNT(*)                                           AS total_trades,
+                    SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END)      AS wins,
+                    SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END)      AS losses,
+                    SUM(profit)                                        AS total_profit
+                FROM closed_trades
+                WHERE user_id = ? AND DATE(close_time) >= ?
+                """,
+                (user_id, since),
+            )
+            row = await cur.fetchone()
+        total  = int(row["total_trades"] or 0)
+        wins   = int(row["wins"]         or 0)
+        losses = int(row["losses"]       or 0)
+        profit = float(row["total_profit"] or 0)
+        return {
+            "total_trades": total,
+            "wins":         wins,
+            "losses":       losses,
+            "win_rate":     round(wins / total * 100, 1) if total else 0.0,
+            "total_profit": round(profit, 2),
+        }

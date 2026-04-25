@@ -85,11 +85,23 @@ CREATE TABLE IF NOT EXISTS user_groups (
     entry_if_favorable      INTEGER NOT NULL DEFAULT 0,
     deletion_strategy       TEXT,
     extraction_instructions TEXT,
+    trading_hours_enabled   INTEGER NOT NULL DEFAULT 0,
+    trading_hours_start     INTEGER,
+    trading_hours_end       INTEGER,
+    trading_hours_days      TEXT,
     active                  INTEGER NOT NULL DEFAULT 1,
     created_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, group_id)
 )
 """
+
+# Migrazioni per la tabella user_groups (applicate dopo la sua creazione)
+_MIGRATIONS_GROUPS = [
+    "ALTER TABLE user_groups ADD COLUMN trading_hours_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE user_groups ADD COLUMN trading_hours_start INTEGER",
+    "ALTER TABLE user_groups ADD COLUMN trading_hours_end INTEGER",
+    "ALTER TABLE user_groups ADD COLUMN trading_hours_days TEXT",
+]
 
 _CREATE_USER_GROUPS_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_user_groups_user_id ON user_groups(user_id)
@@ -170,6 +182,13 @@ class UserStore:
                 await db.commit()
             except Exception:
                 pass
+            # Migrazioni incrementali per user_groups
+            for sql in _MIGRATIONS_GROUPS:
+                try:
+                    await db.execute(sql)
+                    await db.commit()
+                except Exception:
+                    pass
 
     # ── Write ────────────────────────────────────────────────────────────────
 
@@ -311,10 +330,13 @@ class UserStore:
         fields: dict,
     ) -> None:
         """Aggiorna selettivamente le impostazioni di un gruppo utente."""
+        import json as _json
         allowed = {
             "group_name", "sizing_strategy", "management_strategy",
             "range_entry_pct", "entry_if_favorable",
             "deletion_strategy", "extraction_instructions",
+            "trading_hours_enabled", "trading_hours_start", "trading_hours_end",
+            "trading_hours_days",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -324,6 +346,11 @@ class UserStore:
             updates["range_entry_pct"] = max(0, min(100, int(updates["range_entry_pct"])))
         if "entry_if_favorable" in updates:
             updates["entry_if_favorable"] = 1 if updates["entry_if_favorable"] else 0
+        if "trading_hours_enabled" in updates:
+            updates["trading_hours_enabled"] = 1 if updates["trading_hours_enabled"] else 0
+        if "trading_hours_days" in updates:
+            days = updates["trading_hours_days"]
+            updates["trading_hours_days"] = _json.dumps(days) if isinstance(days, list) else days
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [user_id, group_id]
         async with aiosqlite.connect(self._db_path) as db:
@@ -612,7 +639,8 @@ class UserStore:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
-    return {
+    import json as _json
+    d = {
         "id":                       row["id"],
         "user_id":                  row["user_id"],
         "group_id":                 row["group_id"],
@@ -626,3 +654,15 @@ def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
         "active":                   bool(row["active"]),
         "created_at":               row["created_at"],
     }
+    try:
+        d["trading_hours_enabled"] = bool(row["trading_hours_enabled"] or 0)
+        d["trading_hours_start"]   = int(row["trading_hours_start"]) if row["trading_hours_start"] is not None else None
+        d["trading_hours_end"]     = int(row["trading_hours_end"])   if row["trading_hours_end"]   is not None else None
+        raw = row["trading_hours_days"]
+        d["trading_hours_days"]    = _json.loads(raw) if raw else None
+    except (IndexError, KeyError):
+        d["trading_hours_enabled"] = False
+        d["trading_hours_start"]   = None
+        d["trading_hours_end"]     = None
+        d["trading_hours_days"]    = None
+    return d

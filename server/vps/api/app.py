@@ -10,10 +10,12 @@ Il Task Scheduler di Windows punta a questo file.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Rende importabile il package vps.* indipendentemente da dove viene lanciato
@@ -50,6 +52,29 @@ from vps.services.backtest_engine import BacktestEngine
 from vps.services.vps_monitor import VpsMonitor
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+
+# ── Helper: filtro orari di trading ──────────────────────────────────────────
+
+_WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+
+
+def _is_trading_allowed(
+    now: "datetime",
+    start_h: "int | None",
+    end_h: "int | None",
+    days: "list[str] | None",
+) -> bool:
+    """Ritorna True se il trading è permesso nell'orario e giorno correnti (UTC)."""
+    current_day = _WEEKDAYS[now.weekday()]
+    if days and current_day not in days:
+        return False
+    if start_h is None or end_h is None:
+        return True
+    h = now.hour
+    if start_h <= end_h:
+        return start_h <= h < end_h
+    # overnight (es. 22–06)
+    return h >= start_h or h < end_h
 
 _bot_dir = Path(os.environ.get("TRADING_BOT_DIR", _ROOT)).resolve()
 _log_dir = _bot_dir / "logs"
@@ -456,6 +481,23 @@ async def lifespan(app: FastAPI):
         ulog.info("Utente %s: gruppo=%s range_entry_pct=%d%% entry_if_favorable=%s",
                   user_id, group_id, range_entry_pct, entry_if_favorable)
 
+        # ── Step 2.5: verifica filtro orari di trading ────────────────────────
+        if group_settings and group_settings.get("trading_hours_enabled"):
+            if not _is_trading_allowed(
+                datetime.now(timezone.utc),
+                group_settings.get("trading_hours_start"),
+                group_settings.get("trading_hours_end"),
+                group_settings.get("trading_hours_days"),
+            ):
+                ulog.info(
+                    "Utente %s: segnale ignorato — fuori dagli orari di trading (gruppo %s)",
+                    user_id, group_id,
+                )
+                log_error_step = "trading_hours"
+                log_error_msg  = "Segnale ricevuto fuori dagli orari di trading configurati"
+                await _save_log()
+                return
+
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
             ulog.warning(
@@ -615,6 +657,42 @@ async def lifespan(app: FastAPI):
         ]
 
         await _save_log()
+
+        # ── Step 6.5: notifica Telegram per ogni ordine eseguito/fallito ──────
+        for res in results:
+            if res.signal is None:
+                continue
+            sig = res.signal
+            if res.success:
+                entry_str = (
+                    f"{sig.entry_price[0]:.5f}–{sig.entry_price[1]:.5f}"
+                    if isinstance(sig.entry_price, list)
+                    else f"{sig.entry_price:.5f}"
+                ) if sig.entry_price is not None else "market"
+                lines = [
+                    "🔔 Ordine eseguito",
+                    "",
+                    f"📍 {sig.order_type} {sig.symbol}"
+                    + (f" | Lotto: {sig.lot_size}" if sig.lot_size else ""),
+                    f"🎯 Entry: {entry_str}",
+                ]
+                if sig.stop_loss or sig.take_profit:
+                    lines.append(
+                        f"🛡️ SL: {sig.stop_loss or '—'} → TP: {sig.take_profit or '—'}"
+                    )
+                if res.order_id:
+                    lines.append(f"🆔 Ticket: #{res.order_id}")
+            else:
+                lines = [
+                    "⚠️ Ordine fallito",
+                    "",
+                    f"📍 {sig.order_type} {sig.symbol}",
+                    f"❌ {res.error or 'Errore sconosciuto'}",
+                ]
+            try:
+                await tm.send_to_user(user_id, "\n".join(lines))
+            except Exception as _notify_exc:
+                ulog.warning("Alert trade fallito: %s", _notify_exc)
 
         # ── Step 7: registra ordini range nel watcher ─────────────────────────
         for result in results:
@@ -820,11 +898,65 @@ async def lifespan(app: FastAPI):
     vps_monitor.start()
     app.state.vps_monitor = vps_monitor
 
+    # ── Report settimanale (ogni lunedì alle 08:00 UTC) ──────────────────────
+
+    async def _send_weekly_reports() -> None:
+        users = await store.get_active_users()
+        for u in users:
+            uid = u["user_id"]
+            try:
+                summary = await closed_trade_store.get_last_week_summary(uid)
+                if summary["total_trades"] == 0:
+                    continue
+                pnl     = summary["total_profit"]
+                pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
+                now_utc    = datetime.now(timezone.utc)
+                week_start = (now_utc - timedelta(days=7)).strftime("%d/%m")
+                week_end   = (now_utc - timedelta(days=1)).strftime("%d/%m")
+                text = (
+                    f"📊 Report settimanale ({week_start}–{week_end})\n\n"
+                    f"📈 Operazioni: {summary['total_trades']} "
+                    f"({summary['wins']} win / {summary['losses']} loss)\n"
+                    f"🎯 Win rate: {summary['win_rate']}%\n"
+                    f"💰 P&L: {pnl_str}"
+                )
+                await asyncio.get_event_loop().run_in_executor(
+                    None, tm.notify_user, uid, text
+                )
+                logger.info("Report settimanale inviato a utente %s", uid)
+            except Exception as exc:
+                logger.warning("Report settimanale utente %s fallito: %s", uid, exc)
+
+    async def _weekly_report_loop() -> None:
+        while True:
+            try:
+                now        = datetime.now(timezone.utc)
+                days_ahead = (7 - now.weekday()) % 7
+                if days_ahead == 0 and now.hour >= 8:
+                    days_ahead = 7
+                next_run   = now.replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+                wait_secs  = (next_run - now).total_seconds()
+                logger.info(
+                    "Report settimanale: prossimo invio tra %.1f ore (%s UTC)",
+                    wait_secs / 3600, next_run.strftime("%a %Y-%m-%d %H:%M"),
+                )
+                await asyncio.sleep(wait_secs)
+                await _send_weekly_reports()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("Errore loop report settimanale: %s", exc, exc_info=True)
+                await asyncio.sleep(3600)
+
+    weekly_report_task = asyncio.create_task(_weekly_report_loop())
+    app.state.weekly_report_task = weekly_report_task
+
     logger.info("Trading Bot API pronta")
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
+    weekly_report_task.cancel()
     await vps_monitor.stop()
     await range_watcher.stop()
     await price_level_watcher.stop()
