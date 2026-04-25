@@ -189,6 +189,9 @@ class UpdateGroupSettingsBody(BaseModel):
     trading_hours_start:     int | None = Field(None, ge=0, le=23)
     trading_hours_end:       int | None = Field(None, ge=0, le=23)
     trading_hours_days:      list[str] | None = None
+    min_confidence:          int | None = Field(None, ge=0, le=100)
+    eco_calendar_enabled:    bool | None = None
+    eco_calendar_window:     int | None = Field(None, ge=5, le=120)
 
 
 @router.patch("/user/{user_id}/groups/{group_id}")
@@ -222,6 +225,113 @@ async def remove_user_group(
         raise HTTPException(status_code=404, detail=f"Gruppo {group_id} non trovato per l'utente")
     await store.delete_user_group(user_id, group_id)
     await _restart_listener(store, tm, user_id)
+    return {"ok": True}
+
+
+# ── Trust Score (Feature 4) ───────────────────────────────────────────────────
+
+def _compute_trust_score(trade_stats: dict, signal_stats: dict) -> dict:
+    """
+    Formula: win_rate*0.5 + volume_score + exec_rate*0.25
+    - win_rate (0-100) → 0-50 punti
+    - min(trades/30,1)*25 → 0-25 punti (volume)
+    - execution_success_rate (0-100) → 0-25 punti
+    """
+    total_trades = int(trade_stats.get("total_trades") or 0)
+    if total_trades == 0:
+        return {"score": None, "label": "Nessun dato"}
+    wins = int(trade_stats.get("wins") or 0)
+    win_rate     = wins / total_trades * 100
+    volume_score = min(total_trades / 30, 1.0) * 25
+    exec_rate    = float(signal_stats.get("execution_success_rate") or 0)
+    score        = round(win_rate * 0.5 + volume_score + exec_rate * 0.25)
+    score        = max(0, min(100, score))
+    if score >= 75:   label = "Eccellente"
+    elif score >= 55: label = "Buono"
+    elif score >= 35: label = "Discreto"
+    else:             label = "Basso"
+    return {"score": score, "label": label}
+
+
+@router.get("/trust-scores")
+async def get_trust_scores(
+    user_id: str = Query(..., description="Telegram user_id"),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Trust Score per ogni gruppo dell'utente (0-100, basato su win rate, volume, exec rate)."""
+    store              = request.app.state.user_store
+    log_store          = request.app.state.signal_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    groups = user.get("groups") or []
+    scores = []
+    for g in groups:
+        gid          = g["group_id"]
+        trade_stats  = await closed_trade_store.get_group_trade_stats(user_id, gid)
+        signal_stats = await log_store.get_stats_by_user_id(user_id, group_id=gid)
+        score_data   = _compute_trust_score(trade_stats, signal_stats)
+        scores.append({
+            "group_id":   gid,
+            "group_name": g["group_name"],
+            "score":      score_data["score"],
+            "label":      score_data["label"],
+            "trade_count": trade_stats.get("total_trades", 0),
+        })
+    return {"scores": scores}
+
+
+# ── Drawdown alert (Feature 6) ────────────────────────────────────────────────
+
+class DrawdownSettingsBody(BaseModel):
+    drawdown_alert_pct: float | None = Field(None, ge=0, le=100)
+
+
+@router.get("/user/{user_id}/drawdown-status")
+async def get_drawdown_status(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Stato drawdown: se il trading è sospeso e la soglia configurata."""
+    store = request.app.state.user_store
+    user  = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    paused    = user_id in request.app.state.drawdown_paused_users
+    threshold = user.get("drawdown_alert_pct")
+    return {"paused": paused, "threshold": threshold}
+
+
+@router.patch("/user/{user_id}/drawdown-settings")
+async def update_drawdown_settings(
+    user_id: str,
+    body: DrawdownSettingsBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Aggiorna la soglia drawdown giornaliero (% balance). 0 o null = disabilitato."""
+    store = request.app.state.user_store
+    user  = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    pct = body.drawdown_alert_pct
+    await store.update_drawdown_alert(user_id, pct if pct and pct > 0 else None)
+    return {"ok": True}
+
+
+@router.post("/user/{user_id}/resume-drawdown")
+async def resume_drawdown(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Riprende il trading dopo una sospensione per drawdown."""
+    store = request.app.state.user_store
+    user  = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    request.app.state.drawdown_paused_users.discard(user_id)
     return {"ok": True}
 
 

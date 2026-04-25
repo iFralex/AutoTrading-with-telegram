@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { api, type DashboardUserResponse, type UserGroup, type Group } from "@/src/lib/api"
+import { api, type DashboardUserResponse, type UserGroup, type Group, type TrustScore } from "@/src/lib/api"
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
   Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw, Copy,
+  ShieldAlert, Play,
 } from "lucide-react"
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -18,6 +19,23 @@ export function SettingsPage({
 }) {
   const { user } = data
 
+  const [trustScores, setTrustScores] = useState<Record<number, TrustScore>>({})
+  const [drawdownStatus, setDrawdownStatus] = useState<{ paused: boolean; threshold: number | null } | null>(null)
+  const [drawdownLoading, setDrawdownLoading] = useState(false)
+
+  useEffect(() => {
+    api.getTrustScores(user.user_id)
+      .then(res => {
+        const map: Record<number, TrustScore> = {}
+        for (const s of res.scores) map[s.group_id] = s
+        setTrustScores(map)
+      })
+      .catch(() => {})
+    api.getDrawdownStatus(user.user_id)
+      .then(res => setDrawdownStatus(res))
+      .catch(() => {})
+  }, [user.user_id])
+
   const patchGroups = (groups: UserGroup[]) =>
     onUserUpdate({ ...data, user: { ...user, groups } })
 
@@ -30,6 +48,26 @@ export function SettingsPage({
   const addGroup = (g: UserGroup) =>
     patchGroups([...user.groups, g])
 
+  const handleUpdateDrawdown = async (pct: number | null) => {
+    setDrawdownLoading(true)
+    try {
+      await api.updateDrawdownSettings(user.user_id, pct)
+      setDrawdownStatus(prev => prev ? { ...prev, threshold: pct } : { paused: false, threshold: pct })
+    } finally {
+      setDrawdownLoading(false)
+    }
+  }
+
+  const handleResumeDrawdown = async () => {
+    setDrawdownLoading(true)
+    try {
+      await api.resumeDrawdown(user.user_id)
+      setDrawdownStatus(prev => prev ? { ...prev, paused: false } : null)
+    } finally {
+      setDrawdownLoading(false)
+    }
+  }
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-8">
       <div>
@@ -39,6 +77,14 @@ export function SettingsPage({
         </p>
       </div>
 
+      {/* ── Protezione account (drawdown) ───────────────────────────────── */}
+      <DrawdownProtectionSection
+        status={drawdownStatus}
+        loading={drawdownLoading}
+        onUpdate={handleUpdateDrawdown}
+        onResume={handleResumeDrawdown}
+      />
+
       {/* ── Lista gruppi ─────────────────────────────────────────────────── */}
       <div className="space-y-4">
         {user.groups.map(group => (
@@ -46,6 +92,7 @@ export function SettingsPage({
             key={group.group_id}
             group={group}
             userId={user.user_id}
+            trustScore={trustScores[group.group_id] ?? null}
             onUpdate={updateGroup}
             onRemove={() => removeGroup(group.group_id)}
             canRemove={user.groups.length > 1}
@@ -63,11 +110,131 @@ export function SettingsPage({
   )
 }
 
+// ── Drawdown protection section ───────────────────────────────────────────────
+
+function DrawdownProtectionSection({
+  status,
+  loading,
+  onUpdate,
+  onResume,
+}: {
+  status: { paused: boolean; threshold: number | null } | null
+  loading: boolean
+  onUpdate: (pct: number | null) => Promise<void>
+  onResume: () => Promise<void>
+}) {
+  const [editing, setEditing]   = useState(false)
+  const [draft, setDraft]       = useState<string>("")
+  const [saveErr, setSaveErr]   = useState<string | null>(null)
+  const [saved, setSaved]       = useState(false)
+
+  const startEdit = () => {
+    setDraft(status?.threshold != null ? String(status.threshold) : "")
+    setSaveErr(null)
+    setEditing(true)
+  }
+
+  const save = async () => {
+    const pct = draft.trim() === "" ? null : parseFloat(draft)
+    if (pct !== null && (isNaN(pct) || pct < 0 || pct > 100)) {
+      setSaveErr("Inserisci un valore tra 0 e 100")
+      return
+    }
+    setSaveErr(null)
+    try {
+      await onUpdate(pct)
+      setEditing(false)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: unknown) {
+      setSaveErr(e instanceof Error ? e.message : "Errore")
+    }
+  }
+
+  const threshold = status?.threshold ?? null
+  const paused    = status?.paused    ?? false
+
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-card/40 overflow-hidden">
+      <div className="px-5 py-4 flex items-center gap-3">
+        <ShieldAlert className={`w-4 h-4 shrink-0 ${paused ? "text-red-400" : "text-muted-foreground"}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">Protezione account</p>
+          <p className="text-xs text-muted-foreground">Sospende il trading se il drawdown giornaliero supera la soglia</p>
+        </div>
+        {paused && (
+          <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-600/15 border border-red-500/30 text-red-400 uppercase tracking-wide">
+            Sospeso
+          </span>
+        )}
+      </div>
+
+      <div className="border-t border-white/[0.06] px-5 py-4 space-y-3">
+        {paused && (
+          <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-600/8 px-4 py-3">
+            <p className="flex-1 text-xs text-red-300">Trading sospeso: soglia drawdown raggiunta. Riprendi manualmente quando sei pronto.</p>
+            <button
+              onClick={onResume}
+              disabled={loading}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+            >
+              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+              Riprendi
+            </button>
+          </div>
+        )}
+
+        {!editing ? (
+          <div className="flex items-center justify-between gap-3">
+            <p className={`flex-1 text-sm font-mono rounded-lg border px-3 py-2.5 ${
+              threshold != null && threshold > 0
+                ? "bg-black/15 border-white/[0.07] text-foreground/80"
+                : "bg-black/10 border-white/[0.05] text-muted-foreground/50 italic"
+            }`}>
+              {threshold != null && threshold > 0 ? `Soglia: ${threshold}% del balance` : "Disabilitato"}
+            </p>
+            <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
+              {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                placeholder="Es: 5 (vuoto = disabilitato)"
+                className="flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-muted-foreground/30"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground">Percentuale massima di perdita giornaliera sul balance. Vuoto o 0 = funzione disabilitata.</p>
+            {saveErr && <p className="text-xs text-red-400">{saveErr}</p>}
+            <div className="flex items-center gap-2">
+              <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
+                <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+              </button>
+              <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
+                <X className="w-3 h-3" />Annulla
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Group card ────────────────────────────────────────────────────────────────
 
 function GroupCard({
   group,
   userId,
+  trustScore,
   onUpdate,
   onRemove,
   canRemove,
@@ -75,6 +242,7 @@ function GroupCard({
 }: {
   group: UserGroup
   userId: string
+  trustScore: TrustScore | null
   onUpdate: (g: UserGroup) => void
   onRemove: () => void
   canRemove: boolean
@@ -117,6 +285,9 @@ function GroupCard({
       trading_hours_start:     src.trading_hours_start,
       trading_hours_end:       src.trading_hours_end,
       trading_hours_days:      src.trading_hours_days,
+      min_confidence:          src.min_confidence,
+      eco_calendar_enabled:    src.eco_calendar_enabled,
+      eco_calendar_window:     src.eco_calendar_window,
     }
     try {
       await api.updateUserGroup(userId, group.group_id, fields)
@@ -147,7 +318,10 @@ function GroupCard({
       <div className="px-5 py-4 flex items-center gap-3">
         <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate">{group.group_name}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-foreground truncate">{group.group_name}</p>
+            <TrustScoreTag score={trustScore} />
+          </div>
           <p className="text-xs text-muted-foreground font-mono">ID: {group.group_id}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -329,6 +503,37 @@ function GroupCard({
                   trading_hours_start:   v.start,
                   trading_hours_end:     v.end,
                   trading_hours_days:    v.days,
+                })
+              }}
+            />
+          </GroupSettingRow>
+
+          <GroupSettingRow title="Soglia confidenza AI" badge="filtro"
+            description="Scarta i segnali con confidenza di estrazione inferiore alla soglia (0 = accetta tutto)">
+            <ConfidenceField
+              value={group.min_confidence ?? 0}
+              onSave={async v => {
+                await api.updateUserGroup(userId, group.group_id, { min_confidence: v })
+                patch({ min_confidence: v })
+              }}
+            />
+          </GroupSettingRow>
+
+          <GroupSettingRow title="Calendario economico" badge="filtro"
+            description="Blocca i segnali nelle N minuti prima e dopo eventi macroeconomici ad alto impatto (ForexFactory)">
+            <EcoCalendarField
+              value={{
+                enabled: group.eco_calendar_enabled ?? false,
+                window:  group.eco_calendar_window  ?? 30,
+              }}
+              onSave={async v => {
+                await api.updateUserGroup(userId, group.group_id, {
+                  eco_calendar_enabled: v.enabled,
+                  eco_calendar_window:  v.window,
+                })
+                patch({
+                  eco_calendar_enabled: v.enabled,
+                  eco_calendar_window:  v.window,
                 })
               }}
             />
@@ -917,6 +1122,198 @@ function TradingHoursField({
           <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50">
+          <X className="w-3 h-3" />Annulla
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Trust Score tag ───────────────────────────────────────────────────────────
+
+function TrustScoreTag({ score }: { score: TrustScore | null }) {
+  if (score === null) return null
+  if (score.score === null) return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded border bg-white/[0.03] border-white/[0.07] text-muted-foreground/50 font-medium">
+      —
+    </span>
+  )
+  const color =
+    score.score >= 75 ? "text-emerald-400 border-emerald-500/30 bg-emerald-600/8"
+    : score.score >= 55 ? "text-blue-400 border-blue-500/30 bg-blue-600/8"
+    : score.score >= 35 ? "text-amber-400 border-amber-500/30 bg-amber-600/8"
+    : "text-red-400 border-red-500/30 bg-red-600/8"
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold shrink-0 ${color}`}
+      title={`Trust Score: ${score.score}/100 — ${score.label} (${score.trade_count} trade)`}>
+      TS {score.score}
+    </span>
+  )
+}
+
+// ── Confidence filter field ───────────────────────────────────────────────────
+
+function ConfidenceField({ value, onSave }: { value: number; onSave: (v: number) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState(value)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [saved, setSaved]     = useState(false)
+
+  const label = (v: number) =>
+    v === 0 ? "0 — Accetta tutti i segnali"
+    : v >= 80 ? `${v} — Solo segnali molto chiari`
+    : v >= 50 ? `${v} — Segnali sufficientemente chiari`
+    : `${v} — Soglia bassa`
+
+  const save = async () => {
+    setLoading(true); setError(null)
+    try {
+      await onSave(draft)
+      setEditing(false); setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <p className={`text-sm font-mono flex-1 rounded-lg border px-3 py-2.5 ${
+          value > 0
+            ? "bg-black/15 border-white/[0.07] text-foreground/80"
+            : "bg-black/10 border-white/[0.05] text-muted-foreground/50 italic"
+        }`}>{label(value)}</p>
+        <button onClick={() => { setDraft(value); setEditing(true) }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>0 — tutto</span>
+          <span className="font-mono font-semibold text-foreground text-sm">{draft}</span>
+          <span>100 — massima</span>
+        </div>
+        <input type="range" min={0} max={100} step={10} value={draft} onChange={e => setDraft(Number(e.target.value))} className="w-full accent-indigo-500 cursor-pointer" />
+        <p className="text-xs text-muted-foreground italic">{label(draft)}</p>
+      </div>
+      {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
+          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+        </button>
+        <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
+          <X className="w-3 h-3" />Annulla
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Eco calendar field ────────────────────────────────────────────────────────
+
+function EcoCalendarField({
+  value,
+  onSave,
+}: {
+  value: { enabled: boolean; window: number }
+  onSave: (v: { enabled: boolean; window: number }) => Promise<void>
+}) {
+  const [editing, setEditing]  = useState(false)
+  const [enabled, setEnabled]  = useState(value.enabled)
+  const [window_, setWindow]   = useState(value.window)
+  const [loading, setLoading]  = useState(false)
+  const [error, setError]      = useState<string | null>(null)
+  const [saved, setSaved]      = useState(false)
+
+  const startEdit = () => {
+    setEnabled(value.enabled); setWindow(value.window)
+    setError(null); setEditing(true)
+  }
+
+  const save = async () => {
+    setLoading(true); setError(null)
+    try {
+      await onSave({ enabled, window: window_ })
+      setEditing(false); setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Errore")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const summaryLabel = () =>
+    !value.enabled
+      ? "Disabilitato"
+      : `Attivo — finestra ±${value.window} minuti`
+
+  if (!editing) {
+    return (
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 bg-black/15 border border-white/[0.07] rounded-lg px-3 py-2.5">
+          <p className={`text-sm font-mono ${value.enabled ? "text-foreground/80" : "text-muted-foreground/50 italic"}`}>
+            {summaryLabel()}
+          </p>
+        </div>
+        <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        {[
+          { val: false, label: "Disabilitato", desc: "Non controlla il calendario economico" },
+          { val: true,  label: "Attivo",       desc: "Blocca i segnali vicino a eventi high-impact" },
+        ].map(opt => (
+          <button key={String(opt.val)} type="button" onClick={() => setEnabled(opt.val)}
+            className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
+              enabled === opt.val
+                ? "border-indigo-500/40 bg-indigo-600/8 text-foreground"
+                : "border-white/[0.07] text-muted-foreground hover:border-white/[0.15] hover:text-foreground hover:bg-white/[0.02]"
+            }`}>
+            <div className="flex items-center gap-2">
+              <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${enabled === opt.val ? "border-indigo-400 bg-indigo-400/30" : "border-white/20"}`} />
+              <span className="text-sm font-medium">{opt.label}</span>
+            </div>
+            <p className="text-xs mt-0.5 ml-[22px] opacity-65">{opt.desc}</p>
+          </button>
+        ))}
+      </div>
+
+      {enabled && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1.5">Finestra di blocco (minuti prima/dopo l&apos;evento)</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min={5} max={120} value={window_}
+              onChange={e => setWindow(Math.min(120, Math.max(5, Number(e.target.value))))}
+              className="w-24 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+            <span className="text-xs text-muted-foreground">min (5–120)</span>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
+          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+        </button>
+        <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
           <X className="w-3 h-3" />Annulla
         </button>
       </div>

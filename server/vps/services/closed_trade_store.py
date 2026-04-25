@@ -394,6 +394,86 @@ class ClosedTradeStore:
             "cumulative_pnl":        cumulative_pnl[-300:],  # max 300 punti per il grafico
         }
 
+    async def get_today_pnl(self, user_id: str) -> float:
+        """Ritorna il P&L totale di oggi (UTC)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                """
+                SELECT COALESCE(SUM(profit), 0)
+                FROM closed_trades
+                WHERE user_id = ? AND DATE(close_time) = DATE('now')
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
+
+    async def get_group_trade_stats(self, user_id: str, group_id: int) -> dict:
+        """Statistiche trade per un gruppo specifico (via signal_group_id cross-table JOIN)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                """
+                WITH group_signal_ids AS (
+                    SELECT DISTINCT signal_group_id FROM signal_logs
+                    WHERE user_id = ? AND group_id = ? AND signal_group_id IS NOT NULL
+                )
+                SELECT
+                    COUNT(*)                                                        AS total_trades,
+                    COALESCE(SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END), 0)      AS wins,
+                    COALESCE(SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END), 0)      AS losses,
+                    COALESCE(SUM(profit), 0)                                        AS total_profit
+                FROM closed_trades
+                WHERE user_id = ?
+                  AND signal_group_id IN (SELECT signal_group_id FROM group_signal_ids)
+                """,
+                (user_id, group_id, user_id),
+            )
+            row = await cur.fetchone()
+        if row is None:
+            return {"total_trades": 0, "wins": 0, "losses": 0, "total_profit": 0.0}
+        total  = int(row[0] or 0)
+        wins   = int(row[1] or 0)
+        losses = int(row[2] or 0)
+        profit = float(row[3] or 0)
+        return {
+            "total_trades": total,
+            "wins":         wins,
+            "losses":       losses,
+            "win_rate":     round(wins / total * 100, 1) if total else 0.0,
+            "total_profit": round(profit, 2),
+        }
+
+    async def get_monthly_summary(self, user_id: str, year: int, month: int) -> dict:
+        """Riepilogo trade di un mese specifico (per il report mensile)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT
+                    COUNT(*)                                           AS total_trades,
+                    SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END)      AS wins,
+                    SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END)      AS losses,
+                    SUM(profit)                                        AS total_profit
+                FROM closed_trades
+                WHERE user_id = ?
+                  AND strftime('%Y', close_time) = ?
+                  AND strftime('%m', close_time) = ?
+                """,
+                (user_id, str(year), f"{month:02d}"),
+            )
+            row = await cur.fetchone()
+        total  = int(row["total_trades"] or 0)
+        wins   = int(row["wins"]         or 0)
+        losses = int(row["losses"]       or 0)
+        profit = float(row["total_profit"] or 0)
+        return {
+            "total_trades": total,
+            "wins":         wins,
+            "losses":       losses,
+            "win_rate":     round(wins / total * 100, 1) if total else 0.0,
+            "total_profit": round(profit, 2),
+        }
+
     async def get_last_week_summary(self, user_id: str) -> dict:
         """Ritorna un riepilogo dei trade degli ultimi 7 giorni per il report settimanale."""
         from datetime import datetime, timezone, timedelta

@@ -50,6 +50,7 @@ from vps.services.ai_log_store import AILogStore
 from vps.services.backtest_store import BacktestStore
 from vps.services.backtest_engine import BacktestEngine
 from vps.services.vps_monitor import VpsMonitor
+from vps.services.economic_calendar import EconomicCalendarService
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -191,6 +192,12 @@ async def lifespan(app: FastAPI):
     # Task asyncio attivi per run_id (usato per la cancellazione)
     app.state.backtest_tasks: dict[str, object] = {}
 
+    # Utenti con trading sospeso per drawdown alert (reset a mezzanotte UTC)
+    app.state.drawdown_paused_users: set[str] = set()
+
+    # Calendario economico ForexFactory (Feature 7)
+    eco_calendar = EconomicCalendarService(refresh_hours=6)
+
     # Range order watcher
     range_watcher = RangeOrderWatcher()
     range_watcher.start()
@@ -272,6 +279,43 @@ async def lifespan(app: FastAPI):
             ticket = event_data.get("ticket")
             if ticket:
                 price_level_watcher.remove_by_ticket(user_id, int(ticket))
+
+            # ── Drawdown alert check ──────────────────────────────────────────
+            if user_id not in app.state.drawdown_paused_users:
+                try:
+                    dd_user = await store.get_user(user_id)
+                    threshold_pct = dd_user.get("drawdown_alert_pct") if dd_user else None
+                    if threshold_pct and threshold_pct > 0:
+                        today_pnl = await closed_trade_store.get_today_pnl(user_id)
+                        if today_pnl < 0:
+                            mt5_l = dd_user.get("mt5_login")
+                            mt5_p = dd_user.get("mt5_password")
+                            mt5_s = dd_user.get("mt5_server")
+                            if mt5_l and mt5_p and mt5_s:
+                                acc = await mt5_trader.get_account_info(
+                                    user_id=user_id,
+                                    mt5_login=int(mt5_l),
+                                    mt5_password=mt5_p,
+                                    mt5_server=mt5_s,
+                                )
+                                if acc:
+                                    balance   = acc.get("balance", 0)
+                                    loss_pct  = abs(today_pnl) / balance * 100 if balance > 0 else 0
+                                    if loss_pct >= threshold_pct:
+                                        app.state.drawdown_paused_users.add(user_id)
+                                        ulog.warning(
+                                            "Utente %s: drawdown %.1f%% >= soglia %.1f%% — trading sospeso",
+                                            user_id, loss_pct, threshold_pct,
+                                        )
+                                        await tm.send_to_user(
+                                            user_id,
+                                            f"⛔ Trading sospeso\n\n"
+                                            f"📉 Drawdown giornaliero: {loss_pct:.1f}%\n"
+                                            f"🔴 Soglia: {threshold_pct}%\n\n"
+                                            f"Riprendi manualmente dal dashboard quando sei pronto.",
+                                        )
+                except Exception as dd_exc:
+                    ulog.warning("Drawdown check utente %s fallito: %s", user_id, dd_exc)
 
         if strategy_executor is None:
             return
@@ -359,6 +403,14 @@ async def lifespan(app: FastAPI):
         if user_id in app.state.backtesting_users:
             ulog.info(
                 "Utente %s in backtest — messaggio live ignorato per evitare ordini reali",
+                user_id,
+            )
+            return
+
+        # Blocca il trading se l'utente è sospeso per drawdown alert
+        if user_id in app.state.drawdown_paused_users:
+            ulog.info(
+                "Utente %s: trading sospeso per drawdown alert — messaggio ignorato",
                 user_id,
             )
             return
@@ -498,6 +550,26 @@ async def lifespan(app: FastAPI):
                 await _save_log()
                 return
 
+        # ── Step 2.6: verifica calendario economico ──────────────────────────
+        if group_settings and group_settings.get("eco_calendar_enabled"):
+            try:
+                await eco_calendar.refresh_if_needed()
+                window = int((group_settings or {}).get("eco_calendar_window") or 30)
+                blocked, event_str = eco_calendar.is_blocked(
+                    datetime.now(timezone.utc), window
+                )
+                if blocked:
+                    ulog.info(
+                        "Utente %s: segnale ignorato — evento macroeconomico (%s, finestra %dm)",
+                        user_id, event_str, window,
+                    )
+                    log_error_step = "eco_calendar"
+                    log_error_msg  = f"Segnale bloccato: evento macroeconomico ({event_str})"
+                    await _save_log()
+                    return
+            except Exception as _eco_exc:
+                ulog.warning("Controllo calendario economico fallito: %s", _eco_exc)
+
         log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
         if not log_has_mt5_creds:
             ulog.warning(
@@ -551,6 +623,23 @@ async def lifespan(app: FastAPI):
             return
 
         log_signals = [asdict(s) for s in signals]
+
+        # ── Step 4.5: filtro confidenza AI ────────────────────────────────────
+        min_confidence = int((group_settings or {}).get("min_confidence") or 0)
+        if min_confidence > 0:
+            filtered = [s for s in signals if s.confidence is None or s.confidence >= min_confidence]
+            if len(filtered) < len(signals):
+                ulog.info(
+                    "Utente %s: %d segnali filtrati per confidenza AI < %d",
+                    user_id, len(signals) - len(filtered), min_confidence,
+                )
+            if not filtered:
+                log_error_step = "confidence_filter"
+                log_error_msg  = f"Tutti i segnali filtrati (confidenza AI < {min_confidence})"
+                await _save_log()
+                return
+            signals     = filtered
+            log_signals = [asdict(s) for s in signals]
 
         # ── Step 5 (opzionale): filtro pre-trade con StrategyExecutor ─────────
         if strategy_executor and management_strategy:
@@ -951,12 +1040,123 @@ async def lifespan(app: FastAPI):
     weekly_report_task = asyncio.create_task(_weekly_report_loop())
     app.state.weekly_report_task = weekly_report_task
 
+    # ── Reset mezzanotte: svuota drawdown_paused_users ogni 00:00 UTC ────────
+
+    async def _midnight_reset_loop() -> None:
+        while True:
+            try:
+                now      = datetime.now(timezone.utc)
+                tomorrow = (now + timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                await asyncio.sleep((tomorrow - now).total_seconds())
+                cleared = len(app.state.drawdown_paused_users)
+                app.state.drawdown_paused_users.clear()
+                if cleared:
+                    logger.info("Midnight reset: %d utenti rimossi da drawdown_paused", cleared)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("Midnight reset loop errore: %s", exc, exc_info=True)
+                await asyncio.sleep(3600)
+
+    midnight_reset_task = asyncio.create_task(_midnight_reset_loop())
+    app.state.midnight_reset_task = midnight_reset_task
+
+    # ── Report mensile (primo del mese alle 09:00 UTC) ────────────────────────
+
+    async def _fetch_btc_monthly_return() -> float | None:
+        """Rendimento % BTC del mese precedente via Binance public API."""
+        import urllib.request as _urllib_req
+        import json as _json
+        try:
+            def _fetch_sync():
+                url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1M&limit=3"
+                req = _urllib_req.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with _urllib_req.urlopen(req, timeout=10) as resp:
+                    return _json.loads(resp.read())
+            klines = await asyncio.get_event_loop().run_in_executor(None, _fetch_sync)
+            if len(klines) >= 2:
+                prev_close = float(klines[-2][4])
+                curr_close = float(klines[-1][4])
+                if prev_close > 0:
+                    return round((curr_close - prev_close) / prev_close * 100, 2)
+        except Exception as exc:
+            logger.warning("BTC monthly return fetch fallito: %s", exc)
+        return None
+
+    async def _send_monthly_reports() -> None:
+        now     = datetime.now(timezone.utc)
+        month   = now.month - 1 if now.month > 1 else 12
+        year_m  = now.year if now.month > 1 else now.year - 1
+        btc_ret = await _fetch_btc_monthly_return()
+        month_names = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"]
+        users   = await store.get_active_users()
+        for u in users:
+            uid = u["user_id"]
+            try:
+                summary = await closed_trade_store.get_monthly_summary(uid, year_m, month)
+                if summary["total_trades"] == 0:
+                    continue
+                pnl     = summary["total_profit"]
+                pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
+                lines   = [
+                    f"📅 Report mensile — {month_names[month-1]} {year_m}",
+                    "",
+                    f"📈 Operazioni: {summary['total_trades']} "
+                    f"({summary['wins']} win / {summary['losses']} loss)",
+                    f"🎯 Win rate: {summary['win_rate']}%",
+                    f"💰 P&L: {pnl_str}",
+                ]
+                if btc_ret is not None:
+                    btc_str = f"+{btc_ret:.2f}%" if btc_ret >= 0 else f"{btc_ret:.2f}%"
+                    lines.append(f"₿  BTC mese: {btc_str}")
+                text = "\n".join(lines)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, tm.notify_user, uid, text
+                )
+                logger.info("Report mensile inviato a utente %s", uid)
+            except Exception as exc:
+                logger.warning("Report mensile utente %s fallito: %s", uid, exc)
+
+    async def _monthly_report_loop() -> None:
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                if now.month == 12:
+                    next_run = now.replace(
+                        year=now.year + 1, month=1, day=1,
+                        hour=9, minute=0, second=0, microsecond=0,
+                    )
+                else:
+                    next_run = now.replace(
+                        month=now.month + 1, day=1,
+                        hour=9, minute=0, second=0, microsecond=0,
+                    )
+                wait_secs = (next_run - now).total_seconds()
+                logger.info(
+                    "Report mensile: prossimo invio tra %.1f ore (%s UTC)",
+                    wait_secs / 3600, next_run.strftime("%Y-%m-%d %H:%M"),
+                )
+                await asyncio.sleep(wait_secs)
+                await _send_monthly_reports()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("Errore loop report mensile: %s", exc, exc_info=True)
+                await asyncio.sleep(3600)
+
+    monthly_report_task = asyncio.create_task(_monthly_report_loop())
+    app.state.monthly_report_task = monthly_report_task
+
     logger.info("Trading Bot API pronta")
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Arresto in corso...")
     weekly_report_task.cancel()
+    midnight_reset_task.cancel()
+    monthly_report_task.cancel()
     await vps_monitor.stop()
     await range_watcher.stop()
     await price_level_watcher.stop()

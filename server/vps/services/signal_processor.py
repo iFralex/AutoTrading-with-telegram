@@ -82,6 +82,7 @@ class TradeSignal:
     lot_size:    float | None               # None → usa il default dell'utente
     order_mode:  str                        # "MARKET" | "LIMIT" | "STOP"
     prices:      list[float] | None = None  # livelli prezzo che triggerano la management_strategy
+    confidence:  int | None = None          # 0-100: qualità dell'estrazione stimata dall'AI
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -112,6 +113,8 @@ Each element must have these exact keys:
   "order_mode"  : string               — "MARKET" if no entry price given, otherwise "LIMIT"
   "prices"      : [number]|null        — price levels at which the management strategy should be
                                          triggered for this specific signal; null if not applicable
+  "confidence"  : integer              — extraction confidence 0-100 (100 = explicit, clear signal;
+                                         0 = very ambiguous or partial data)
 
 Rules:
 - If multiple Take Profit levels exist, emit one object per TP
@@ -119,6 +122,8 @@ Rules:
 - If an entry range is given (e.g. "4652 - 4656"), set entry_price to [4652, 4656]; do NOT average the values.
 - If a single entry price is given, set entry_price to that number (not an array).
 - Preserve all numeric values exactly as written; do not round or convert.
+- "confidence": rate the extraction quality. 100 = all fields explicit and unambiguous;
+  lower values for missing fields, unclear direction, or ambiguous prices.
 - "prices": if a management strategy is provided, derive any price levels expressible from
   this signal's entry_price, stop_loss, and take_profit (e.g. "50% between entry and TP"
   → entry + (take_profit - entry) * 0.5). Use the single numeric entry price for the
@@ -404,6 +409,8 @@ class SignalProcessor:
         signals: list[TradeSignal] = []
         for item in raw:
             try:
+                raw_conf = item.get("confidence")
+                conf = int(raw_conf) if raw_conf is not None else None
                 sig = TradeSignal(
                     symbol      = str(item["symbol"]).strip(),
                     order_type  = str(item["order_type"]).upper().strip(),
@@ -413,6 +420,7 @@ class SignalProcessor:
                     lot_size    = _to_float(item.get("lot_size")),
                     order_mode  = str(item.get("order_mode", "LIMIT")).upper(),
                     prices      = _parse_prices(item.get("prices")),
+                    confidence  = max(0, min(100, conf)) if conf is not None else None,
                 )
                 if sig.symbol and sig.order_type in ("BUY", "SELL"):
                     signals.append(sig)

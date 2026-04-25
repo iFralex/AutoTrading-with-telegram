@@ -163,8 +163,19 @@ export interface UserGroup {
   trading_hours_start: number | null
   trading_hours_end: number | null
   trading_hours_days: string[] | null
+  min_confidence: number
+  eco_calendar_enabled: boolean
+  eco_calendar_window: number
   active: boolean
   created_at: string
+}
+
+export interface TrustScore {
+  group_id:    number
+  group_name:  string
+  score:       number | null
+  label:       string
+  trade_count: number
 }
 
 export interface DashboardUser {
@@ -180,6 +191,7 @@ export interface DashboardUser {
   mt5_server: string | null
   active: boolean
   created_at: string
+  drawdown_alert_pct: number | null
   groups: UserGroup[]
 }
 
@@ -563,7 +575,8 @@ export const api = {
       "group_name" | "sizing_strategy" | "management_strategy" |
       "range_entry_pct" | "entry_if_favorable" |
       "deletion_strategy" | "extraction_instructions" |
-      "trading_hours_enabled" | "trading_hours_start" | "trading_hours_end" | "trading_hours_days"
+      "trading_hours_enabled" | "trading_hours_start" | "trading_hours_end" | "trading_hours_days" |
+      "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window"
     >>
   ) {
     return call<{ ok: boolean }>(
@@ -628,6 +641,43 @@ export const api = {
     return call<{ trades: ClosedTrade[] }>(
       "GET",
       `/api/dashboard/recent-trades?user_id=${encodeURIComponent(userId)}&limit=${limit}`
+    )
+  },
+
+  // ── Trust Score (Feature 4) ───────────────────────────────────────────────
+
+  /** Trust Score per ogni gruppo: win rate, volume e exec rate aggregati. */
+  getTrustScores(userId: string) {
+    return call<{ scores: TrustScore[] }>(
+      "GET",
+      `/api/dashboard/trust-scores?user_id=${encodeURIComponent(userId)}`
+    )
+  },
+
+  // ── Drawdown alert (Feature 6) ────────────────────────────────────────────
+
+  /** Stato drawdown: se il trading è sospeso e la soglia configurata. */
+  getDrawdownStatus(userId: string) {
+    return call<{ paused: boolean; threshold: number | null }>(
+      "GET",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/drawdown-status`
+    )
+  },
+
+  /** Aggiorna la soglia drawdown giornaliero (% balance). null = disabilitato. */
+  updateDrawdownSettings(userId: string, pct: number | null) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/drawdown-settings`,
+      { drawdown_alert_pct: pct }
+    )
+  },
+
+  /** Riprende il trading dopo una sospensione per drawdown. */
+  resumeDrawdown(userId: string) {
+    return call<{ ok: boolean }>(
+      "POST",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/resume-drawdown`
     )
   },
 
