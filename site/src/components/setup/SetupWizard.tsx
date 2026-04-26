@@ -35,7 +35,6 @@ function ErrBox({ msg }: { msg: string }) {
 const PLAN_ORDER: PlanId[] = ["core", "pro", "elite"]
 
 const FIELD_PLAN_MAP: { field: keyof SetupData; label: string; minPlan: PlanId; isSet?: (d: SetupData) => boolean }[] = [
-  { field: "extractionInstructions", label: "AI extraction instructions",   minPlan: "pro"   },
   { field: "minConfidence",          label: "AI confidence threshold",      minPlan: "pro",   isSet: d => Number(d.minConfidence) > 0 },
   { field: "managementStrategy",     label: "Position management",          minPlan: "elite" },
   { field: "deletionStrategy",       label: "Signal deletion handling",     minPlan: "elite" },
@@ -879,6 +878,18 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           </div>
         </div>
 
+        {/* AI extraction instructions — Core */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI extraction instructions</span>
+            <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+            <PlanBadge plan="core" />
+          </div>
+          <TA id="extract" value={data.extractionInstructions} onChange={v => update({ extractionInstructions: v })} placeholder={"Example: " + EXTRACT_EX[0]} />
+          <p className="text-xs text-white/22 mt-1.5">Injected into the AI signal parsing prompt. Use to normalize broker symbol names.</p>
+          <div className="space-y-1.5 mt-2">{EXTRACT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ extractionInstructions: p })} />)}</div>
+        </div>
+
         {/* Advanced toggle */}
         <button
           onClick={() => setShowAdv(v => !v)}
@@ -898,17 +909,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
 
         {showAdv && (
           <div className="space-y-6 pt-1">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI extraction instructions</span>
-                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-                <PlanBadge plan="pro" />
-              </div>
-              <TA id="extract" value={data.extractionInstructions} onChange={v => update({ extractionInstructions: v })} placeholder={"Example: " + EXTRACT_EX[0]} />
-              <p className="text-xs text-white/22 mt-1.5">Injected into the AI signal parsing prompt. Use to normalize broker symbol names.</p>
-              <div className="space-y-1.5 mt-2">{EXTRACT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ extractionInstructions: p })} />)}</div>
-            </div>
-
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Position management</span>
@@ -1161,7 +1161,7 @@ function PaymentStep({ data, update, onNext, onBack }: StepProps) {
     { label: "Position sizing",     value: "Configured",                                             minPlan: "core"  as PlanId, show: !!data.sizingStrategy },
     { label: "Range entry position",        value: `${data.rangeEntryPct}%`,                                         minPlan: "core"  as PlanId, show: Number(data.rangeEntryPct) !== 50 },
     { label: "Market entry if favorable",   value: "Enabled",                                                        minPlan: "core"  as PlanId, show: data.entryIfFavorable },
-    { label: "AI extraction rules",         value: "Configured",                                                     minPlan: "pro"   as PlanId, show: !!data.extractionInstructions },
+    { label: "AI extraction rules",         value: "Configured",                                                     minPlan: "core"  as PlanId, show: !!data.extractionInstructions },
     { label: "AI confidence threshold",     value: `≥ ${data.minConfidence}`,                                        minPlan: "pro"   as PlanId, show: Number(data.minConfidence) > 0 },
     { label: "Position management",         value: "Configured",                                                     minPlan: "elite" as PlanId, show: !!data.managementStrategy },
     { label: "Deletion handling",           value: "Configured",                                                     minPlan: "elite" as PlanId, show: !!data.deletionStrategy },
