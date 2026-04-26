@@ -951,7 +951,8 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         sig.stop_loss, sig.take_profit,
       ].filter((v): v is number => typeof v === "number")
       if (levels.length >= 2) {
-        const margin = Math.abs(levels[levels.length - 1] - levels[0]) * 0.5
+        const range  = Math.max(...levels) - Math.min(...levels)
+        const margin = range * 0.1
         setPriceMin(String(Math.round((Math.min(...levels) - margin) * 100) / 100))
         setPriceMax(String(Math.round((Math.max(...levels) + margin) * 100) / 100))
       }
@@ -1023,7 +1024,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     setPricePath(prev => {
       if (prev.length === 0) return [pt]
       const last = prev[prev.length - 1]
-      if (Math.abs(pt.t - last.t) < 0.005) return prev
+      if (pt.t < last.t + 0.002) return prev   // only accept forward movement
       return [...prev, pt]
     })
   }
