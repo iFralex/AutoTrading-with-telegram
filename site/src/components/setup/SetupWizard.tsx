@@ -161,6 +161,8 @@ export interface SetupData {
   mt5Password: string
   mt5Server: string
   mt5AccountName: string
+  mt5Balance: string
+  mt5Currency: string
   sizingStrategy: string
   extractionInstructions: string
   managementStrategy: string
@@ -181,7 +183,7 @@ export interface SetupData {
 const EMPTY: SetupData = {
   plan: "", phone: "", apiId: "", apiHash: "", loginKey: "", code: "",
   userId: "", groupId: "", groupName: "", mt5Login: "", mt5Password: "",
-  mt5Server: "", mt5AccountName: "", sizingStrategy: "",
+  mt5Server: "", mt5AccountName: "", mt5Balance: "", mt5Currency: "", sizingStrategy: "",
   extractionInstructions: "", managementStrategy: "", deletionStrategy: "",
   rangeEntryPct: "50", entryIfFavorable: false,
   minConfidence: "0",
@@ -681,7 +683,7 @@ function MT5Step({ data, update, onNext, onBack }: StepProps) {
     try {
       const res = await api.verifyMt5(Number(data.mt5Login), data.mt5Password, data.mt5Server, data.phone || undefined)
       setVerified(res.account)
-      update({ mt5AccountName: res.account.name })
+      update({ mt5AccountName: res.account.name, mt5Balance: String(res.account.balance), mt5Currency: res.account.currency })
     } catch (ex) {
       if (ex instanceof ApiError && ex.status === 503) setMt5Unavail(true)
       else setErr(ex instanceof ApiError ? ex.message : "Verification failed.")
@@ -825,6 +827,16 @@ type SimResult = {
 
 type PricePt = { t: number; price: number }
 
+type PretradeDecision = {
+  signal_index: number; approved: boolean; reason: string
+  modified_lots?: number | null; modified_sl?: number | null; modified_tp?: number | null
+}
+type PretradeToolCall = { name: string; args: Record<string, unknown>; result: Record<string, unknown> }
+type PretradeResult = {
+  event_type: string; decisions: PretradeDecision[]
+  tool_calls: PretradeToolCall[]; final_response: string
+}
+
 const CHART_W = 560
 const CHART_H = 200
 const CHART_PAD = { top: 16, right: 16, bottom: 28, left: 52 }
@@ -899,6 +911,22 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   const [drawing, setDrawing]     = useState(false)
   const [simLoading, setSimLoading] = useState(false)
   const [simResult, setSimResult]   = useState<SimResult | null>(null)
+
+  // AI strategy mock panel
+  const [mockBalance,    setMockBalance]    = useState(() => data.mt5Balance || "10000")
+  const [mockEquity,     setMockEquity]     = useState(() => data.mt5Balance || "10000")
+  const [mockFreeMargin, setMockFreeMargin] = useState(() => data.mt5Balance || "10000")
+  const [mockLeverage,   setMockLeverage]   = useState("100")
+  const [mockCurrency,   setMockCurrency]   = useState(() => data.mt5Currency || "USD")
+  const [mockPositions,  setMockPositions]  = useState("0")
+  const [mockDailyPnl,   setMockDailyPnl]   = useState("0")
+  const [mockWeeklyPnl,  setMockWeeklyPnl]  = useState("0")
+  const [mockMonthlyPnl, setMockMonthlyPnl] = useState("0")
+  const [pretradeLoading, setPretradeLoading] = useState(false)
+  const [pretradeResult,  setPretradeResult]  = useState<PretradeResult | null>(null)
+  const [expandedToolCalls, setExpandedToolCalls] = useState(false)
+  const [eventSimLoading, setEventSimLoading] = useState<Record<string, boolean>>({})
+  const [eventSimResults, setEventSimResults] = useState<Record<string, PretradeResult>>({})
 
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -1019,6 +1047,56 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
     } catch {}
     setSimLoading(false)
+  }
+
+  function buildMockState() {
+    return {
+      balance: parseFloat(mockBalance) || 10000,
+      equity: parseFloat(mockEquity) || 10000,
+      free_margin: parseFloat(mockFreeMargin) || 10000,
+      leverage: parseInt(mockLeverage) || 100,
+      currency: mockCurrency || "USD",
+      open_positions: Array.from({ length: parseInt(mockPositions) || 0 }, (_, i) => ({
+        ticket: 100 + i, symbol: "XAUUSD", order_type: "BUY", lots: 0.1, profit: 0,
+      })),
+      daily_pnl: parseFloat(mockDailyPnl) || 0,
+      weekly_pnl: parseFloat(mockWeeklyPnl) || 0,
+      monthly_pnl: parseFloat(mockMonthlyPnl) || 0,
+    }
+  }
+
+  async function handleRunPretrade() {
+    if (!extracted.length) return
+    setPretradeLoading(true); setPretradeResult(null)
+    try {
+      const res = await api.simulatePretrade({
+        signals: extracted as Parameters<typeof api.simulatePretrade>[0]["signals"],
+        message: activeMsg,
+        management_strategy: data.managementStrategy || undefined,
+        deletion_strategy: data.deletionStrategy || undefined,
+        event_type: "pretrade",
+        mock_state: buildMockState(),
+      })
+      setPretradeResult(res)
+    } catch {}
+    setPretradeLoading(false)
+  }
+
+  async function handleSimEvent(evKey: string, evType: string, evData: Record<string, unknown>) {
+    setEventSimLoading(p => ({ ...p, [evKey]: true }))
+    try {
+      const res = await api.simulatePretrade({
+        signals: extracted as Parameters<typeof api.simulatePretrade>[0]["signals"],
+        message: activeMsg,
+        management_strategy: data.managementStrategy || undefined,
+        deletion_strategy: data.deletionStrategy || undefined,
+        event_type: evType,
+        event_data: evData,
+        mock_state: buildMockState(),
+      })
+      setEventSimResults(p => ({ ...p, [evKey]: res }))
+    } catch {}
+    setEventSimLoading(p => ({ ...p, [evKey]: false }))
   }
 
   // ── Render helpers ──────────────────────────────────────────────────────────
@@ -1600,6 +1678,187 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ── AI Strategy simulation panel ─────────────────────────────── */}
+            {(data.managementStrategy || data.deletionStrategy) && extracted.length > 0 && (
+              <div className="rounded-2xl border border-violet-400/15 bg-violet-400/[0.02] p-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-violet-400/10 flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  </div>
+                  <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">AI Strategy Simulation</span>
+                </div>
+
+                {/* Mock account state */}
+                <div>
+                  <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">Mock MT5 account state</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: "Balance", value: mockBalance, set: setMockBalance },
+                      { label: "Equity", value: mockEquity, set: setMockEquity },
+                      { label: "Free margin", value: mockFreeMargin, set: setMockFreeMargin },
+                      { label: "Leverage", value: mockLeverage, set: setMockLeverage },
+                      { label: "Currency", value: mockCurrency, set: setMockCurrency, text: true },
+                      { label: "Open positions", value: mockPositions, set: setMockPositions, integer: true },
+                    ].map(f => (
+                      <div key={f.label}>
+                        <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
+                        <input
+                          type={f.text ? "text" : f.integer ? "number" : "number"}
+                          step={f.text || f.integer ? undefined : "any"}
+                          value={f.value}
+                          onChange={e => f.set(e.target.value)}
+                          className="w-full bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-violet-400/30 transition-all"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-2">
+                    {[
+                      { label: "Daily P&L", value: mockDailyPnl, set: setMockDailyPnl },
+                      { label: "Weekly P&L", value: mockWeeklyPnl, set: setMockWeeklyPnl },
+                      { label: "Monthly P&L", value: mockMonthlyPnl, set: setMockMonthlyPnl },
+                    ].map(f => (
+                      <div key={f.label}>
+                        <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
+                        <input type="number" step="any" value={f.value} onChange={e => f.set(e.target.value)}
+                          className="w-full bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-violet-400/30 transition-all" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Run pretrade button */}
+                <button type="button" onClick={handleRunPretrade}
+                  disabled={pretradeLoading}
+                  className="w-full flex items-center justify-center gap-2 border border-violet-400/25 bg-violet-400/[0.06] hover:bg-violet-400/[0.1] text-violet-300 font-semibold text-xs rounded-xl py-2.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  {pretradeLoading && <Spin />}
+                  {pretradeLoading ? "Running AI pre_trade…" : "Run AI pre_trade strategy"}
+                </button>
+
+                {/* Pretrade results */}
+                {pretradeResult && (
+                  <div className="space-y-3">
+                    {/* Decisions */}
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Signal decisions</p>
+                      {pretradeResult.decisions.map((d, di) => {
+                        const sig = extracted[d.signal_index]
+                        const label = sig ? `[${di}] ${sig.order_type} ${sig.symbol}` : `Signal ${d.signal_index}`
+                        const isModified = !d.approved ? false : (d.modified_lots != null || d.modified_sl != null || d.modified_tp != null)
+                        return (
+                          <div key={di} className={`rounded-xl border px-3 py-2.5 text-xs space-y-1 ${
+                            !d.approved ? "border-red-400/20 bg-red-400/[0.04]"
+                            : isModified ? "border-amber-400/20 bg-amber-400/[0.04]"
+                            : "border-emerald-400/20 bg-emerald-400/[0.04]"
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-bold ${!d.approved ? "text-red-400" : isModified ? "text-amber-400" : "text-emerald-400"}`}>
+                                {!d.approved ? "✗ Rejected" : isModified ? "~ Modified" : "✓ Approved"}
+                              </span>
+                              <span className="text-white/50 font-mono">{label}</span>
+                            </div>
+                            {isModified && (
+                              <div className="flex flex-wrap gap-2 text-[10px] font-mono text-amber-300/70">
+                                {d.modified_lots != null && <span>lots: {d.modified_lots}</span>}
+                                {d.modified_sl != null && <span>SL: {d.modified_sl}</span>}
+                                {d.modified_tp != null && <span>TP: {d.modified_tp}</span>}
+                              </div>
+                            )}
+                            <p className="text-white/40 text-[10px] leading-relaxed">{d.reason}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Tool calls log */}
+                    {pretradeResult.tool_calls.length > 0 && (
+                      <div>
+                        <button type="button" onClick={() => setExpandedToolCalls(v => !v)}
+                          className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/55 transition-colors">
+                          <svg className={`w-3 h-3 transition-transform ${expandedToolCalls ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6" /></svg>
+                          Tool calls ({pretradeResult.tool_calls.length})
+                        </button>
+                        {expandedToolCalls && (
+                          <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
+                            {pretradeResult.tool_calls.map((tc, ti) => (
+                              <div key={ti} className="rounded-lg bg-white/[0.02] border border-white/6 px-2.5 py-2 font-mono text-[10px]">
+                                <span className="text-violet-300">{tc.name}</span>
+                                <span className="text-white/25 ml-2">{JSON.stringify(tc.args).slice(0, 80)}</span>
+                                <div className="text-white/20 mt-0.5">→ {JSON.stringify(tc.result).slice(0, 80)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* AI reasoning */}
+                    {pretradeResult.final_response && (
+                      <div className="rounded-xl bg-white/[0.02] border border-white/6 px-3 py-2.5">
+                        <p className="text-[10px] font-semibold text-white/25 uppercase tracking-wider mb-1.5">AI reasoning</p>
+                        <p className="text-xs text-white/50 leading-relaxed whitespace-pre-wrap">{pretradeResult.final_response}</p>
+                      </div>
+                    )}
+
+                    {/* Per-event simulation buttons */}
+                    {simResult && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Simulate AI reactions to events</p>
+                        {simResult.per_signal.flatMap((sig, si) =>
+                          sig.events
+                            .filter(ev => ev.type === "price_level" || ev.type === "signal_deleted")
+                            .map((ev, ei) => {
+                              const evKey = `${si}-${ei}-${ev.type}`
+                              const evType = ev.type === "signal_deleted" ? "message_deleted" : "price_level_reached"
+                              const evData = ev.type === "signal_deleted"
+                                ? { symbol: sig.symbol, order_type: sig.order_type, entry: sig.entry, sl: sig.sl, tp: sig.tp }
+                                : { symbol: sig.symbol, order_type: sig.order_type, price: ev.price, trigger_price: ev.price }
+                              const evResult = eventSimResults[evKey]
+                              const evLoading = eventSimLoading[evKey]
+                              return (
+                                <div key={evKey} className="rounded-xl border border-white/8 bg-white/[0.02] p-3 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-[10px] text-white/40">
+                                      <span className={`font-semibold ${ev.type === "signal_deleted" ? "text-orange-400/80" : "text-blue-400/80"}`}>
+                                        {ev.type === "signal_deleted" ? "Signal deleted" : "Price level reached"}
+                                      </span>
+                                      {" — "}{sig.order_type} {sig.symbol} @ {ev.price?.toFixed(5)}
+                                    </div>
+                                    <button type="button" onClick={() => handleSimEvent(evKey, evType, evData)}
+                                      disabled={evLoading}
+                                      className="text-[10px] px-2 py-1 rounded-lg border border-violet-400/20 bg-violet-400/[0.05] text-violet-300 hover:bg-violet-400/[0.1] transition-all disabled:opacity-40 flex items-center gap-1">
+                                      {evLoading && <Spin />}
+                                      {evLoading ? "Running…" : "Simulate AI reaction"}
+                                    </button>
+                                  </div>
+                                  {evResult && (
+                                    <div className="space-y-1.5">
+                                      {evResult.tool_calls.length > 0 && (
+                                        <div className="space-y-1">
+                                          {evResult.tool_calls.map((tc, ti) => (
+                                            <div key={ti} className="rounded-lg bg-white/[0.015] border border-white/5 px-2 py-1.5 font-mono text-[10px]">
+                                              <span className="text-violet-300">{tc.name}</span>
+                                              <span className="text-white/20 ml-2">{JSON.stringify(tc.args).slice(0, 60)}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {evResult.final_response && (
+                                        <p className="text-[10px] text-white/40 leading-relaxed">{evResult.final_response}</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

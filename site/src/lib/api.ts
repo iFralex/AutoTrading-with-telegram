@@ -581,6 +581,39 @@ export const api = {
     }>("POST", "/api/setup/simulate-signal", payload)
   },
 
+  /** Mock AI pre_trade / on_event simulation — real Gemini agent with mocked MT5 tools. */
+  simulatePretrade(payload: {
+    signals: Array<{
+      symbol: string; order_type: string; entry_price: number | [number, number] | null
+      stop_loss: number | null; take_profit: number | null; lot_size: number | null
+      order_mode: string; confidence: number | null
+    }>
+    message?: string
+    management_strategy?: string
+    deletion_strategy?: string
+    event_type?: string
+    event_data?: Record<string, unknown>
+    mock_state?: {
+      balance?: number; equity?: number; free_margin?: number; leverage?: number
+      currency?: string; open_positions?: unknown[]; daily_pnl?: number
+      weekly_pnl?: number; monthly_pnl?: number
+    }
+  }) {
+    return call<{
+      event_type: string
+      decisions: Array<{
+        signal_index: number
+        approved: boolean
+        reason: string
+        modified_lots?: number | null
+        modified_sl?: number | null
+        modified_tp?: number | null
+      }>
+      tool_calls: Array<{ name: string; args: Record<string, unknown>; result: Record<string, unknown> }>
+      final_response: string
+    }>("POST", "/api/setup/simulate-pretrade", payload)
+  },
+
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
   /** Recupera profilo utente + ultimi 50 log segnali per numero di telefono. */
