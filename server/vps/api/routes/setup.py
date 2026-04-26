@@ -270,6 +270,189 @@ async def get_groups(
         raise HTTPException(400, detail=str(exc))
 
 
+@router.get("/telegram/recent-messages")
+async def get_recent_messages(
+    login_key: str,
+    group_id: str,
+    limit: int = 15,
+    tm: TelegramManager = Depends(get_telegram),
+):
+    """Ritorna gli ultimi N messaggi testuali dal gruppo selezionato (max 30)."""
+    try:
+        msgs = tm.get_recent_messages(login_key, group_id, min(limit, 30))
+        return {"messages": msgs}
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc))
+    except Exception as exc:
+        logger.error("get_recent_messages: %s", exc)
+        raise HTTPException(400, detail=str(exc))
+
+
+# ── Signal simulator ──────────────────────────────────────────────────────────
+
+class SimulateSignalBody(BaseModel):
+    message: str
+    sizing_strategy: str | None = None
+    extraction_instructions: str | None = None
+    management_strategy: str | None = None
+    deletion_strategy: str | None = None
+    price_path: list[dict] | None = None    # [{"t": 0-1, "price": float}, ...]
+    timeline_events: list[dict] | None = None  # [{"t": 0-1, "type": "signal_deleted"}, ...]
+    lot_size: float = 0.1
+
+
+@router.post("/simulate-signal")
+async def simulate_signal_endpoint(
+    body: SimulateSignalBody,
+    request: Request,
+):
+    """
+    Dry-run: estrae il segnale dal messaggio con l'AI e, se viene fornito
+    un price_path, simula gli eventi (entry/SL/TP) sul percorso di prezzo disegnato.
+    Non apre MT5 e non piazza ordini reali.
+    """
+    from vps.services.signal_processor import SignalProcessor
+    sp: SignalProcessor | None = request.app.state.signal_processor
+    if sp is None:
+        raise HTTPException(503, detail="Signal processor not available (GEMINI_API_KEY missing)")
+
+    try:
+        is_signal = await sp.detect_signal(body.message)
+        if not is_signal:
+            return {"is_signal": False, "extracted": [], "simulation": None}
+
+        signals, _, _ = await sp.extract_signals(
+            body.message,
+            sizing_strategy=body.sizing_strategy,
+            extraction_instructions=body.extraction_instructions,
+            management_strategy=body.management_strategy,
+        )
+    except Exception as exc:
+        logger.error("simulate_signal_endpoint: %s", exc)
+        raise HTTPException(500, detail=str(exc))
+
+    from dataclasses import asdict
+    extracted = [asdict(s) for s in signals]
+
+    simulation = None
+    if body.price_path and len(body.price_path) >= 2 and signals:
+        simulation = _sim_price_events(
+            signals,
+            body.price_path,
+            body.timeline_events or [],
+            body.lot_size,
+            body.deletion_strategy,
+        )
+
+    return {"is_signal": True, "extracted": extracted, "simulation": simulation}
+
+
+def _sim_price_events(signals, price_path, timeline_events, default_lot, deletion_strategy):
+    """Pure price-path simulation — no MT5."""
+    per_signal = []
+    total_pnl = 0.0
+    n = len(price_path)
+
+    for sig_idx, sig in enumerate(signals):
+        sig_events: list[dict] = []
+        entry = sig.entry_price
+        sl = sig.stop_loss
+        tp = sig.take_profit
+        lot = sig.lot_size if sig.lot_size else default_lot
+        order_type = sig.order_type
+
+        if isinstance(entry, list):
+            actual_entry: float | None = (entry[0] + entry[1]) / 2.0
+            state = "pending"
+        elif entry is not None:
+            actual_entry = float(entry)
+            state = "pending"
+        else:
+            actual_entry = None
+            state = "market_pending"
+
+        order_open_price: float | None = None
+
+        for i, pt in enumerate(price_path):
+            t_norm = i / max(n - 1, 1)
+            price = float(pt.get("price", 0))
+
+            if state in ("closed", "deleted"):
+                break
+
+            # Timeline events
+            for te in timeline_events:
+                te_t = float(te.get("t", -1))
+                if abs(te_t - t_norm) < (1.5 / max(n, 1)):
+                    if te.get("type") == "signal_deleted":
+                        desc = "Signal deleted"
+                        if deletion_strategy:
+                            preview = deletion_strategy[:60] + ("…" if len(deletion_strategy) > 60 else "")
+                            desc += f" — AI action: "{preview}""
+                        sig_events.append({"t": t_norm, "type": "signal_deleted", "price": price, "description": desc})
+                        state = "deleted"
+                        break
+
+            if state in ("closed", "deleted"):
+                break
+
+            if state == "market_pending":
+                order_open_price = price
+                state = "open"
+                sig_events.append({"t": t_norm, "type": "entry", "price": price,
+                                    "description": f"Market {order_type} opened @ {price:.5f}"})
+
+            elif state == "pending" and actual_entry is not None:
+                hit = (order_type == "BUY" and price <= actual_entry) or \
+                      (order_type == "SELL" and price >= actual_entry)
+                if hit:
+                    order_open_price = actual_entry
+                    state = "open"
+                    sig_events.append({"t": t_norm, "type": "entry", "price": actual_entry,
+                                        "description": f"Limit {order_type} triggered @ {actual_entry:.5f}"})
+
+            if state == "open" and order_open_price is not None:
+                if sl is not None:
+                    sl_hit = (order_type == "BUY" and price <= sl) or (order_type == "SELL" and price >= sl)
+                    if sl_hit:
+                        pnl = _calc_pnl(order_type, order_open_price, sl, lot)
+                        total_pnl += pnl
+                        sig_events.append({"t": t_norm, "type": "sl", "price": sl,
+                                            "pnl": round(pnl, 2),
+                                            "description": f"Stop Loss @ {sl:.5f}  ({pnl:+.2f})"})
+                        state = "closed"
+                        break
+
+                if tp is not None:
+                    tp_hit = (order_type == "BUY" and price >= tp) or (order_type == "SELL" and price <= tp)
+                    if tp_hit:
+                        pnl = _calc_pnl(order_type, order_open_price, tp, lot)
+                        total_pnl += pnl
+                        sig_events.append({"t": t_norm, "type": "tp", "price": tp,
+                                            "pnl": round(pnl, 2),
+                                            "description": f"Take Profit @ {tp:.5f}  ({pnl:+.2f})"})
+                        state = "closed"
+                        break
+
+        per_signal.append({
+            "signal_index": sig_idx,
+            "symbol": sig.symbol,
+            "order_type": sig.order_type,
+            "entry": actual_entry,
+            "sl": sl,
+            "tp": tp,
+            "events": sig_events,
+            "state": state,
+        })
+
+    return {"per_signal": per_signal, "total_pnl": round(total_pnl, 2)}
+
+
+def _calc_pnl(order_type: str, open_price: float, close_price: float, lot: float) -> float:
+    diff = (close_price - open_price) if order_type == "BUY" else (open_price - close_price)
+    return diff * lot * 100000  # approximate; pip value varies by instrument
+
+
 # ── MT5 endpoint ─────────────────────────────────────────────────────────────
 
 @router.post("/mt5/verify")

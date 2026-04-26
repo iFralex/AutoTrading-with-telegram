@@ -534,6 +534,53 @@ export const api = {
     )
   },
 
+  /** Signal Simulator — ultimi messaggi dal gruppo selezionato (usa sessione pendente). */
+  getRecentMessages(loginKey: string, groupId: string, limit = 15) {
+    return call<{ messages: { id: number; text: string; date: string | null }[] }>(
+      "GET",
+      `/api/setup/telegram/recent-messages?login_key=${encodeURIComponent(loginKey)}&group_id=${encodeURIComponent(groupId)}&limit=${limit}`
+    )
+  },
+
+  /** Signal Simulator — estrae il segnale e, se fornito price_path, simula gli eventi. */
+  simulateSignal(payload: {
+    message: string
+    sizing_strategy?: string
+    extraction_instructions?: string
+    management_strategy?: string
+    deletion_strategy?: string
+    price_path?: { t: number; price: number }[]
+    timeline_events?: { t: number; type: string }[]
+    lot_size?: number
+  }) {
+    return call<{
+      is_signal: boolean
+      extracted: Array<{
+        symbol: string
+        order_type: string
+        entry_price: number | [number, number] | null
+        stop_loss: number | null
+        take_profit: number | null
+        lot_size: number | null
+        order_mode: string
+        confidence: number | null
+      }>
+      simulation: {
+        per_signal: Array<{
+          signal_index: number
+          symbol: string
+          order_type: string
+          entry: number | null
+          sl: number | null
+          tp: number | null
+          events: Array<{ t: number; type: string; price: number; pnl?: number; description: string }>
+          state: string
+        }>
+        total_pnl: number
+      } | null
+    }>("POST", "/api/setup/simulate-signal", payload)
+  },
+
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
   /** Recupera profilo utente + ultimi 50 log segnali per numero di telefono. */

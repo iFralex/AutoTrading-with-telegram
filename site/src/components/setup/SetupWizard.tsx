@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { api, ApiError, type SetupSession, type Group, type MT5Account, type VerifyCodeResponse } from "@/src/lib/api"
 
@@ -806,304 +806,810 @@ function TA({ id, value, onChange, placeholder }: { id: string; value: string; o
   )
 }
 
+// ── Signal Simulator helpers ──────────────────────────────────────────────────
+
+type SimPhase = "signal" | "pipeline" | "chart"
+
+type SimExtracted = {
+  symbol: string; order_type: string; entry_price: number | [number, number] | null
+  stop_loss: number | null; take_profit: number | null; lot_size: number | null
+  order_mode: string; confidence: number | null
+}
+
+type SimEvent = { t: number; type: string; price: number; pnl?: number; description: string }
+
+type SimResult = {
+  per_signal: Array<{ signal_index: number; symbol: string; order_type: string; entry: number | null; sl: number | null; tp: number | null; events: SimEvent[]; state: string }>
+  total_pnl: number
+}
+
+type PricePt = { t: number; price: number }
+
+const CHART_W = 560
+const CHART_H = 200
+const CHART_PAD = { top: 16, right: 16, bottom: 28, left: 52 }
+
+function priceToY(price: number, pMin: number, pMax: number): number {
+  if (pMax === pMin) return CHART_H / 2
+  const inner = CHART_H - CHART_PAD.top - CHART_PAD.bottom
+  return CHART_PAD.top + inner * (1 - (price - pMin) / (pMax - pMin))
+}
+function tToX(t: number): number {
+  const inner = CHART_W - CHART_PAD.left - CHART_PAD.right
+  return CHART_PAD.left + t * inner
+}
+function xyToPricePt(svgX: number, svgY: number, pMin: number, pMax: number): PricePt {
+  const inner_x = CHART_W - CHART_PAD.left - CHART_PAD.right
+  const inner_y = CHART_H - CHART_PAD.top - CHART_PAD.bottom
+  const t = Math.max(0, Math.min(1, (svgX - CHART_PAD.left) / inner_x))
+  const price = pMin + (1 - Math.max(0, Math.min(1, (svgY - CHART_PAD.top) / inner_y))) * (pMax - pMin)
+  return { t, price }
+}
+
+function PipelineCard({
+  icon, title, badge, value, isEmpty, isRequired, expanded, onToggle, children,
+}: {
+  icon: React.ReactNode; title: string; badge?: React.ReactNode; value: string; isEmpty: boolean
+  isRequired?: boolean; expanded: boolean; onToggle: () => void; children: React.ReactNode
+}) {
+  return (
+    <div className={`rounded-2xl border transition-all ${
+      expanded ? "border-emerald-400/25 bg-emerald-400/[0.03]"
+      : isRequired && isEmpty ? "border-amber-400/20 bg-amber-400/[0.025]"
+      : isEmpty ? "border-white/8 bg-white/[0.02]"
+      : "border-emerald-400/15 bg-emerald-400/[0.025]"
+    }`}>
+      <button type="button" onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-3 text-left">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+          expanded ? "bg-emerald-400/15" : isEmpty ? isRequired ? "bg-amber-400/10" : "bg-white/[0.04]" : "bg-emerald-400/10"
+        }`}>{icon}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{title}</span>
+            {badge}
+          </div>
+          <p className={`text-xs mt-0.5 truncate ${isEmpty ? isRequired ? "text-amber-400/70" : "text-white/25" : "text-white/50"}`}>
+            {isEmpty ? isRequired ? "Required — click to configure" : "Optional — click to configure" : value}
+          </p>
+        </div>
+        <svg className={`w-4 h-4 text-white/25 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {expanded && <div className="px-4 pb-4 space-y-3">{children}</div>}
+    </div>
+  )
+}
+
 function RulesStep({ data, update, onNext, onBack }: StepProps) {
-  const [showAdv, setShowAdv] = useState(false)
+  const [phase, setPhase]           = useState<SimPhase>("signal")
+  const [recentMsgs, setRecentMsgs] = useState<{ id: number; text: string; date: string | null }[]>([])
+  const [loadingMsgs, setLoadingMsgs] = useState(false)
+  const [selectedMsg, setSelectedMsg]  = useState("")
+  const [pasteMsg, setPasteMsg]        = useState("")
+  const [extracting, setExtracting]    = useState(false)
+  const [extracted, setExtracted]      = useState<SimExtracted[]>([])
+  const [isSignal, setIsSignal]        = useState<boolean | null>(null)
+  const [openCard, setOpenCard]        = useState<string | null>("sizing")
+
+  // Chart phase
+  const [priceMin, setPriceMin]   = useState("")
+  const [priceMax, setPriceMax]   = useState("")
+  const [pricePath, setPricePath] = useState<PricePt[]>([])
+  const [tEvents, setTEvents]     = useState<{ t: number; type: string }[]>([])
+  const [addEventMode, setAddEventMode] = useState(false)
+  const [drawing, setDrawing]     = useState(false)
+  const [simLoading, setSimLoading] = useState(false)
+  const [simResult, setSimResult]   = useState<SimResult | null>(null)
+
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  // Fetch recent messages when entering signal phase
+  useEffect(() => {
+    if (data.loginKey && data.groupId) {
+      setLoadingMsgs(true)
+      api.getRecentMessages(data.loginKey, data.groupId)
+        .then(r => setRecentMsgs(r.messages))
+        .catch(() => {})
+        .finally(() => setLoadingMsgs(false))
+    }
+  }, [data.loginKey, data.groupId])
+
+  // Pre-fill price range from extraction result
+  useEffect(() => {
+    if (extracted.length > 0 && !priceMin && !priceMax) {
+      const sig = extracted[0]
+      const levels = [
+        sig.entry_price instanceof Array ? sig.entry_price[0] : sig.entry_price,
+        sig.entry_price instanceof Array ? sig.entry_price[1] : null,
+        sig.stop_loss, sig.take_profit,
+      ].filter((v): v is number => typeof v === "number")
+      if (levels.length >= 2) {
+        const margin = Math.abs(levels[levels.length - 1] - levels[0]) * 0.5
+        setPriceMin(String(Math.round((Math.min(...levels) - margin) * 100) / 100))
+        setPriceMax(String(Math.round((Math.max(...levels) + margin) * 100) / 100))
+      }
+    }
+  }, [extracted, priceMin, priceMax])
+
+  const activeMsg = selectedMsg || pasteMsg
+
+  async function handleSelectMessage(text: string) {
+    setSelectedMsg(text)
+    setPasteMsg("")
+    await runExtraction(text)
+    setPhase("pipeline")
+  }
+
+  async function handleUsePaste() {
+    if (!pasteMsg.trim()) return
+    setSelectedMsg("")
+    await runExtraction(pasteMsg)
+    setPhase("pipeline")
+  }
+
+  async function runExtraction(text: string) {
+    setExtracting(true)
+    setExtracted([])
+    setIsSignal(null)
+    try {
+      const res = await api.simulateSignal({
+        message: text,
+        sizing_strategy: data.sizingStrategy || undefined,
+        extraction_instructions: data.extractionInstructions || undefined,
+        management_strategy: data.managementStrategy || undefined,
+      })
+      setIsSignal(res.is_signal)
+      setExtracted(res.extracted)
+    } catch {}
+    setExtracting(false)
+  }
+
+  // SVG mouse handlers
+  function getSvgCoords(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = svgRef.current!.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) * (CHART_W / rect.width),
+      y: (e.clientY - rect.top) * (CHART_H / rect.height),
+    }
+  }
+
+  const pMin = parseFloat(priceMin) || 0
+  const pMax = parseFloat(priceMax) || 1
+
+  function handleSvgMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (pMax <= pMin) return
+    const { x, y } = getSvgCoords(e)
+    if (addEventMode) {
+      const pt = xyToPricePt(x, y, pMin, pMax)
+      setTEvents(prev => [...prev, { t: pt.t, type: "signal_deleted" }])
+      return
+    }
+    setDrawing(true)
+    setPricePath([xyToPricePt(x, y, pMin, pMax)])
+    setSimResult(null)
+  }
+
+  function handleSvgMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (!drawing || addEventMode) return
+    const { x, y } = getSvgCoords(e)
+    const pt = xyToPricePt(x, y, pMin, pMax)
+    setPricePath(prev => {
+      if (prev.length === 0) return [pt]
+      const last = prev[prev.length - 1]
+      if (Math.abs(pt.t - last.t) < 0.005) return prev
+      return [...prev, pt]
+    })
+  }
+
+  function handleSvgMouseUp() { setDrawing(false) }
+
+  async function handleRunSim() {
+    if (!activeMsg.trim() || pricePath.length < 2) return
+    setSimLoading(true)
+    try {
+      const res = await api.simulateSignal({
+        message: activeMsg,
+        sizing_strategy: data.sizingStrategy || undefined,
+        extraction_instructions: data.extractionInstructions || undefined,
+        management_strategy: data.managementStrategy || undefined,
+        deletion_strategy: data.deletionStrategy || undefined,
+        price_path: pricePath,
+        timeline_events: tEvents,
+      })
+      setSimResult(res.simulation)
+      if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
+    } catch {}
+    setSimLoading(false)
+  }
+
+  // ── Render helpers ──────────────────────────────────────────────────────────
+
+  function renderSignalBadge() {
+    if (isSignal === null) return null
+    return isSignal
+      ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-400">Signal detected</span>
+      : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-white/35">Not a signal</span>
+  }
+
+  function renderExtractedSummary() {
+    if (extracting) return (
+      <div className="flex items-center gap-2 text-xs text-white/40">
+        <Spin /><span>Analyzing with AI…</span>
+      </div>
+    )
+    if (isSignal === false) return (
+      <p className="text-xs text-white/35 italic">No trading signal found in this message.</p>
+    )
+    if (!extracted.length) return null
+    return (
+      <div className="space-y-2">
+        {extracted.map((s, i) => (
+          <div key={i} className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-bold px-2 py-0.5 rounded ${s.order_type === "BUY" ? "bg-emerald-400/15 text-emerald-300" : "bg-red-400/15 text-red-300"}`}>
+              {s.order_type}
+            </span>
+            <span className="text-xs font-mono text-white/70">{s.symbol}</span>
+            {s.entry_price !== null && (
+              <span className="text-xs text-white/40 font-mono">
+                @ {Array.isArray(s.entry_price) ? `${s.entry_price[0]}–${s.entry_price[1]}` : s.entry_price}
+              </span>
+            )}
+            {s.stop_loss !== null && <span className="text-xs text-red-400/70 font-mono">SL {s.stop_loss}</span>}
+            {s.take_profit !== null && <span className="text-xs text-emerald-400/70 font-mono">TP {s.take_profit}</span>}
+            {s.confidence !== null && (
+              <span className={`text-xs font-mono ${s.confidence >= 70 ? "text-emerald-400/60" : s.confidence >= 40 ? "text-amber-400/60" : "text-red-400/60"}`}>
+                {s.confidence}% confidence
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // ── Chart SVG helpers ───────────────────────────────────────────────────────
+
+  function renderChart() {
+    const hasRange = pMax > pMin
+    const pathD = pricePath.length >= 2
+      ? pricePath.map((pt, i) => `${i === 0 ? "M" : "L"} ${tToX(pt.t).toFixed(1)} ${priceToY(pt.price, pMin, pMax).toFixed(1)}`).join(" ")
+      : null
+
+    // Grid lines
+    const gridPrices = hasRange ? Array.from({ length: 5 }, (_, i) => pMin + (pMax - pMin) * i / 4) : []
+
+    // Sim event markers on path
+    const simMarkers: { cx: number; cy: number; type: string; pnl?: number }[] = []
+    if (simResult && hasRange) {
+      simResult.per_signal.forEach(sig => {
+        sig.events.forEach(ev => {
+          const cx = tToX(ev.t)
+          const cy = priceToY(ev.price, pMin, pMax)
+          simMarkers.push({ cx, cy, type: ev.type, pnl: ev.pnl })
+        })
+      })
+    }
+
+    return (
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        className={`w-full rounded-xl border ${hasRange ? "border-white/10 cursor-crosshair" : "border-white/5"} bg-white/[0.02]`}
+        onMouseDown={handleSvgMouseDown}
+        onMouseMove={handleSvgMouseMove}
+        onMouseUp={handleSvgMouseUp}
+        onMouseLeave={handleSvgMouseUp}
+      >
+        {/* Grid */}
+        {gridPrices.map((p, i) => {
+          const y = priceToY(p, pMin, pMax)
+          return (
+            <g key={i}>
+              <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="white" strokeOpacity={0.04} strokeDasharray="2,3" />
+              <text x={CHART_PAD.left - 4} y={y + 3.5} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{p.toFixed(5)}</text>
+            </g>
+          )
+        })}
+
+        {/* Signal level lines */}
+        {extracted.length > 0 && hasRange && extracted[0].stop_loss !== null && (
+          <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
+            y1={priceToY(extracted[0].stop_loss!, pMin, pMax)} y2={priceToY(extracted[0].stop_loss!, pMin, pMax)}
+            stroke="#f87171" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />
+        )}
+        {extracted.length > 0 && hasRange && extracted[0].take_profit !== null && (
+          <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
+            y1={priceToY(extracted[0].take_profit!, pMin, pMax)} y2={priceToY(extracted[0].take_profit!, pMin, pMax)}
+            stroke="#34d399" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />
+        )}
+        {extracted.length > 0 && hasRange && extracted[0].entry_price !== null && (
+          (() => {
+            const ep = extracted[0].entry_price
+            const epVal = Array.isArray(ep) ? (ep[0] + ep[1]) / 2 : ep!
+            return <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
+              y1={priceToY(epVal, pMin, pMax)} y2={priceToY(epVal, pMin, pMax)}
+              stroke="#a3e635" strokeOpacity={0.4} strokeDasharray="4,3" strokeWidth={1} />
+          })()
+        )}
+
+        {/* Drawn path */}
+        {pathD && (
+          <path d={pathD} fill="none" stroke="#34d399" strokeWidth={2} strokeOpacity={0.8} strokeLinejoin="round" strokeLinecap="round" />
+        )}
+
+        {/* Timeline events */}
+        {tEvents.map((ev, i) => {
+          const x = tToX(ev.t)
+          return (
+            <g key={i}>
+              <line x1={x} x2={x} y1={CHART_PAD.top} y2={CHART_H - CHART_PAD.bottom} stroke="#fb923c" strokeOpacity={0.5} strokeDasharray="3,3" strokeWidth={1.5} />
+              <text x={x} y={CHART_H - CHART_PAD.bottom + 12} textAnchor="middle" fontSize={7} fill="rgba(251,146,60,0.7)">deleted</text>
+            </g>
+          )
+        })}
+
+        {/* Simulation markers */}
+        {simMarkers.map((m, i) => {
+          const color = m.type === "tp" ? "#34d399" : m.type === "sl" ? "#f87171" : m.type === "entry" ? "#a3e635" : "#fb923c"
+          return (
+            <g key={i}>
+              <circle cx={m.cx} cy={m.cy} r={5} fill={color} fillOpacity={0.9} />
+              {m.pnl !== undefined && (
+                <text x={m.cx} y={m.cy - 8} textAnchor="middle" fontSize={8} fill={m.pnl >= 0 ? "#34d399" : "#f87171"} fontWeight="bold">
+                  {m.pnl >= 0 ? "+" : ""}{m.pnl.toFixed(0)}
+                </text>
+              )}
+            </g>
+          )
+        })}
+
+        {/* Placeholder text */}
+        {!pathD && hasRange && (
+          <text x={CHART_W / 2} y={CHART_H / 2 + 4} textAnchor="middle" fontSize={11} fill="rgba(255,255,255,0.18)">
+            Draw the price movement with your mouse
+          </text>
+        )}
+        {!hasRange && (
+          <text x={CHART_W / 2} y={CHART_H / 2 + 4} textAnchor="middle" fontSize={11} fill="rgba(255,255,255,0.15)">
+            Set price min & max above to enable drawing
+          </text>
+        )}
+      </svg>
+    )
+  }
 
   return (
     <div className={`${card} p-8`}>
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-400/10 border border-amber-400/20">
-          <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-violet-500/10 border border-violet-500/20">
+          <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
         <div>
-          <h3 className="font-bold text-white">AI &amp; risk rules</h3>
-          <p className="text-xs text-white/40">Tell the AI how to size and manage your trades</p>
+          <h2 className="text-lg font-bold text-white">Signal Simulator</h2>
+          <p className="text-xs text-white/35 mt-0.5">Configure your AI rules using a real signal</p>
         </div>
       </div>
 
-      <div className="space-y-5">
-        {/* Sizing — Core */}
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Position sizing</span>
-            <span className="text-emerald-400 text-xs normal-case font-normal">Required</span>
-            <PlanBadge plan="core" />
-          </div>
-          <TA id="sizing" value={data.sizingStrategy} onChange={v => update({ sizingStrategy: v })} placeholder={"Example: " + SIZING_EX[0]} />
-          <p className="text-xs text-white/22 mt-1.5">The AI uses this with your account balance, equity, and leverage to calculate lot size at each signal.</p>
-          <div className="space-y-1.5 mt-2">
-            {SIZING_EX.map(p => <Preset key={p} text={p} onClick={() => update({ sizingStrategy: p })} />)}
-          </div>
-        </div>
+      {/* Phase tabs */}
+      <div className="flex items-center gap-1 mb-6 p-1 rounded-xl bg-white/[0.03] border border-white/8">
+        {([
+          { id: "signal", label: "1. Pick signal" },
+          { id: "pipeline", label: "2. Configure" },
+          { id: "chart", label: "3. Simulate" },
+        ] as const).map(tab => (
+          <button key={tab.id} type="button"
+            onClick={() => { if (tab.id === "pipeline" || tab.id === "chart") { if (!activeMsg) return } setPhase(tab.id) }}
+            className={`flex-1 text-xs font-semibold py-2 rounded-lg transition-all ${
+              phase === tab.id
+                ? "bg-white/[0.07] text-white"
+                : "text-white/30 hover:text-white/60"
+            } ${(tab.id === "pipeline" || tab.id === "chart") && !activeMsg ? "opacity-30 cursor-not-allowed" : ""}`}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Range entry — Core */}
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Range entry position</span>
-            <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-            <PlanBadge plan="core" />
-          </div>
-          <div className="flex items-center gap-4">
-            <input type="range" min={0} max={100} step={5} value={Number(data.rangeEntryPct)}
-              onChange={e => update({ rangeEntryPct: e.target.value })}
-              className="flex-1 accent-emerald-400 cursor-pointer" />
-            <span className="text-sm font-mono text-white/55 w-10 text-right shrink-0">{data.rangeEntryPct}%</span>
-          </div>
-          <p className="text-xs text-white/22 mt-1.5">Where to place a limit order within the signal&apos;s entry range. 0% = bottom, 50% = middle, 100% = top.</p>
-        </div>
+      <div className="space-y-4">
 
-        {/* Entry if favorable — Core */}
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Market entry if price is favorable</span>
-            <PlanBadge plan="core" />
-          </div>
-          <div className="space-y-1.5">
-            {([
-              { val: false, label: "Disabled", desc: "Always place a pending order at the target price" },
-              { val: true,  label: "Enabled",  desc: "Enter at market immediately if price is already past the entry target" },
-            ] as const).map(opt => (
-              <button key={String(opt.val)} type="button" onClick={() => update({ entryIfFavorable: opt.val })}
-                className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
-                  data.entryIfFavorable === opt.val
-                    ? "border-emerald-400/25 bg-emerald-400/[0.06] text-white"
-                    : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
-                }`}>
-                <span className="text-xs font-semibold">{opt.label}</span>
-                <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* AI extraction instructions — Core */}
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI extraction instructions</span>
-            <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-            <PlanBadge plan="core" />
-          </div>
-          <TA id="extract" value={data.extractionInstructions} onChange={v => update({ extractionInstructions: v })} placeholder={"Example: " + EXTRACT_EX[0]} />
-          <p className="text-xs text-white/22 mt-1.5">Injected into the AI signal parsing prompt. Use to normalize broker symbol names.</p>
-          <div className="space-y-1.5 mt-2">{EXTRACT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ extractionInstructions: p })} />)}</div>
-        </div>
-
-        {/* Advanced toggle */}
-        <button
-          onClick={() => setShowAdv(v => !v)}
-          className="w-full flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/8 px-4 py-3 text-sm text-white/45 hover:text-white/70 hover:bg-white/[0.04] transition-all"
-        >
-          <span className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-white/28" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" />
-            </svg>
-            Advanced rules
-            <span className="text-xs text-white/22">— Pro &amp; Elite</span>
-          </span>
-          <svg className={`w-4 h-4 transition-transform ${showAdv ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {showAdv && (
-          <div className="space-y-6 pt-1">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Position management</span>
-                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-                <PlanBadge plan="elite" />
+        {/* ── Phase 1: signal picker ─────────────────────────────────────────── */}
+        {phase === "signal" && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Recent messages */}
+              <div>
+                <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Recent messages from {data.groupName || "your group"}</p>
+                {loadingMsgs ? (
+                  <div className="space-y-2">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="h-14 rounded-xl bg-white/[0.03] border border-white/6 animate-pulse" />
+                    ))}
+                  </div>
+                ) : recentMsgs.length === 0 ? (
+                  <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-6 text-center text-xs text-white/25">
+                    No messages found — use the paste option →
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {recentMsgs.map(msg => (
+                      <button key={msg.id} type="button"
+                        onClick={() => handleSelectMessage(msg.text)}
+                        className={`w-full text-left rounded-xl border px-3 py-2.5 transition-all group ${
+                          selectedMsg === msg.text
+                            ? "border-violet-400/30 bg-violet-400/[0.06] text-white"
+                            : "border-white/8 text-white/50 hover:border-white/18 hover:text-white/75 hover:bg-white/[0.03]"
+                        }`}>
+                        <p className="text-[11px] line-clamp-2 leading-relaxed">{msg.text}</p>
+                        {msg.date && <p className="text-[10px] text-white/20 mt-1">{new Date(msg.date).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <TA id="mgmt" value={data.managementStrategy} onChange={v => update({ managementStrategy: v })} placeholder={"Example: " + MGMT_EX[0]} />
-              <p className="text-xs text-white/22 mt-1.5">How the AI manages open trades: break-even, trailing stop, partial close, etc.</p>
-              <div className="space-y-1.5 mt-2">{MGMT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ managementStrategy: p })} />)}</div>
+
+              {/* Paste */}
+              <div>
+                <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Or paste a message</p>
+                <textarea rows={6} placeholder={"Paste a signal message here…\n\nExample:\nBUY XAUUSD @ 2340\nSL: 2325\nTP: 2365"}
+                  value={pasteMsg} onChange={e => { setPasteMsg(e.target.value); setSelectedMsg("") }}
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/18 focus:outline-none focus:border-violet-400/40 focus:bg-white/[0.05] transition-all resize-none" />
+                <button type="button" onClick={handleUsePaste} disabled={!pasteMsg.trim()}
+                  className="mt-2 w-full py-2.5 rounded-xl border border-violet-400/20 bg-violet-400/[0.05] text-xs font-semibold text-violet-300 hover:bg-violet-400/[0.10] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                  Use this message →
+                </button>
+              </div>
             </div>
 
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">When a signal is deleted</span>
-                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-                <PlanBadge plan="elite" />
+            <div className="flex gap-3 pt-2">
+              <GhostBtn onClick={onBack}>← Back</GhostBtn>
+              <button type="button" onClick={() => setPhase("pipeline")}
+                className="flex-1 text-center text-xs text-white/25 hover:text-white/50 transition-colors py-3">
+                Skip simulator — configure manually →
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── Phase 2: pipeline config ───────────────────────────────────────── */}
+        {phase === "pipeline" && (
+          <>
+            {/* Selected message display */}
+            {activeMsg && (
+              <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Selected signal</span>
+                      {renderSignalBadge()}
+                    </div>
+                    <p className="text-xs text-white/55 line-clamp-2 leading-relaxed">{activeMsg}</p>
+                  </div>
+                  <button onClick={() => setPhase("signal")} className="text-[10px] text-white/25 hover:text-white/55 shrink-0 transition-colors">change</button>
+                </div>
+                {(extracting || extracted.length > 0 || isSignal === false) && (
+                  <div className="mt-2 pt-2 border-t border-white/6">
+                    {renderExtractedSummary()}
+                  </div>
+                )}
               </div>
-              <div className="rounded-xl bg-amber-500/8 border border-amber-500/15 px-4 py-3 text-xs text-amber-300/75 mb-3 leading-relaxed">
-                Signal rooms often delete messages to hide bad trades. Define what the AI should do when that happens.
+            )}
+
+            {/* Pipeline cards */}
+            <PipelineCard
+              icon={<svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+              title="Position Sizing"
+              badge={<PlanBadge plan="core" />}
+              value={data.sizingStrategy}
+              isEmpty={!data.sizingStrategy.trim()}
+              isRequired
+              expanded={openCard === "sizing"}
+              onToggle={() => setOpenCard(v => v === "sizing" ? null : "sizing")}
+            >
+              <TA id="sizing" value={data.sizingStrategy} onChange={v => update({ sizingStrategy: v })} placeholder={"Example: " + SIZING_EX[0]} />
+              <p className="text-xs text-white/22">How much to trade per signal. The AI uses this rule when calculating lot size.</p>
+              <div className="space-y-1.5">{SIZING_EX.map(p => <Preset key={p} text={p} onClick={() => update({ sizingStrategy: p })} />)}</div>
+
+              <div className="border-t border-white/6 pt-3 space-y-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">Range entry position</span>
+                    <PlanBadge plan="core" />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input type="range" min={0} max={100} step={5} value={Number(data.rangeEntryPct)}
+                      onChange={e => update({ rangeEntryPct: e.target.value })}
+                      className="flex-1 accent-emerald-400 cursor-pointer" />
+                    <span className="text-xs font-mono text-white/55 w-10 text-right shrink-0">{data.rangeEntryPct}%</span>
+                  </div>
+                  <p className="text-xs text-white/22 mt-1">Position within entry range. 0%=bottom, 50%=mid, 100%=top.</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">Market entry if price is favorable</span>
+                    <PlanBadge plan="core" />
+                  </div>
+                  <div className="flex gap-2">
+                    {([{ val: false, label: "Off" }, { val: true, label: "On" }] as const).map(o => (
+                      <button key={String(o.val)} type="button" onClick={() => update({ entryIfFavorable: o.val })}
+                        className={`flex-1 py-2 rounded-lg border text-xs font-semibold transition-all ${data.entryIfFavorable === o.val ? "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300" : "border-white/8 text-white/35 hover:border-white/15"}`}>
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </PipelineCard>
+
+            <PipelineCard
+              icon={<svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
+              title="Position Management"
+              badge={<PlanBadge plan="elite" />}
+              value={data.managementStrategy}
+              isEmpty={!data.managementStrategy.trim()}
+              expanded={openCard === "mgmt"}
+              onToggle={() => setOpenCard(v => v === "mgmt" ? null : "mgmt")}
+            >
+              <TA id="mgmt" value={data.managementStrategy} onChange={v => update({ managementStrategy: v })} placeholder={"Example: " + MGMT_EX[0]} />
+              <p className="text-xs text-white/22">How the AI manages open positions: break-even, trailing stop, partial close, etc.</p>
+              <div className="space-y-1.5">{MGMT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ managementStrategy: p })} />)}</div>
+            </PipelineCard>
+
+            <PipelineCard
+              icon={<svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+              title="Signal Deletion"
+              badge={<PlanBadge plan="elite" />}
+              value={data.deletionStrategy}
+              isEmpty={!data.deletionStrategy.trim()}
+              expanded={openCard === "deletion"}
+              onToggle={() => setOpenCard(v => v === "deletion" ? null : "deletion")}
+            >
+              <div className="rounded-xl bg-amber-500/8 border border-amber-500/15 px-3 py-2 text-xs text-amber-300/75 leading-relaxed">
+                Signal rooms often delete messages to hide bad trades. Define what the AI should do.
               </div>
               <TA id="deletion" value={data.deletionStrategy} onChange={v => update({ deletionStrategy: v })} placeholder={"Example: " + DELETION_EX[0]} />
-              <div className="space-y-1.5 mt-2">{DELETION_EX.map(p => <Preset key={p} text={p} onClick={() => update({ deletionStrategy: p })} />)}</div>
-            </div>
+              <div className="space-y-1.5">{DELETION_EX.map(p => <Preset key={p} text={p} onClick={() => update({ deletionStrategy: p })} />)}</div>
+            </PipelineCard>
 
-            {/* AI confidence threshold — Pro */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI confidence threshold</span>
-                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
-                <PlanBadge plan="pro" />
+            <PipelineCard
+              icon={<svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" /></svg>}
+              title="Advanced filters"
+              badge={<span className="text-[10px] text-white/20">Pro & Elite</span>}
+              value={[
+                data.minConfidence !== "0" ? `Confidence ≥ ${data.minConfidence}` : "",
+                data.extractionInstructions ? "Custom extraction rules" : "",
+                data.tradingHoursEnabled ? "Trading hours filter" : "",
+                data.ecoCalendarEnabled ? "Eco calendar filter" : "",
+                data.communityVisible ? "Community visible" : "",
+              ].filter(Boolean).join(" · ") || ""}
+              isEmpty={!data.extractionInstructions && !Number(data.minConfidence) && !data.tradingHoursEnabled && !data.ecoCalendarEnabled && !data.communityVisible}
+              expanded={openCard === "advanced"}
+              onToggle={() => setOpenCard(v => v === "advanced" ? null : "advanced")}
+            >
+              {/* Extraction instructions */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">AI extraction instructions</span>
+                  <span className="text-white/20 text-[10px]">Optional</span>
+                  <PlanBadge plan="core" />
+                </div>
+                <TA id="extract" value={data.extractionInstructions} onChange={v => update({ extractionInstructions: v })} placeholder={"Example: " + EXTRACT_EX[0]} />
+                <div className="space-y-1 mt-1.5">{EXTRACT_EX.map(p => <Preset key={p} text={p} onClick={() => update({ extractionInstructions: p })} />)}</div>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-4">
+              {/* Confidence threshold */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">AI confidence threshold</span>
+                  <PlanBadge plan="pro" />
+                </div>
+                <div className="flex items-center gap-3">
                   <input type="range" min={0} max={100} step={10} value={Number(data.minConfidence)}
                     onChange={e => update({ minConfidence: e.target.value })}
                     className="flex-1 accent-emerald-400 cursor-pointer" />
-                  <span className="text-sm font-mono text-white/55 w-10 text-right shrink-0">{data.minConfidence}</span>
+                  <span className="text-xs font-mono text-white/55 w-10 text-right shrink-0">{data.minConfidence}</span>
                 </div>
-                <p className="text-xs text-white/28 italic">
-                  {Number(data.minConfidence) === 0
-                    ? "0 — Accept all signals regardless of AI confidence"
-                    : Number(data.minConfidence) >= 80
-                    ? `${data.minConfidence} — Only very clear, high-confidence signals`
-                    : `${data.minConfidence} — Discard low-confidence signals`}
-                </p>
+                <p className="text-xs text-white/22 mt-1">{Number(data.minConfidence) === 0 ? "0 — Accept all signals" : `Discard signals below ${data.minConfidence}% confidence`}</p>
               </div>
-            </div>
-
-            {/* Trading hours filter — Elite */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Trading hours filter</span>
-                <PlanBadge plan="elite" />
-              </div>
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  {([
-                    { val: false, label: "Disabled", desc: "Execute signals 24/7 without restrictions" },
-                    { val: true,  label: "Enabled",  desc: "Block signals outside the configured time window" },
-                  ] as const).map(opt => (
-                    <button key={String(opt.val)} type="button" onClick={() => update({ tradingHoursEnabled: opt.val })}
-                      className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
-                        data.tradingHoursEnabled === opt.val
-                          ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
-                          : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
-                      }`}>
-                      <span className="text-xs font-semibold">{opt.label}</span>
-                      <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+              {/* Trading hours */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">Trading hours filter</span>
+                  <PlanBadge plan="elite" />
+                </div>
+                <div className="flex gap-2">
+                  {([{ val: false, label: "Off" }, { val: true, label: "On" }] as const).map(o => (
+                    <button key={String(o.val)} type="button" onClick={() => update({ tradingHoursEnabled: o.val })}
+                      className={`flex-1 py-1.5 rounded-lg border text-xs font-semibold transition-all ${data.tradingHoursEnabled === o.val ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300" : "border-white/8 text-white/35 hover:border-white/15"}`}>
+                      {o.label}
                     </button>
                   ))}
                 </div>
                 {data.tradingHoursEnabled && (
-                  <>
-                    <div className="flex items-center gap-3">
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center gap-2">
                       <div className="flex-1">
-                        <label className="text-xs text-white/30 mb-1.5 block">Start (UTC)</label>
+                        <label className="text-[10px] text-white/25 mb-1 block">Start UTC</label>
                         <input type="number" min={0} max={23} value={data.tradingHoursStart}
                           onChange={e => update({ tradingHoursStart: String(Math.min(23, Math.max(0, Number(e.target.value)))) })}
                           className={inp} />
                       </div>
-                      <div className="pt-5 text-white/25 text-sm shrink-0">→</div>
+                      <span className="text-white/20 text-xs pt-4">→</span>
                       <div className="flex-1">
-                        <label className="text-xs text-white/30 mb-1.5 block">End (UTC)</label>
+                        <label className="text-[10px] text-white/25 mb-1 block">End UTC</label>
                         <input type="number" min={0} max={23} value={data.tradingHoursEnd}
                           onChange={e => update({ tradingHoursEnd: String(Math.min(23, Math.max(0, Number(e.target.value)))) })}
                           className={inp} />
                       </div>
                     </div>
-                    <p className="text-xs text-white/22 -mt-1">
-                      {Number(data.tradingHoursStart) <= Number(data.tradingHoursEnd)
-                        ? `Allowed ${data.tradingHoursStart.padStart(2,"0")}:00–${data.tradingHoursEnd.padStart(2,"0")}:59 UTC`
-                        : `Overnight: ${data.tradingHoursStart.padStart(2,"0")}:00–${data.tradingHoursEnd.padStart(2,"0")}:59 UTC (+1d)`}
-                    </p>
-                    <div>
-                      <p className="text-xs text-white/30 mb-2">Active days</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(["MON","TUE","WED","THU","FRI","SAT","SUN"] as const).map(day => {
-                          const sel = data.tradingHoursDays.includes(day)
-                          const labels: Record<string, string> = { MON:"Mon",TUE:"Tue",WED:"Wed",THU:"Thu",FRI:"Fri",SAT:"Sat",SUN:"Sun" }
-                          return (
-                            <button key={day} type="button"
-                              onClick={() => update({ tradingHoursDays: sel
-                                ? data.tradingHoursDays.filter(d => d !== day)
-                                : [...data.tradingHoursDays, day] })}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
-                                sel ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300"
-                                    : "border-white/8 text-white/30 hover:border-white/15 hover:text-white/60"
-                              }`}>
-                              {labels[day]}
-                            </button>
-                          )
-                        })}
-                      </div>
+                    <div className="flex flex-wrap gap-1">
+                      {(["MON","TUE","WED","THU","FRI","SAT","SUN"] as const).map(day => {
+                        const sel = data.tradingHoursDays.includes(day)
+                        const labels: Record<string, string> = { MON:"Mon",TUE:"Tue",WED:"Wed",THU:"Thu",FRI:"Fri",SAT:"Sat",SUN:"Sun" }
+                        return (
+                          <button key={day} type="button"
+                            onClick={() => update({ tradingHoursDays: sel ? data.tradingHoursDays.filter(d => d !== day) : [...data.tradingHoursDays, day] })}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-all ${sel ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300" : "border-white/8 text-white/30 hover:border-white/15"}`}>
+                            {labels[day]}
+                          </button>
+                        )
+                      })}
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
-            </div>
-
-            {/* Economic calendar — Elite */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Economic calendar filter</span>
-                <PlanBadge plan="elite" />
-              </div>
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  {([
-                    { val: false, label: "Disabled", desc: "Does not check the economic calendar" },
-                    { val: true,  label: "Enabled",  desc: "Adjusts signals near high-impact macro events (ForexFactory)" },
-                  ] as const).map(opt => (
-                    <button key={String(opt.val)} type="button" onClick={() => update({ ecoCalendarEnabled: opt.val })}
-                      className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
-                        data.ecoCalendarEnabled === opt.val
-                          ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
-                          : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
-                      }`}>
-                      <span className="text-xs font-semibold">{opt.label}</span>
-                      <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+              {/* Eco calendar */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">Economic calendar filter</span>
+                  <PlanBadge plan="elite" />
+                </div>
+                <div className="flex gap-2">
+                  {([{ val: false, label: "Off" }, { val: true, label: "On" }] as const).map(o => (
+                    <button key={String(o.val)} type="button" onClick={() => update({ ecoCalendarEnabled: o.val })}
+                      className={`flex-1 py-1.5 rounded-lg border text-xs font-semibold transition-all ${data.ecoCalendarEnabled === o.val ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300" : "border-white/8 text-white/35 hover:border-white/15"}`}>
+                      {o.label}
                     </button>
                   ))}
                 </div>
                 {data.ecoCalendarEnabled && (
-                  <>
+                  <div className="mt-2 space-y-2">
                     <div>
-                      <label className="text-xs text-white/30 mb-1.5 block">Event window (minutes before/after)</label>
-                      <div className="flex items-center gap-2">
-                        <input type="number" min={5} max={120} value={data.ecoCalendarWindow}
-                          onChange={e => update({ ecoCalendarWindow: String(Math.min(120, Math.max(5, Number(e.target.value)))) })}
-                          className={`${inp} w-24`} />
-                        <span className="text-xs text-white/30">min (5–120)</span>
-                      </div>
+                      <label className="text-[10px] text-white/25 mb-1 block">Event window (min)</label>
+                      <input type="number" min={5} max={120} value={data.ecoCalendarWindow}
+                        onChange={e => update({ ecoCalendarWindow: String(Math.min(120, Math.max(5, Number(e.target.value)))) })}
+                        className={`${inp} w-24`} />
                     </div>
-                    <div>
-                      <label className="text-xs text-white/30 mb-1.5 block">AI strategy during event <span className="text-white/20">(optional)</span></label>
-                      <TA id="eco-strategy" value={data.ecoCalendarStrategy}
-                        onChange={v => update({ ecoCalendarStrategy: v })}
-                        placeholder="Example: Reduce lot size to 50% and widen SL" />
-                      <p className="text-xs text-white/22 mt-1.5">If set, the AI applies this strategy instead of blocking the signal.</p>
-                    </div>
-                  </>
+                    <TA id="eco-strategy" value={data.ecoCalendarStrategy} onChange={v => update({ ecoCalendarStrategy: v })} placeholder="AI strategy during events (optional)" />
+                  </div>
                 )}
               </div>
-            </div>
+              {/* Community */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wider">Signal room visibility</span>
+                  <PlanBadge plan="elite" />
+                </div>
+                <div className="flex gap-2">
+                  {([{ val: false, label: "Private" }, { val: true, label: "Public" }] as const).map(o => (
+                    <button key={String(o.val)} type="button" onClick={() => update({ communityVisible: o.val })}
+                      className={`flex-1 py-1.5 rounded-lg border text-xs font-semibold transition-all ${data.communityVisible === o.val ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300" : "border-white/8 text-white/35 hover:border-white/15"}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </PipelineCard>
 
-            {/* Community visibility — Elite */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Signal room visibility</span>
-                <PlanBadge plan="elite" />
-              </div>
-              <div className="space-y-1.5">
-                {([
-                  { val: false, label: "Private", desc: "Your signal room is not listed in the community" },
-                  { val: true,  label: "Public",  desc: "Elite users can discover and follow your signal room" },
-                ] as const).map(opt => (
-                  <button key={String(opt.val)} type="button" onClick={() => update({ communityVisible: opt.val })}
-                    className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
-                      data.communityVisible === opt.val
-                        ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
-                        : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
-                    }`}>
-                    <span className="text-xs font-semibold">{opt.label}</span>
-                    <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
+            <div className="flex gap-3 pt-2">
+              <GhostBtn onClick={() => setPhase("signal")}>← Back</GhostBtn>
+              <GhostBtn onClick={() => setPhase("chart")} className="flex-1">Draw chart & simulate →</GhostBtn>
+              <PrimaryBtn onClick={onNext} disabled={!data.sizingStrategy.trim()} className="flex-1">Continue →</PrimaryBtn>
             </div>
-          </div>
+          </>
         )}
 
-        <div className="flex gap-3 pt-2">
-          <GhostBtn onClick={onBack}>← Back</GhostBtn>
-          <PrimaryBtn onClick={onNext} disabled={!data.sizingStrategy.trim()} className="flex-1">Continue →</PrimaryBtn>
-        </div>
+        {/* ── Phase 3: drawable chart ────────────────────────────────────────── */}
+        {phase === "chart" && (
+          <>
+            {/* Extracted signal compact summary */}
+            {extracted.length > 0 && (
+              <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/[0.02] border border-white/8">
+                <div className="flex items-center gap-2 flex-wrap flex-1">{renderExtractedSummary()}</div>
+                <button onClick={() => setPhase("pipeline")} className="text-[10px] text-white/25 hover:text-white/55 transition-colors shrink-0">edit config</button>
+              </div>
+            )}
+
+            {/* Price range */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <label className={lbl}>Price min</label>
+                <input type="number" step="any" className={inp} placeholder="e.g. 2300" value={priceMin} onChange={e => setPriceMin(e.target.value)} />
+              </div>
+              <div className="flex-1">
+                <label className={lbl}>Price max</label>
+                <input type="number" step="any" className={inp} placeholder="e.g. 2400" value={priceMax} onChange={e => setPriceMax(e.target.value)} />
+              </div>
+              <div className="pt-6">
+                <button type="button" onClick={() => { setPricePath([]); setTEvents([]); setSimResult(null) }}
+                  className="px-3 py-2.5 rounded-xl border border-white/8 text-xs text-white/30 hover:text-white/60 hover:border-white/15 transition-all">
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className="select-none">
+              {renderChart()}
+              <div className="flex items-center gap-4 mt-2">
+                <div className="flex items-center gap-3 text-[10px] text-white/25">
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#a3e635] opacity-50"></span> Entry</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#34d399] opacity-50"></span> TP</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#f87171] opacity-50"></span> SL</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#fb923c] opacity-50"></span> Deleted</span>
+                </div>
+                <div className="flex-1" />
+                <button type="button"
+                  onClick={() => setAddEventMode(v => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${addEventMode ? "border-orange-400/30 bg-orange-400/[0.08] text-orange-300" : "border-white/8 text-white/35 hover:border-white/15 hover:text-white/60"}`}>
+                  {addEventMode ? "Click chart to place deletion event" : "+ Add deletion event"}
+                </button>
+              </div>
+            </div>
+
+            {/* Run simulation */}
+            <button type="button" onClick={handleRunSim}
+              disabled={simLoading || pricePath.length < 2 || !activeMsg.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-500 to-purple-500 text-white font-bold rounded-xl py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(139,92,246,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none">
+              {simLoading && <Spin />}
+              {simLoading ? "Running simulation…" : pricePath.length < 2 ? "Draw a price path first" : "Run simulation →"}
+            </button>
+
+            {/* Simulation result */}
+            {simResult && (
+              <div className="space-y-3">
+                <div className={`flex items-center justify-between px-4 py-3 rounded-xl border ${simResult.total_pnl >= 0 ? "border-emerald-400/20 bg-emerald-400/[0.05]" : "border-red-400/20 bg-red-400/[0.04]"}`}>
+                  <span className="text-sm font-semibold text-white/70">Simulated P&amp;L</span>
+                  <span className={`text-lg font-bold font-mono ${simResult.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {simResult.total_pnl >= 0 ? "+" : ""}{simResult.total_pnl.toFixed(2)} <span className="text-xs font-normal opacity-50">approx.</span>
+                  </span>
+                </div>
+                {simResult.per_signal.map((sig, si) => (
+                  <div key={si} className="space-y-1">
+                    <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">{sig.order_type} {sig.symbol}</p>
+                    {sig.events.length === 0 ? (
+                      <p className="text-xs text-white/20 italic">No events — price never crossed key levels</p>
+                    ) : (
+                      sig.events.map((ev, ei) => (
+                        <div key={ei} className={`flex items-center gap-3 text-xs px-3 py-2 rounded-lg ${
+                          ev.type === "tp" ? "bg-emerald-400/[0.04] text-emerald-300/80"
+                          : ev.type === "sl" ? "bg-red-400/[0.04] text-red-300/80"
+                          : ev.type === "entry" ? "bg-white/[0.03] text-white/55"
+                          : "bg-orange-400/[0.04] text-orange-300/80"
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            ev.type === "tp" ? "bg-emerald-400" : ev.type === "sl" ? "bg-red-400" : ev.type === "entry" ? "bg-white/40" : "bg-orange-400"
+                          }`} />
+                          <span className="flex-1">{ev.description}</span>
+                          {ev.pnl !== undefined && (
+                            <span className={`font-mono font-bold ${ev.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                              {ev.pnl >= 0 ? "+" : ""}{ev.pnl.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <GhostBtn onClick={() => setPhase("pipeline")}>← Back</GhostBtn>
+              <PrimaryBtn onClick={onNext} disabled={!data.sizingStrategy.trim()} className="flex-1">Continue →</PrimaryBtn>
+            </div>
+          </>
+        )}
+
       </div>
     </div>
   )

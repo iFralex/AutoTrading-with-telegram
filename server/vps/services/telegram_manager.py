@@ -172,6 +172,18 @@ class TelegramManager:
         """
         return self._call(self._async_get_groups_for_user(user_id), timeout=60)
 
+    def get_recent_messages(self, login_key: str, group_id: str, limit: int = 15) -> list[dict]:
+        """
+        Ritorna gli ultimi messaggi testuali dal gruppo selezionato usando la sessione pendente.
+
+        Returns:
+            [{"id": int, "text": str, "date": str|null}]
+
+        Raises:
+            ValueError  se login_key non trovato
+        """
+        return self._call(self._async_get_recent_messages(login_key, group_id, limit), timeout=30)
+
     # ── Gestione utenti ──────────────────────────────────────────────────────
 
     def add_user(
@@ -494,6 +506,21 @@ class TelegramManager:
         # Dal più recente al più vecchio → invertiamo per ordine cronologico
         messages.reverse()
         logger.info("Storico Telegram utente %s: %d messaggi scaricati", user_id, len(messages))
+        return messages
+
+    async def _async_get_recent_messages(self, login_key: str, group_id: str, limit: int) -> list[dict]:
+        entry = self._pending.get(login_key)
+        if entry is None:
+            raise ValueError("Sessione di login non trovata")
+        client: TelegramClient = entry["client"]
+        messages: list[dict] = []
+        async for msg in client.iter_messages(int(group_id), limit=limit):
+            if msg.text and msg.text.strip():
+                messages.append({
+                    "id": msg.id,
+                    "text": msg.text,
+                    "date": msg.date.isoformat() if msg.date else None,
+                })
         return messages
 
     async def _async_get_groups(self, login_key: str) -> list[dict]:
