@@ -19,9 +19,40 @@ import functools
 import io
 import json as _json
 import logging
+import random
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
+
+# ── Gemini Flex config (50% cheaper, may queue) ───────────────────────────────
+_FLEX_CONFIG      = {"service_tier": "flex", "http_options": {"timeout": 900_000}}
+_FLEX_MAX_RETRIES = 8
+_FLEX_BASE_DELAY  = 5.0
+_FLEX_MAX_DELAY   = 300.0
+
+
+async def _flex_retry(coro_factory, max_retries: int = _FLEX_MAX_RETRIES):
+    for attempt in range(max_retries):
+        try:
+            return await coro_factory()
+        except Exception as exc:
+            s    = str(exc).lower()
+            code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            retryable = (
+                code in (429, 503)
+                or "429" in s or "503" in s
+                or "resource exhausted" in s
+                or "service unavailable" in s
+                or "overloaded" in s
+                or "capacity" in s
+                or "quota" in s
+            )
+            if not retryable or attempt >= max_retries - 1:
+                raise
+            delay = min(_FLEX_BASE_DELAY * (2 ** attempt) + random.uniform(0, 2), _FLEX_MAX_DELAY)
+            logger.warning("Gemini Flex report: %s (attempt %d/%d) — wait %.0fs",
+                           exc, attempt + 1, max_retries, delay)
+            await asyncio.sleep(delay)
 
 logger = logging.getLogger(__name__)
 
@@ -1182,13 +1213,17 @@ List 3-4 concrete, specific actions (not generic). Base each recommendation on a
 {group_section}
 Respond EXCLUSIVELY in English. Use concrete data in every section. Be specific and direct, not generic."""
 
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-            ),
-        )
+        async def _call():
+            return await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=_FLEX_CONFIG,
+                ),
+            )
+
+        response = await _flex_retry(_call)
         return (response.text or "").strip()
     except Exception as exc:
         logger.warning("AI insights generation failed: %s", exc)
