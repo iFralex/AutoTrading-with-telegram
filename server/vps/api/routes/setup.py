@@ -388,7 +388,7 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
                         desc = "Signal deleted"
                         if deletion_strategy:
                             preview = deletion_strategy[:60] + ("…" if len(deletion_strategy) > 60 else "")
-                            desc += f" — AI action: "{preview}""
+                            desc += f' — AI action: “{preview}”'
                         sig_events.append({"t": t_norm, "type": "signal_deleted", "price": price, "description": desc})
                         state = "deleted"
                         break
