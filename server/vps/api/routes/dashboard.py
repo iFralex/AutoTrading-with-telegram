@@ -222,12 +222,70 @@ async def remove_user_group(
     group_id: int,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Rimuove un gruppo dal profilo e aggiorna il listener Telegram."""
-    store = request.app.state.user_store
-    tm    = request.app.state.telegram_manager
+    """
+    Removes a group from the user's profile, closes all open follower positions,
+    cleans up community follow records, and updates the Telegram listener.
+    """
+    store              = request.app.state.user_store
+    tm                 = request.app.state.telegram_manager
+    signal_log_store   = request.app.state.signal_log_store
+    mt5_trader         = request.app.state.mt5_trader
+    group_follow_store = request.app.state.group_follow_store
+
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:
         raise HTTPException(status_code=404, detail=f"Gruppo {group_id} non trovato per l'utente")
+
+    # ── Close open positions of all community followers ───────────────────────
+    followers = await group_follow_store.get_followers(user_id, group_id)
+    for follower_uid in followers:
+        try:
+            follower_user = await store.get_user(follower_uid)
+            if not follower_user:
+                continue
+            mt5_login    = follower_user.get("mt5_login")
+            mt5_password = follower_user.get("mt5_password")
+            mt5_server   = follower_user.get("mt5_server")
+            if not (mt5_login and mt5_password and mt5_server):
+                continue
+            signal_group_ids = await signal_log_store.get_signal_group_ids_by_group(
+                follower_uid, group_id
+            )
+            if not signal_group_ids:
+                continue
+            sig_id_set = set(signal_group_ids)
+            positions = await mt5_trader.get_positions(
+                user_id=follower_uid,
+                mt5_login=int(mt5_login),
+                mt5_password=mt5_password,
+                mt5_server=mt5_server,
+            )
+            for pos in positions:
+                if pos.get("signal_group_id") in sig_id_set:
+                    try:
+                        await mt5_trader.close_position_by_ticket(
+                            user_id=follower_uid,
+                            ticket=pos["ticket"],
+                            mt5_login=int(mt5_login),
+                            mt5_password=mt5_password,
+                            mt5_server=mt5_server,
+                        )
+                    except Exception as _close_exc:
+                        logger.warning(
+                            "remove_user_group: close follower %s position %s failed: %s",
+                            follower_uid, pos["ticket"], _close_exc,
+                        )
+        except Exception as _exc:
+            logger.warning(
+                "remove_user_group: position cleanup for follower %s failed: %s",
+                follower_uid, _exc,
+            )
+
+    # Remove follow records and shadow user_groups entries for all followers
+    await group_follow_store.delete_by_source(user_id, group_id)
+    for follower_uid in followers:
+        await store.delete_community_follow_entry(follower_uid, group_id)
+
     await store.delete_user_group(user_id, group_id)
     await _restart_listener(store, tm, user_id)
     return {"ok": True}
@@ -683,6 +741,7 @@ async def delete_user(
     backtest_store       = request.app.state.backtest_store
     session_store        = request.app.state.setup_session_store
     monthly_report_store = request.app.state.monthly_report_store
+    group_follow_store   = request.app.state.group_follow_store
     tm                   = request.app.state.telegram_manager
     mt5_trader           = request.app.state.mt5_trader
     sessions_dir         = request.app.state.sessions_dir
@@ -727,6 +786,8 @@ async def delete_user(
     await closed_trade_store.delete_by_user_id(user_id)
     await backtest_store.delete_all_runs_for_user(user_id)
     await monthly_report_store.delete_by_user_id(user_id)
+    await group_follow_store.delete_by_follower(user_id)
+    await group_follow_store.delete_by_source_user(user_id)
     await store.delete_all_links_for_user(user_id)
     await store.delete_all_user_groups(user_id)
     await store.delete(user_id)
@@ -874,3 +935,266 @@ async def download_saved_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Community Groups (Elite feature) ─────────────────────────────────────────
+
+def _group_alias(token: str) -> str:
+    return f"Channel #{token[:6].upper()}"
+
+
+@router.get("/community/groups")
+async def list_community_groups(
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Lists all public community groups with trust score, sorted by score descending."""
+    store              = request.app.state.user_store
+    log_store          = request.app.state.signal_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+
+    community_groups = await store.get_all_community_groups()
+    results = []
+    for g in community_groups:
+        uid   = g["user_id"]
+        gid   = g["group_id"]
+        token = g["community_token"]
+        try:
+            trade_stats  = await closed_trade_store.get_community_group_stats(uid, gid)
+            signal_stats = await log_store.get_stats_by_user_id(uid, group_id=gid)
+            score_data   = _compute_trust_score(trade_stats, signal_stats)
+        except Exception:
+            trade_stats  = {"total_trades": 0}
+            score_data   = {"score": None, "label": "No data", "breakdown": {}}
+        results.append({
+            "token":                  token,
+            "alias":                  _group_alias(token),
+            "score":                  score_data["score"],
+            "label":                  score_data["label"],
+            "trade_count":            int(trade_stats.get("total_trades") or 0),
+            "win_rate":               trade_stats.get("win_rate") if trade_stats.get("total_trades") else None,
+            "total_profit":           trade_stats.get("total_profit", 0.0),
+            "profit_factor":          trade_stats.get("profit_factor"),
+            "max_consecutive_losses": trade_stats.get("max_consecutive_losses", 0),
+            "breakdown":              score_data.get("breakdown", {}),
+        })
+    results.sort(key=lambda x: (x["score"] is None, -(x["score"] or 0)))
+    return {"groups": results}
+
+
+@router.get("/community/groups/{token}")
+async def get_community_group_detail(
+    token:   str,
+    user_id: str | None = Query(None, description="Viewer user_id for is_following check"),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Detailed stats, equity curve and recent trades for a community group."""
+    store              = request.app.state.user_store
+    log_store          = request.app.state.signal_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+    group_follow_store = request.app.state.group_follow_store
+
+    grp = await store.get_user_group_by_token(token)
+    if grp is None or not grp.get("community_visible"):
+        raise HTTPException(status_code=404, detail="Community group not found")
+
+    src_uid = grp["user_id"]
+    src_gid = grp["group_id"]
+
+    trade_stats   = await closed_trade_store.get_community_group_stats(src_uid, src_gid)
+    equity_curve  = await closed_trade_store.get_community_group_equity(src_uid, src_gid)
+    recent_trades = await closed_trade_store.get_community_group_trades(src_uid, src_gid, limit=30)
+    signal_stats  = await log_store.get_stats_by_user_id(src_uid, group_id=src_gid)
+    score_data    = _compute_trust_score(trade_stats, signal_stats)
+
+    is_following = False
+    if user_id:
+        is_following = await group_follow_store.is_following(user_id, src_uid, src_gid)
+
+    return {
+        "token":         token,
+        "alias":         _group_alias(token),
+        "score":         score_data["score"],
+        "label":         score_data["label"],
+        "is_following":  is_following,
+        "trade_stats":   trade_stats,
+        "equity_curve":  equity_curve,
+        "recent_trades": recent_trades,
+        "breakdown":     score_data.get("breakdown", {}),
+    }
+
+
+class FollowGroupBody(BaseModel):
+    follower_user_id: str
+
+
+@router.post("/community/groups/{token}/follow")
+async def follow_community_group(
+    token: str,
+    body:  FollowGroupBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Follow a community group: creates shadow user_groups entry and group_follows record."""
+    store              = request.app.state.user_store
+    group_follow_store = request.app.state.group_follow_store
+
+    grp = await store.get_user_group_by_token(token)
+    if grp is None or not grp.get("community_visible"):
+        raise HTTPException(status_code=404, detail="Community group not found")
+
+    follower = await store.get_user(body.follower_user_id)
+    if follower is None:
+        raise HTTPException(status_code=404, detail="Follower user not found")
+
+    if body.follower_user_id == grp["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot follow your own group")
+
+    src_uid = grp["user_id"]
+    src_gid = grp["group_id"]
+
+    already = await group_follow_store.is_following(body.follower_user_id, src_uid, src_gid)
+    if already:
+        return {"ok": True, "already_following": True}
+
+    await store.create_community_follow_entry(
+        follower_user_id     = body.follower_user_id,
+        source_group_id      = src_gid,
+        source_group_name    = grp["group_name"],
+        sizing_strategy      = grp.get("sizing_strategy"),
+        management_strategy  = grp.get("management_strategy"),
+        range_entry_pct      = grp.get("range_entry_pct", 0),
+        entry_if_favorable   = grp.get("entry_if_favorable", False),
+        deletion_strategy    = grp.get("deletion_strategy"),
+        extraction_instructions = grp.get("extraction_instructions"),
+    )
+    await group_follow_store.add_follow(body.follower_user_id, src_uid, src_gid)
+    return {"ok": True, "already_following": False}
+
+
+@router.delete("/community/groups/{token}/follow")
+async def unfollow_community_group(
+    token:           str,
+    user_id:         str  = Query(...),
+    close_positions: bool = Query(default=True),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Unfollow: optionally closes open positions, removes shadow entry and follow record."""
+    store              = request.app.state.user_store
+    group_follow_store = request.app.state.group_follow_store
+    signal_log_store   = request.app.state.signal_log_store
+    mt5_trader         = request.app.state.mt5_trader
+
+    grp = await store.get_user_group_by_token(token)
+    if grp is None:
+        raise HTTPException(status_code=404, detail="Community group not found")
+
+    src_uid = grp["user_id"]
+    src_gid = grp["group_id"]
+
+    if close_positions:
+        try:
+            follower_user = await store.get_user(user_id)
+            if follower_user:
+                mt5_login    = follower_user.get("mt5_login")
+                mt5_password = follower_user.get("mt5_password")
+                mt5_server   = follower_user.get("mt5_server")
+                if mt5_login and mt5_password and mt5_server:
+                    signal_group_ids = await signal_log_store.get_signal_group_ids_by_group(
+                        user_id, src_gid
+                    )
+                    if signal_group_ids:
+                        sig_id_set = set(signal_group_ids)
+                        positions = await mt5_trader.get_positions(
+                            user_id=user_id,
+                            mt5_login=int(mt5_login),
+                            mt5_password=mt5_password,
+                            mt5_server=mt5_server,
+                        )
+                        for pos in positions:
+                            if pos.get("signal_group_id") in sig_id_set:
+                                try:
+                                    await mt5_trader.close_position_by_ticket(
+                                        user_id=user_id,
+                                        ticket=pos["ticket"],
+                                        mt5_login=int(mt5_login),
+                                        mt5_password=mt5_password,
+                                        mt5_server=mt5_server,
+                                    )
+                                except Exception as _ce:
+                                    logger.warning("unfollow close pos %s failed: %s", pos["ticket"], _ce)
+        except Exception as _exc:
+            logger.warning("unfollow position close failed: %s", _exc)
+
+    await store.delete_community_follow_entry(user_id, src_gid)
+    await group_follow_store.remove_follow(user_id, src_uid, src_gid)
+    return {"ok": True}
+
+
+@router.get("/user/{user_id}/community-follows")
+async def list_community_follows(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Lists all community groups the user is following, with stats and their custom settings."""
+    store              = request.app.state.user_store
+    group_follow_store = request.app.state.group_follow_store
+    log_store          = request.app.state.signal_log_store
+    closed_trade_store = request.app.state.closed_trade_store
+
+    following = await group_follow_store.get_following(user_id)
+    results   = []
+    for f in following:
+        src_uid = f["source_user_id"]
+        src_gid = f["source_group_id"]
+
+        grp = await store.get_user_group(src_uid, src_gid)
+        if grp is None:
+            continue
+        token = grp.get("community_token") or ""
+        alias = _group_alias(token) if token else f"Channel #{src_gid}"
+
+        shadow = await store.get_community_follow_entry(user_id, src_gid)
+
+        try:
+            trade_stats = await closed_trade_store.get_community_group_stats(src_uid, src_gid)
+            signal_stats = await log_store.get_stats_by_user_id(src_uid, group_id=src_gid)
+            score_data  = _compute_trust_score(trade_stats, signal_stats)
+        except Exception:
+            trade_stats = {"total_trades": 0}
+            score_data  = {"score": None, "label": "No data"}
+
+        results.append({
+            "token":        token,
+            "alias":        alias,
+            "score":        score_data["score"],
+            "label":        score_data["label"],
+            "trade_count":  int(trade_stats.get("total_trades") or 0),
+            "win_rate":     trade_stats.get("win_rate"),
+            "total_profit": trade_stats.get("total_profit"),
+            "followed_at":  f["created_at"],
+            "my_settings":  shadow or {},
+        })
+    return {"following": results}
+
+
+@router.patch("/user/{user_id}/community-follows/{token}")
+async def update_community_follow_settings(
+    user_id: str,
+    token:   str,
+    body: UpdateGroupSettingsBody,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Updates the follower's personal strategies for a followed community group."""
+    store              = request.app.state.user_store
+    group_follow_store = request.app.state.group_follow_store
+
+    grp = await store.get_user_group_by_token(token)
+    if grp is None:
+        raise HTTPException(status_code=404, detail="Community group not found")
+
+    src_gid = grp["group_id"]
+    if not await group_follow_store.is_following(user_id, grp["user_id"], src_gid):
+        raise HTTPException(status_code=404, detail="You are not following this group")
+
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    await store.update_user_group_settings(user_id, src_gid, fields)
+    return {"ok": True}

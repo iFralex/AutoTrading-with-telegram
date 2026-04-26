@@ -975,3 +975,71 @@ class ClosedTradeStore:
             "win_rate":     round(wins / total * 100, 1) if total else 0.0,
             "total_profit": round(profit, 2),
         }
+
+    # ── Community Groups ─────────────────────────────────────────────────────
+
+    _COMMUNITY_WHERE = (
+        "user_id = ? AND signal_group_id IN ("
+        "  SELECT DISTINCT signal_group_id FROM signal_logs"
+        "  WHERE user_id = ? AND group_id = ? AND signal_group_id IS NOT NULL"
+        ")"
+    )
+
+    async def get_community_group_stats(
+        self, source_user_id: str, source_group_id: int
+    ) -> dict:
+        """Full stats for a community group (identified by source user + group)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_full_stats(
+                db,
+                self._COMMUNITY_WHERE,
+                (source_user_id, source_user_id, source_group_id),
+            )
+
+    async def get_community_group_equity(
+        self, source_user_id: str, source_group_id: int
+    ) -> list[dict]:
+        """Daily cumulative PnL curve for a community group."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                f"""
+                SELECT date(close_time) AS day, COALESCE(SUM(profit), 0) AS daily_pnl
+                FROM closed_trades
+                WHERE {self._COMMUNITY_WHERE} AND profit IS NOT NULL
+                GROUP BY date(close_time)
+                ORDER BY day ASC
+                """,
+                (source_user_id, source_user_id, source_group_id),
+            )
+            rows = await cursor.fetchall()
+        cumulative = 0.0
+        result = []
+        for row in rows:
+            daily = float(row[1] or 0)
+            cumulative += daily
+            result.append({
+                "day":            row[0],
+                "daily_pnl":      round(daily, 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result
+
+    async def get_community_group_trades(
+        self, source_user_id: str, source_group_id: int, limit: int = 30
+    ) -> list[dict]:
+        """Recent trades for a community group."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""
+                SELECT ticket, symbol, order_type, lots, entry_price, close_price,
+                       sl, tp, profit, reason, open_time, close_time
+                FROM closed_trades
+                WHERE {self._COMMUNITY_WHERE}
+                ORDER BY close_time DESC
+                LIMIT ?
+                """,
+                (source_user_id, source_user_id, source_group_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]

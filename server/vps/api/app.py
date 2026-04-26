@@ -53,6 +53,7 @@ from vps.services.vps_monitor import VpsMonitor
 from vps.services.economic_calendar import EconomicCalendarService
 from vps.services.monthly_report import MonthlyReportGenerator
 from vps.services.monthly_report_store import MonthlyReportStore
+from vps.services.group_follow_store import GroupFollowStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,11 @@ async def lifespan(app: FastAPI):
     monthly_report_store = MonthlyReportStore(_db_path)
     await monthly_report_store.init()
     app.state.monthly_report_store = monthly_report_store
+
+    # Community group follows
+    group_follow_store = GroupFollowStore(_db_path)
+    await group_follow_store.init()
+    app.state.group_follow_store = group_follow_store
 
     # Backtest store + engine
     backtest_store = BacktestStore(_db_path)
@@ -831,6 +837,21 @@ async def lifespan(app: FastAPI):
         ]
 
         await _save_log()
+
+        # ── Community group propagation ────────────────────────────────────────
+        if not _is_forwarded and group_id is not None:
+            try:
+                followers = await app.state.group_follow_store.get_followers(user_id, group_id)
+                for follower_uid in followers:
+                    ulog.info(
+                        "Community propagation %s/%s → follower %s",
+                        user_id, group_id, follower_uid,
+                    )
+                    asyncio.get_event_loop().create_task(
+                        on_message(follower_uid, group_id, message, raw_event, sender, _is_forwarded=True)
+                    )
+            except Exception as _comm_exc:
+                ulog.warning("Community propagation errore: %s", _comm_exc)
 
         # ── Step 6.5: notifica Telegram per ogni ordine eseguito/fallito ──────
         for res in results:

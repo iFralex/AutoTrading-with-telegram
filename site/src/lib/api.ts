@@ -369,6 +369,40 @@ export interface SavedReport {
   size_bytes:   number
 }
 
+// ── Community Groups (Elite) ──────────────────────────────────────────────────
+
+export interface CommunityGroup {
+  token:                  string
+  alias:                  string
+  score:                  number | null
+  label:                  string
+  trade_count:            number
+  win_rate:               number | null
+  total_profit:           number
+  profit_factor:          number | null
+  max_consecutive_losses: number
+  breakdown:              Record<string, number>
+}
+
+export interface CommunityGroupDetail extends CommunityGroup {
+  is_following:  boolean
+  trade_stats:   TradeStats
+  equity_curve:  { day: string; daily_pnl: number; cumulative_pnl: number }[]
+  recent_trades: ClosedTrade[]
+}
+
+export interface CommunityFollow {
+  token:        string
+  alias:        string
+  score:        number | null
+  label:        string
+  trade_count:  number
+  win_rate:     number | null
+  total_profit: number | null
+  followed_at:  string
+  my_settings:  Partial<UserGroup>
+}
+
 export const api = {
   /**
    * Step 2a — invia il codice OTP al numero di telefono.
@@ -771,6 +805,64 @@ export const api = {
     a.download = `report_${year}_${String(month).padStart(2, "0")}.pdf`
     a.click()
     URL.revokeObjectURL(objUrl)
+  },
+
+  // ── Community Groups (Elite) ──────────────────────────────────────────────
+
+  /** List all public community groups sorted by trust score. */
+  listCommunityGroups() {
+    return call<{ groups: CommunityGroup[] }>("GET", "/api/dashboard/community/groups")
+  },
+
+  /** Detailed stats for a community group (equity curve, recent trades, score). */
+  getCommunityGroup(token: string, userId?: string) {
+    const q = userId ? `?user_id=${encodeURIComponent(userId)}` : ""
+    return call<CommunityGroupDetail>(
+      "GET",
+      `/api/dashboard/community/groups/${encodeURIComponent(token)}${q}`
+    )
+  },
+
+  /** Follow a community group (creates shadow settings entry). */
+  followCommunityGroup(token: string, followerUserId: string) {
+    return call<{ ok: boolean; already_following: boolean }>(
+      "POST",
+      `/api/dashboard/community/groups/${encodeURIComponent(token)}/follow`,
+      { follower_user_id: followerUserId }
+    )
+  },
+
+  /** Unfollow a community group (optionally closes open positions). */
+  unfollowCommunityGroup(token: string, userId: string, closePositions = true) {
+    return call<{ ok: boolean }>(
+      "DELETE",
+      `/api/dashboard/community/groups/${encodeURIComponent(token)}/follow` +
+        `?user_id=${encodeURIComponent(userId)}&close_positions=${closePositions}`
+    )
+  },
+
+  /** List community groups the user is currently following. */
+  listCommunityFollows(userId: string) {
+    return call<{ following: CommunityFollow[] }>(
+      "GET",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/community-follows`
+    )
+  },
+
+  /** Update personal strategies for a followed community group. */
+  updateCommunityFollowSettings(
+    userId: string,
+    token: string,
+    settings: Partial<Pick<UserGroup,
+      "sizing_strategy" | "management_strategy" | "range_entry_pct" |
+      "entry_if_favorable" | "deletion_strategy" | "extraction_instructions"
+    >>
+  ) {
+    return call<{ ok: boolean }>(
+      "PATCH",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/community-follows/${encodeURIComponent(token)}`,
+      settings
+    )
   },
 
   // ── Backtest ──────────────────────────────────────────────────────────────

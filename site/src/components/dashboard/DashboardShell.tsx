@@ -15,6 +15,7 @@ import {
   AlertCircle,
   History,
   TrendingUp,
+  Users,
 } from "lucide-react"
 import { api, type DashboardUserResponse } from "@/src/lib/api"
 import { OverviewPage }   from "./pages/OverviewPage"
@@ -25,25 +26,27 @@ import { LogsPage }       from "./pages/LogsPage"
 import { TestPage }       from "./pages/TestPage"
 import { TradesPage }     from "./pages/TradesPage"
 import { BacktestPage }   from "./pages/BacktestPage"
+import { CommunityPage }  from "./pages/CommunityPage"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades" | "backtest"
+type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades" | "backtest" | "community"
 
 const NAV: {
   id: Section
   label: string
   Icon: React.ComponentType<{ className?: string }>
-  hint?: string
+  alwaysEnabled?: boolean
 }[] = [
-  { id: "overview",  label: "Panoramica",     Icon: LayoutDashboard },
-  { id: "analytics", label: "Statistiche",    Icon: BarChart2 },
-  { id: "ai",        label: "AI & Costi",     Icon: Bot },
-  { id: "settings",  label: "Configurazione", Icon: Settings2 },
-  { id: "logs",      label: "Log Segnali",    Icon: ScrollText },
-  { id: "trades",    label: "Trade Recenti",  Icon: History },
-  { id: "backtest",  label: "Backtest",       Icon: TrendingUp },
-  { id: "test",      label: "Strumenti",      Icon: FlaskConical },
+  { id: "overview",   label: "Panoramica",     Icon: LayoutDashboard },
+  { id: "analytics",  label: "Statistiche",    Icon: BarChart2 },
+  { id: "ai",         label: "AI & Costi",     Icon: Bot },
+  { id: "settings",   label: "Configurazione", Icon: Settings2 },
+  { id: "logs",       label: "Log Segnali",    Icon: ScrollText },
+  { id: "trades",     label: "Trade Recenti",  Icon: History },
+  { id: "backtest",   label: "Backtest",       Icon: TrendingUp },
+  { id: "community",  label: "Community",      Icon: Users, alwaysEnabled: true },
+  { id: "test",       label: "Strumenti",      Icon: FlaskConical },
 ]
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
@@ -110,9 +113,9 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
 
         {/* Navigation */}
         <nav className="flex-1 py-2.5 px-2 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ id, label, Icon }) => {
+          {NAV.map(({ id, label, Icon, alwaysEnabled }) => {
             const active   = section === id
-            const disabled = !data && id !== "overview"
+            const disabled = !data && id !== "overview" && !alwaysEnabled
             return (
               <button
                 key={id}
@@ -241,7 +244,9 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
-          {loading ? (
+          {section === "community" ? (
+            <CommunityPage userId={data?.user.user_id} />
+          ) : loading ? (
             <LoadingState />
           ) : !data ? (
             <EmptyState onSearch={search} />

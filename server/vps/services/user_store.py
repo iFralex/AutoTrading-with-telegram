@@ -113,6 +113,12 @@ _MIGRATIONS_GROUPS = [
     "ALTER TABLE user_groups ADD COLUMN eco_calendar_enabled INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE user_groups ADD COLUMN eco_calendar_window INTEGER NOT NULL DEFAULT 30",
     "ALTER TABLE user_groups ADD COLUMN eco_calendar_strategy TEXT",
+    # Community Groups (Elite feature)
+    "ALTER TABLE user_groups ADD COLUMN community_token TEXT",
+    "ALTER TABLE user_groups ADD COLUMN community_visible INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_groups ADD COLUMN is_community_follow INTEGER NOT NULL DEFAULT 0",
+    # Backfill tokens for existing real groups
+    "UPDATE user_groups SET community_token = hex(randomblob(8)) WHERE community_token IS NULL AND is_community_follow = 0",
 ]
 
 _CREATE_USER_GROUPS_INDEX = """
@@ -306,14 +312,17 @@ class UserStore:
         active: bool = True,
     ) -> None:
         """Inserisce o aggiorna un gruppo utente."""
+        import secrets as _secrets
+        new_token = _secrets.token_hex(8)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
                 INSERT INTO user_groups
                     (user_id, group_id, group_name,
                      sizing_strategy, management_strategy, range_entry_pct,
-                     entry_if_favorable, deletion_strategy, extraction_instructions, active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     entry_if_favorable, deletion_strategy, extraction_instructions,
+                     active, community_token, community_visible, is_community_follow)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
                 ON CONFLICT(user_id, group_id) DO UPDATE SET
                     group_name              = excluded.group_name,
                     sizing_strategy         = excluded.sizing_strategy,
@@ -322,7 +331,8 @@ class UserStore:
                     entry_if_favorable      = excluded.entry_if_favorable,
                     deletion_strategy       = excluded.deletion_strategy,
                     extraction_instructions = excluded.extraction_instructions,
-                    active                  = excluded.active
+                    active                  = excluded.active,
+                    community_token         = COALESCE(community_token, excluded.community_token)
                 """,
                 (
                     user_id, group_id, group_name,
@@ -331,9 +341,104 @@ class UserStore:
                     1 if entry_if_favorable else 0,
                     deletion_strategy, extraction_instructions,
                     1 if active else 0,
+                    new_token,
                 ),
             )
             await db.commit()
+
+    # ── Community Groups ─────────────────────────────────────────────────────
+
+    async def get_all_community_groups(self) -> list[dict]:
+        """Returns all public community groups (active, non-follow, visible)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, group_id, group_name,
+                       community_token, community_visible, is_community_follow,
+                       sizing_strategy, management_strategy, range_entry_pct,
+                       entry_if_favorable, deletion_strategy, extraction_instructions
+                FROM user_groups
+                WHERE active = 1
+                  AND is_community_follow = 0
+                  AND community_visible = 1
+                  AND community_token IS NOT NULL
+                """
+            )
+            rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_user_group_by_token(self, community_token: str) -> dict | None:
+        """Returns a user_group by its community_token."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM user_groups WHERE community_token = ?",
+                (community_token,),
+            )
+            row = await cursor.fetchone()
+        return _group_row_to_dict(row) if row is not None else None
+
+    async def create_community_follow_entry(
+        self,
+        follower_user_id: str,
+        source_group_id: int,
+        source_group_name: str,
+        *,
+        sizing_strategy: str | None = None,
+        management_strategy: str | None = None,
+        range_entry_pct: int = 0,
+        entry_if_favorable: bool = False,
+        deletion_strategy: str | None = None,
+        extraction_instructions: str | None = None,
+    ) -> None:
+        """Creates an inactive shadow user_groups entry so a follower receives propagated messages."""
+        import secrets as _secrets
+        token = _secrets.token_hex(8)
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO user_groups
+                    (user_id, group_id, group_name,
+                     sizing_strategy, management_strategy, range_entry_pct,
+                     entry_if_favorable, deletion_strategy, extraction_instructions,
+                     active, is_community_follow, community_token, community_visible)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, 0)
+                """,
+                (
+                    follower_user_id, source_group_id, source_group_name,
+                    sizing_strategy, management_strategy,
+                    max(0, min(100, int(range_entry_pct))),
+                    1 if entry_if_favorable else 0,
+                    deletion_strategy, extraction_instructions,
+                    token,
+                ),
+            )
+            await db.commit()
+
+    async def delete_community_follow_entry(
+        self, follower_user_id: str, source_group_id: int
+    ) -> None:
+        """Removes the shadow community follow entry from user_groups."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "DELETE FROM user_groups WHERE user_id = ? AND group_id = ? AND is_community_follow = 1",
+                (follower_user_id, source_group_id),
+            )
+            await db.commit()
+
+    async def get_community_follow_entry(
+        self, follower_user_id: str, source_group_id: int
+    ) -> dict | None:
+        """Returns the shadow community follow entry for a follower + source group."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM user_groups WHERE user_id = ? AND group_id = ? AND is_community_follow = 1",
+                (follower_user_id, source_group_id),
+            )
+            row = await cursor.fetchone()
+        return _group_row_to_dict(row) if row is not None else None
 
     async def update_user_group_settings(
         self,
@@ -743,4 +848,12 @@ def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
         d["eco_calendar_enabled"]   = False
         d["eco_calendar_window"]    = 30
         d["eco_calendar_strategy"]  = None
+    try:
+        d["community_token"]        = row["community_token"] or None
+        d["community_visible"]      = bool(row["community_visible"] if row["community_visible"] is not None else 1)
+        d["is_community_follow"]    = bool(row["is_community_follow"] or 0)
+    except (IndexError, KeyError):
+        d["community_token"]        = None
+        d["community_visible"]      = True
+        d["is_community_follow"]    = False
     return d

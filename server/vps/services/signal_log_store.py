@@ -482,6 +482,21 @@ class SignalLogStore:
         }
 
 
+    async def get_signal_group_ids_by_group(self, user_id: str, group_id: int) -> list[str]:
+        """Returns all distinct signal_group_ids for a given user+group combination."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT DISTINCT signal_group_id FROM signal_logs
+                WHERE user_id = ? AND group_id = ?
+                  AND signal_group_id IS NOT NULL AND is_signal = 1
+                """,
+                (user_id, group_id),
+            )
+            rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _row_to_dict(row: aiosqlite.Row) -> dict:
