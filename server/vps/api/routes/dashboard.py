@@ -23,7 +23,11 @@ import shutil
 import time
 from typing import Any
 
+import asyncio
+from datetime import date
+
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from vps.services.signal_processor import TradeSignal
@@ -192,6 +196,7 @@ class UpdateGroupSettingsBody(BaseModel):
     min_confidence:          int | None = Field(None, ge=0, le=100)
     eco_calendar_enabled:    bool | None = None
     eco_calendar_window:     int | None = Field(None, ge=5, le=120)
+    eco_calendar_strategy:   str | None = None
 
 
 @router.patch("/user/{user_id}/groups/{group_id}")
@@ -232,25 +237,47 @@ async def remove_user_group(
 
 def _compute_trust_score(trade_stats: dict, signal_stats: dict) -> dict:
     """
-    Formula: win_rate*0.5 + volume_score + exec_rate*0.25
-    - win_rate (0-100) → 0-50 punti
-    - min(trades/30,1)*25 → 0-25 punti (volume)
-    - execution_success_rate (0-100) → 0-25 punti
+    Formula (tot. 100 punti):
+      - Win Rate       (0-35): win_rate * 0.35
+      - Profit Factor  (0-25): min(PF/3, 1) * 25  — penalizza PF < 1
+      - Volume         (0-15): min(trades/50, 1) * 15
+      - Exec Rate      (0-15): exec_success_rate * 0.15
+      - Streak         (0-10): 10 * (1 - min(max_consec_losses/10, 1))
     """
     total_trades = int(trade_stats.get("total_trades") or 0)
     if total_trades == 0:
-        return {"score": None, "label": "Nessun dato"}
-    wins = int(trade_stats.get("wins") or 0)
-    win_rate     = wins / total_trades * 100
-    volume_score = min(total_trades / 30, 1.0) * 25
-    exec_rate    = float(signal_stats.get("execution_success_rate") or 0)
-    score        = round(win_rate * 0.5 + volume_score + exec_rate * 0.25)
-    score        = max(0, min(100, score))
+        return {"score": None, "label": "Nessun dato", "breakdown": {}}
+
+    wins               = int(trade_stats.get("wins") or 0)
+    win_rate           = wins / total_trades * 100
+    pf                 = trade_stats.get("profit_factor")
+    max_consec_losses  = int(trade_stats.get("max_consecutive_losses") or 0)
+    exec_rate          = float(signal_stats.get("execution_success_rate") or 0)
+
+    win_rate_score  = round(win_rate * 0.35, 1)
+    pf_score        = round(min((pf or 0) / 3.0, 1.0) * 25, 1) if pf is not None else 0.0
+    volume_score    = round(min(total_trades / 50.0, 1.0) * 15, 1)
+    exec_score      = round(exec_rate * 0.15, 1)
+    streak_score    = round(10.0 * (1.0 - min(max_consec_losses / 10.0, 1.0)), 1)
+
+    score = max(0, min(100, round(win_rate_score + pf_score + volume_score + exec_score + streak_score)))
+
     if score >= 75:   label = "Eccellente"
     elif score >= 55: label = "Buono"
     elif score >= 35: label = "Discreto"
     else:             label = "Basso"
-    return {"score": score, "label": label}
+
+    return {
+        "score": score,
+        "label": label,
+        "breakdown": {
+            "win_rate_score":       win_rate_score,
+            "profit_factor_score":  pf_score,
+            "volume_score":         volume_score,
+            "exec_rate_score":      exec_score,
+            "streak_score":         streak_score,
+        },
+    }
 
 
 @router.get("/trust-scores")
@@ -275,11 +302,15 @@ async def get_trust_scores(
         signal_stats = await log_store.get_stats_by_user_id(user_id, group_id=gid)
         score_data   = _compute_trust_score(trade_stats, signal_stats)
         scores.append({
-            "group_id":   gid,
-            "group_name": g["group_name"],
-            "score":      score_data["score"],
-            "label":      score_data["label"],
-            "trade_count": trade_stats.get("total_trades", 0),
+            "group_id":               gid,
+            "group_name":             g["group_name"],
+            "score":                  score_data["score"],
+            "label":                  score_data["label"],
+            "trade_count":            trade_stats.get("total_trades", 0),
+            "win_rate":               trade_stats.get("win_rate", 0.0),
+            "profit_factor":          trade_stats.get("profit_factor"),
+            "max_consecutive_losses": trade_stats.get("max_consecutive_losses", 0),
+            "breakdown":              score_data.get("breakdown", {}),
         })
     return {"scores": scores}
 
@@ -287,7 +318,10 @@ async def get_trust_scores(
 # ── Drawdown alert (Feature 6) ────────────────────────────────────────────────
 
 class DrawdownSettingsBody(BaseModel):
-    drawdown_alert_pct: float | None = Field(None, ge=0, le=100)
+    drawdown_alert_pct:   float | None = Field(None, ge=0, le=100)
+    drawdown_period:      str | None   = Field(None, pattern="^(daily|weekly|monthly|custom)$")
+    drawdown_period_days: int | None   = Field(None, ge=1, le=365)
+    drawdown_strategy:    str | None   = None
 
 
 @router.get("/user/{user_id}/drawdown-status")
@@ -295,14 +329,19 @@ async def get_drawdown_status(
     user_id: str,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Stato drawdown: se il trading è sospeso e la soglia configurata."""
+    """Stato drawdown: se il trading è sospeso + configurazione completa."""
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
-    paused    = user_id in request.app.state.drawdown_paused_users
-    threshold = user.get("drawdown_alert_pct")
-    return {"paused": paused, "threshold": threshold}
+    paused = user_id in request.app.state.drawdown_paused_users
+    return {
+        "paused":        paused,
+        "threshold":     user.get("drawdown_alert_pct"),
+        "period":        user.get("drawdown_period") or "daily",
+        "period_days":   user.get("drawdown_period_days") or 1,
+        "strategy":      user.get("drawdown_strategy"),
+    }
 
 
 @router.patch("/user/{user_id}/drawdown-settings")
@@ -311,13 +350,19 @@ async def update_drawdown_settings(
     body: DrawdownSettingsBody,
     request: Request = None,  # type: ignore[assignment]
 ):
-    """Aggiorna la soglia drawdown giornaliero (% balance). 0 o null = disabilitato."""
+    """Aggiorna tutte le impostazioni drawdown."""
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
     pct = body.drawdown_alert_pct
-    await store.update_drawdown_alert(user_id, pct if pct and pct > 0 else None)
+    await store.update_drawdown_settings_full(
+        user_id,
+        drawdown_alert_pct   = pct if pct and pct > 0 else None,
+        drawdown_period      = body.drawdown_period or "daily",
+        drawdown_period_days = body.drawdown_period_days or 1,
+        drawdown_strategy    = body.drawdown_strategy or None,
+    )
     return {"ok": True}
 
 
@@ -631,16 +676,17 @@ async def delete_user(
       - Elimina eventuali signal_links
       - Elimina la sessione di setup temporanea (setup_sessions.db)
     """
-    store              = request.app.state.user_store
-    log_store          = request.app.state.signal_log_store
-    ai_log_store       = request.app.state.ai_log_store
-    closed_trade_store = request.app.state.closed_trade_store
-    backtest_store     = request.app.state.backtest_store
-    session_store      = request.app.state.setup_session_store
-    tm                 = request.app.state.telegram_manager
-    mt5_trader         = request.app.state.mt5_trader
-    sessions_dir       = request.app.state.sessions_dir
-    mt5_users_dir      = request.app.state.mt5_users_dir
+    store                = request.app.state.user_store
+    log_store            = request.app.state.signal_log_store
+    ai_log_store         = request.app.state.ai_log_store
+    closed_trade_store   = request.app.state.closed_trade_store
+    backtest_store       = request.app.state.backtest_store
+    session_store        = request.app.state.setup_session_store
+    monthly_report_store = request.app.state.monthly_report_store
+    tm                   = request.app.state.telegram_manager
+    mt5_trader           = request.app.state.mt5_trader
+    sessions_dir         = request.app.state.sessions_dir
+    mt5_users_dir        = request.app.state.mt5_users_dir
 
     user = await store.get_user(user_id)
     if user is None:
@@ -680,6 +726,7 @@ async def delete_user(
     await ai_log_store.delete_by_user_id(user_id)
     await closed_trade_store.delete_by_user_id(user_id)
     await backtest_store.delete_all_runs_for_user(user_id)
+    await monthly_report_store.delete_by_user_id(user_id)
     await store.delete_all_links_for_user(user_id)
     await store.delete_all_user_groups(user_id)
     await store.delete(user_id)
@@ -725,3 +772,105 @@ async def reset_user_stats(
         "deleted_ai_logs":     deleted_ai,
         "deleted_trades":      deleted_trades,
     }
+
+
+@router.post("/user/{user_id}/generate-report")
+async def generate_report(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    send_telegram: bool = Query(default=True),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Genera un report PDF per gli ultimi N giorni e lo restituisce come download.
+    Se send_telegram=true, lo invia anche via Telegram.
+    """
+    store              = request.app.state.user_store
+    closed_trade_store = request.app.state.closed_trade_store
+    monthly_report_gen = request.app.state.monthly_report_gen
+
+    user = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    if monthly_report_gen is None:
+        raise HTTPException(status_code=503, detail="MonthlyReportGenerator non attivo (GEMINI_API_KEY mancante)")
+
+    stats        = await closed_trade_store.get_period_stats(user_id, days)
+    trades       = await closed_trade_store.get_period_trades(user_id, days)
+    equity_curve = await closed_trade_store.get_period_equity_curve(user_id, days)
+    last_6       = await closed_trade_store.get_last_n_months_summaries(user_id, 6)
+    groups_stats      = await closed_trade_store.get_period_groups_stats(user_id, days)
+    prev_groups_stats = await closed_trade_store.get_period_groups_stats_prev(user_id, days)
+
+    if stats["total_trades"] == 0:
+        raise HTTPException(status_code=404, detail=f"Nessun trade negli ultimi {days} giorni")
+
+    pdf_bytes = await monthly_report_gen.generate_for_period(
+        user_id, days, stats, trades, equity_curve, last_6,
+        groups_stats=groups_stats,
+        prev_groups_stats=prev_groups_stats,
+    )
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="Generazione PDF fallita")
+
+    if send_telegram:
+        tm = request.app.state.telegram_manager
+        today = date.today().strftime("%d/%m/%Y")
+        caption = f"Report ultimi {days} giorni — al {today}"
+        filename = f"report_{days}d_{date.today().strftime('%Y%m%d')}.pdf"
+        await asyncio.get_event_loop().run_in_executor(
+            None, tm.notify_user_with_file, user_id, pdf_bytes, filename, caption
+        )
+
+    filename_dl = f"report_{days}d_{date.today().strftime('%Y%m%d')}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename_dl}"'},
+    )
+
+
+@router.get("/user/{user_id}/reports")
+async def list_saved_reports(
+    user_id: str,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Returns metadata for all saved monthly PDF reports for this user.
+    Each entry contains: id, year, month, generated_at, size_bytes.
+    """
+    store = request.app.state.user_store
+    user  = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    monthly_report_store = request.app.state.monthly_report_store
+    reports = await monthly_report_store.list_for_user(user_id)
+    return {"reports": reports}
+
+
+@router.get("/user/{user_id}/reports/{year}/{month}")
+async def download_saved_report(
+    user_id: str,
+    year:    int,
+    month:   int,
+    request: Request = None,  # type: ignore[assignment]
+):
+    """Downloads a previously saved monthly PDF report as a file attachment."""
+    store = request.app.state.user_store
+    user  = await store.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+
+    monthly_report_store = request.app.state.monthly_report_store
+    pdf_bytes = await monthly_report_store.get(user_id, year, month)
+    if pdf_bytes is None:
+        raise HTTPException(status_code=404, detail=f"Nessun report salvato per {year}-{month:02d}")
+
+    filename = f"report_{year}_{month:02d}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

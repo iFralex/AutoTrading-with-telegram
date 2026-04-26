@@ -20,7 +20,13 @@ export function SettingsPage({
   const { user } = data
 
   const [trustScores, setTrustScores] = useState<Record<number, TrustScore>>({})
-  const [drawdownStatus, setDrawdownStatus] = useState<{ paused: boolean; threshold: number | null } | null>(null)
+  const [drawdownStatus, setDrawdownStatus] = useState<{
+    paused:      boolean
+    threshold:   number | null
+    period:      "daily" | "weekly" | "monthly" | "custom"
+    period_days: number
+    strategy:    string | null
+  } | null>(null)
   const [drawdownLoading, setDrawdownLoading] = useState(false)
 
   useEffect(() => {
@@ -48,11 +54,25 @@ export function SettingsPage({
   const addGroup = (g: UserGroup) =>
     patchGroups([...user.groups, g])
 
-  const handleUpdateDrawdown = async (pct: number | null) => {
+  const handleUpdateDrawdown = async (settings: {
+    drawdown_alert_pct?:   number | null
+    drawdown_period?:      "daily" | "weekly" | "monthly" | "custom"
+    drawdown_period_days?: number
+    drawdown_strategy?:    string | null
+  }) => {
     setDrawdownLoading(true)
     try {
-      await api.updateDrawdownSettings(user.user_id, pct)
-      setDrawdownStatus(prev => prev ? { ...prev, threshold: pct } : { paused: false, threshold: pct })
+      await api.updateDrawdownSettings(user.user_id, settings)
+      setDrawdownStatus(prev => {
+        const base = prev ?? { paused: false, threshold: null, period: "daily" as const, period_days: 1, strategy: null }
+        return {
+          ...base,
+          threshold:   settings.drawdown_alert_pct   !== undefined ? settings.drawdown_alert_pct   : base.threshold,
+          period:      settings.drawdown_period       !== undefined ? settings.drawdown_period       : base.period,
+          period_days: settings.drawdown_period_days  !== undefined ? settings.drawdown_period_days  : base.period_days,
+          strategy:    settings.drawdown_strategy     !== undefined ? settings.drawdown_strategy     : base.strategy,
+        }
+      })
     } finally {
       setDrawdownLoading(false)
     }
@@ -118,31 +138,61 @@ function DrawdownProtectionSection({
   onUpdate,
   onResume,
 }: {
-  status: { paused: boolean; threshold: number | null } | null
+  status: {
+    paused:      boolean
+    threshold:   number | null
+    period:      "daily" | "weekly" | "monthly" | "custom"
+    period_days: number
+    strategy:    string | null
+  } | null
   loading: boolean
-  onUpdate: (pct: number | null) => Promise<void>
+  onUpdate: (settings: {
+    drawdown_alert_pct?:   number | null
+    drawdown_period?:      "daily" | "weekly" | "monthly" | "custom"
+    drawdown_period_days?: number
+    drawdown_strategy?:    string | null
+  }) => Promise<void>
   onResume: () => Promise<void>
 }) {
-  const [editing, setEditing]   = useState(false)
-  const [draft, setDraft]       = useState<string>("")
-  const [saveErr, setSaveErr]   = useState<string | null>(null)
-  const [saved, setSaved]       = useState(false)
+  const [editing, setEditing]           = useState(false)
+  const [draftPct, setDraftPct]         = useState<string>("")
+  const [draftPeriod, setDraftPeriod]   = useState<"daily" | "weekly" | "monthly" | "custom">("daily")
+  const [draftDays, setDraftDays]       = useState<number>(7)
+  const [draftStrategy, setDraftStrategy] = useState<string>("")
+  const [saveErr, setSaveErr]           = useState<string | null>(null)
+  const [saved, setSaved]               = useState(false)
+
+  const periodLabel = (p: string, days?: number) => {
+    if (p === "daily")   return "Giornaliero"
+    if (p === "weekly")  return "Settimanale"
+    if (p === "monthly") return "Mensile"
+    if (p === "custom")  return `Ultimi ${days ?? 7} giorni`
+    return p
+  }
 
   const startEdit = () => {
-    setDraft(status?.threshold != null ? String(status.threshold) : "")
+    setDraftPct(status?.threshold != null ? String(status.threshold) : "")
+    setDraftPeriod(status?.period ?? "daily")
+    setDraftDays(status?.period_days ?? 7)
+    setDraftStrategy(status?.strategy ?? "")
     setSaveErr(null)
     setEditing(true)
   }
 
   const save = async () => {
-    const pct = draft.trim() === "" ? null : parseFloat(draft)
+    const pct = draftPct.trim() === "" ? null : parseFloat(draftPct)
     if (pct !== null && (isNaN(pct) || pct < 0 || pct > 100)) {
       setSaveErr("Inserisci un valore tra 0 e 100")
       return
     }
     setSaveErr(null)
     try {
-      await onUpdate(pct)
+      await onUpdate({
+        drawdown_alert_pct:   pct,
+        drawdown_period:      draftPeriod,
+        drawdown_period_days: draftPeriod === "custom" ? Math.max(1, draftDays) : undefined,
+        drawdown_strategy:    draftStrategy.trim() || null,
+      })
       setEditing(false)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -152,6 +202,7 @@ function DrawdownProtectionSection({
   }
 
   const threshold = status?.threshold ?? null
+  const period    = status?.period    ?? "daily"
   const paused    = status?.paused    ?? false
 
   return (
@@ -160,7 +211,7 @@ function DrawdownProtectionSection({
         <ShieldAlert className={`w-4 h-4 shrink-0 ${paused ? "text-red-400" : "text-muted-foreground"}`} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground">Protezione account</p>
-          <p className="text-xs text-muted-foreground">Sospende il trading se il drawdown giornaliero supera la soglia</p>
+          <p className="text-xs text-muted-foreground">Sospende il trading se il drawdown supera la soglia nel periodo selezionato</p>
         </div>
         {paused && (
           <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-600/15 border border-red-500/30 text-red-400 uppercase tracking-wide">
@@ -185,34 +236,92 @@ function DrawdownProtectionSection({
         )}
 
         {!editing ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className={`flex-1 text-sm font-mono rounded-lg border px-3 py-2.5 ${
+          <div className="flex items-start justify-between gap-3">
+            <div className={`flex-1 text-sm font-mono rounded-lg border px-3 py-2.5 space-y-1 ${
               threshold != null && threshold > 0
                 ? "bg-black/15 border-white/[0.07] text-foreground/80"
                 : "bg-black/10 border-white/[0.05] text-muted-foreground/50 italic"
             }`}>
-              {threshold != null && threshold > 0 ? `Soglia: ${threshold}% del balance` : "Disabilitato"}
-            </p>
-            <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
+              {threshold != null && threshold > 0 ? (
+                <>
+                  <p>Soglia: {threshold}% · {periodLabel(period, status?.period_days)}</p>
+                  {status?.strategy && (
+                    <p className="text-xs text-muted-foreground truncate">Strategia AI: {status.strategy}</p>
+                  )}
+                </>
+              ) : (
+                <p>Disabilitato</p>
+              )}
+            </div>
+            <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
               {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.5}
-                value={draft}
-                onChange={e => setDraft(e.target.value)}
-                placeholder="Es: 5 (vuoto = disabilitato)"
-                className="flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-muted-foreground/30"
-              />
-              <span className="text-sm text-muted-foreground">%</span>
+          <div className="space-y-4">
+            {/* Threshold */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Soglia di drawdown (%)</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0} max={100} step={0.5}
+                  value={draftPct}
+                  onChange={e => setDraftPct(e.target.value)}
+                  placeholder="Es: 5 (vuoto = disabilitato)"
+                  className="flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-muted-foreground/30"
+                />
+                <span className="text-sm text-muted-foreground">%</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">Percentuale massima di perdita nel periodo. Vuoto o 0 = disabilitato.</p>
             </div>
-            <p className="text-[10px] text-muted-foreground">Percentuale massima di perdita giornaliera sul balance. Vuoto o 0 = funzione disabilitata.</p>
+
+            {/* Period selector */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Periodo di calcolo</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["daily", "weekly", "monthly", "custom"] as const).map(p => (
+                  <button
+                    key={p} type="button" onClick={() => setDraftPeriod(p)}
+                    className={`text-left rounded-lg border px-3 py-2 transition-all ${
+                      draftPeriod === p
+                        ? "border-indigo-500/40 bg-indigo-600/8 text-foreground"
+                        : "border-white/[0.07] text-muted-foreground hover:border-white/[0.15] hover:text-foreground hover:bg-white/[0.02]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2.5 h-2.5 rounded-full border-2 shrink-0 ${draftPeriod === p ? "border-indigo-400 bg-indigo-400/30" : "border-white/20"}`} />
+                      <span className="text-xs font-medium">{periodLabel(p)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {draftPeriod === "custom" && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="number" min={1} max={365}
+                    value={draftDays}
+                    onChange={e => setDraftDays(Math.max(1, Math.min(365, Number(e.target.value))))}
+                    className="w-24 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  />
+                  <span className="text-xs text-muted-foreground">giorni (1–365)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Strategy textarea */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Strategia AI al raggiungimento (opzionale)</p>
+              <textarea
+                value={draftStrategy}
+                onChange={e => setDraftStrategy(e.target.value)}
+                rows={3}
+                placeholder="Es: Chiudi tutte le posizioni in perdita e sospendi nuovi ingressi per il resto del giorno"
+                className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50 placeholder:text-muted-foreground/30 transition-colors"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">Se impostata, l&apos;AI agent eseguirà questa strategia invece di bloccare il trading.</p>
+            </div>
+
             {saveErr && <p className="text-xs text-red-400">{saveErr}</p>}
             <div className="flex items-center gap-2">
               <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
@@ -288,6 +397,7 @@ function GroupCard({
       min_confidence:          src.min_confidence,
       eco_calendar_enabled:    src.eco_calendar_enabled,
       eco_calendar_window:     src.eco_calendar_window,
+      eco_calendar_strategy:   src.eco_calendar_strategy,
     }
     try {
       await api.updateUserGroup(userId, group.group_id, fields)
@@ -520,20 +630,23 @@ function GroupCard({
           </GroupSettingRow>
 
           <GroupSettingRow title="Calendario economico" badge="filtro"
-            description="Blocca i segnali nelle N minuti prima e dopo eventi macroeconomici ad alto impatto (ForexFactory)">
+            description="Sospende o modifica l'estrazione nelle N minuti prima/dopo eventi macroeconomici ad alto impatto (ForexFactory)">
             <EcoCalendarField
               value={{
-                enabled: group.eco_calendar_enabled ?? false,
-                window:  group.eco_calendar_window  ?? 30,
+                enabled:  group.eco_calendar_enabled  ?? false,
+                window:   group.eco_calendar_window   ?? 30,
+                strategy: group.eco_calendar_strategy ?? null,
               }}
               onSave={async v => {
                 await api.updateUserGroup(userId, group.group_id, {
-                  eco_calendar_enabled: v.enabled,
-                  eco_calendar_window:  v.window,
+                  eco_calendar_enabled:  v.enabled,
+                  eco_calendar_window:   v.window,
+                  eco_calendar_strategy: v.strategy,
                 })
                 patch({
-                  eco_calendar_enabled: v.enabled,
-                  eco_calendar_window:  v.window,
+                  eco_calendar_enabled:  v.enabled,
+                  eco_calendar_window:   v.window,
+                  eco_calendar_strategy: v.strategy,
                 })
               }}
             />
@@ -1143,9 +1256,20 @@ function TrustScoreTag({ score }: { score: TrustScore | null }) {
     : score.score >= 55 ? "text-blue-400 border-blue-500/30 bg-blue-600/8"
     : score.score >= 35 ? "text-amber-400 border-amber-500/30 bg-amber-600/8"
     : "text-red-400 border-red-500/30 bg-red-600/8"
+  const bd = score.breakdown
+  const tooltipLines = [
+    `Trust Score: ${score.score}/100 — ${score.label}`,
+    `${score.trade_count} trade`,
+    ...(score.win_rate    != null ? [`Win rate: ${score.win_rate}%`] : []),
+    ...(score.profit_factor != null ? [`PF: ${score.profit_factor.toFixed(2)}`] : []),
+    ...(score.max_consecutive_losses != null ? [`Max losses: ${score.max_consecutive_losses}`] : []),
+    ...(bd ? [
+      `Breakdown: WR ${bd.win_rate_pts}pt · PF ${bd.profit_factor_pts}pt · Vol ${bd.volume_pts}pt · Exec ${bd.exec_rate_pts}pt · Streak ${bd.streak_pts}pt`,
+    ] : []),
+  ]
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold shrink-0 ${color}`}
-      title={`Trust Score: ${score.score}/100 — ${score.label} (${score.trade_count} trade)`}>
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold shrink-0 cursor-help ${color}`}
+      title={tooltipLines.join("\n")}>
       TS {score.score}
     </span>
   )
@@ -1224,25 +1348,26 @@ function EcoCalendarField({
   value,
   onSave,
 }: {
-  value: { enabled: boolean; window: number }
-  onSave: (v: { enabled: boolean; window: number }) => Promise<void>
+  value: { enabled: boolean; window: number; strategy: string | null }
+  onSave: (v: { enabled: boolean; window: number; strategy: string | null }) => Promise<void>
 }) {
-  const [editing, setEditing]  = useState(false)
-  const [enabled, setEnabled]  = useState(value.enabled)
-  const [window_, setWindow]   = useState(value.window)
-  const [loading, setLoading]  = useState(false)
-  const [error, setError]      = useState<string | null>(null)
-  const [saved, setSaved]      = useState(false)
+  const [editing, setEditing]       = useState(false)
+  const [enabled, setEnabled]       = useState(value.enabled)
+  const [window_, setWindow]        = useState(value.window)
+  const [strategy, setStrategy]     = useState(value.strategy ?? "")
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState<string | null>(null)
+  const [saved, setSaved]           = useState(false)
 
   const startEdit = () => {
-    setEnabled(value.enabled); setWindow(value.window)
+    setEnabled(value.enabled); setWindow(value.window); setStrategy(value.strategy ?? "")
     setError(null); setEditing(true)
   }
 
   const save = async () => {
     setLoading(true); setError(null)
     try {
-      await onSave({ enabled, window: window_ })
+      await onSave({ enabled, window: window_, strategy: strategy.trim() || null })
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
@@ -1252,18 +1377,22 @@ function EcoCalendarField({
     }
   }
 
-  const summaryLabel = () =>
-    !value.enabled
-      ? "Disabilitato"
-      : `Attivo — finestra ±${value.window} minuti`
+  const summaryLabel = () => {
+    if (!value.enabled) return "Disabilitato"
+    const base = `Attivo — finestra ±${value.window} minuti`
+    return value.strategy ? `${base} · con strategia AI` : base
+  }
 
   if (!editing) {
     return (
       <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 bg-black/15 border border-white/[0.07] rounded-lg px-3 py-2.5">
+        <div className="flex-1 bg-black/15 border border-white/[0.07] rounded-lg px-3 py-2.5 space-y-0.5">
           <p className={`text-sm font-mono ${value.enabled ? "text-foreground/80" : "text-muted-foreground/50 italic"}`}>
             {summaryLabel()}
           </p>
+          {value.enabled && value.strategy && (
+            <p className="text-xs text-muted-foreground truncate">Strategia: {value.strategy}</p>
+          )}
         </div>
         <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
           {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
@@ -1277,7 +1406,7 @@ function EcoCalendarField({
       <div className="space-y-2">
         {[
           { val: false, label: "Disabilitato", desc: "Non controlla il calendario economico" },
-          { val: true,  label: "Attivo",       desc: "Blocca i segnali vicino a eventi high-impact" },
+          { val: true,  label: "Attivo",       desc: "Agisce sui segnali vicino a eventi high-impact" },
         ].map(opt => (
           <button key={String(opt.val)} type="button" onClick={() => setEnabled(opt.val)}
             className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
@@ -1295,17 +1424,33 @@ function EcoCalendarField({
       </div>
 
       {enabled && (
-        <div>
-          <p className="text-xs text-muted-foreground mb-1.5">Finestra di blocco (minuti prima/dopo l&apos;evento)</p>
-          <div className="flex items-center gap-2">
-            <input
-              type="number" min={5} max={120} value={window_}
-              onChange={e => setWindow(Math.min(120, Math.max(5, Number(e.target.value))))}
-              className="w-24 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
-            />
-            <span className="text-xs text-muted-foreground">min (5–120)</span>
+        <>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">Finestra (minuti prima/dopo l&apos;evento)</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min={5} max={120} value={window_}
+                onChange={e => setWindow(Math.min(120, Math.max(5, Number(e.target.value))))}
+                className="w-24 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-sm font-mono text-foreground/90 focus:outline-none focus:border-indigo-500/50 transition-colors"
+              />
+              <span className="text-xs text-muted-foreground">min (5–120)</span>
+            </div>
           </div>
-        </div>
+
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">Strategia AI in caso di evento (opzionale)</p>
+            <textarea
+              value={strategy}
+              onChange={e => setStrategy(e.target.value)}
+              rows={3}
+              placeholder="Es: Riduci il lotto al 50% e imposta SL più ampio del normale"
+              className="w-full rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2.5 text-sm font-mono text-foreground/90 resize-y focus:outline-none focus:border-indigo-500/50 placeholder:text-muted-foreground/30 transition-colors"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Se impostata, l&apos;AI inietta questa strategia nel prompt invece di bloccare il segnale.
+            </p>
+          </div>
+        </>
       )}
 
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}

@@ -245,6 +245,46 @@ class TelegramManager:
         """
         return self._call(self.send_to_user(user_id, text), timeout=10)
 
+    async def send_file_to_user(
+        self,
+        user_id: str,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = "",
+    ) -> bool:
+        """
+        Invia un file (bytes) all'utente tramite la sua sessione Telethon.
+        Da chiamare con await nel loop del TelegramManager.
+        """
+        import io
+        client = self._clients.get(user_id)
+        if not client:
+            return False
+        try:
+            buf = io.BytesIO(file_bytes)
+            buf.name = filename
+            await client.send_file(int(user_id), buf, caption=caption)
+            return True
+        except Exception as exc:
+            logger.warning("Invio file a %s fallito: %s", user_id, exc)
+            return False
+
+    def notify_user_with_file(
+        self,
+        user_id: str,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = "",
+    ) -> bool:
+        """
+        Thread-safe: invia un file all'utente schedulando la coroutine
+        sul loop del TelegramManager.
+        """
+        return self._call(
+            self.send_file_to_user(user_id, file_bytes, filename, caption),
+            timeout=60,
+        )
+
     def get_history(
         self,
         user_id: str,

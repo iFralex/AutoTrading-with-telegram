@@ -164,18 +164,31 @@ export interface UserGroup {
   trading_hours_end: number | null
   trading_hours_days: string[] | null
   min_confidence: number
-  eco_calendar_enabled: boolean
-  eco_calendar_window: number
+  eco_calendar_enabled:   boolean
+  eco_calendar_window:    number
+  eco_calendar_strategy:  string | null
   active: boolean
   created_at: string
 }
 
+export interface TrustScoreBreakdown {
+  win_rate_pts:          number
+  profit_factor_pts:     number
+  volume_pts:            number
+  exec_rate_pts:         number
+  streak_pts:            number
+}
+
 export interface TrustScore {
-  group_id:    number
-  group_name:  string
-  score:       number | null
-  label:       string
-  trade_count: number
+  group_id:               number
+  group_name:             string
+  score:                  number | null
+  label:                  string
+  trade_count:            number
+  win_rate:               number | null
+  profit_factor:          number | null
+  max_consecutive_losses: number | null
+  breakdown:              TrustScoreBreakdown | null
 }
 
 export interface DashboardUser {
@@ -191,7 +204,10 @@ export interface DashboardUser {
   mt5_server: string | null
   active: boolean
   created_at: string
-  drawdown_alert_pct: number | null
+  drawdown_alert_pct:   number | null
+  drawdown_period:      "daily" | "weekly" | "monthly" | "custom"
+  drawdown_period_days: number
+  drawdown_strategy:    string | null
   groups: UserGroup[]
 }
 
@@ -342,6 +358,15 @@ export interface DashboardStats {
   min_lot_size:           number | null
   max_lot_size:           number | null
   balance_trend:          BalanceTrendPoint[]
+}
+
+export interface SavedReport {
+  id:           number
+  user_id:      string
+  year:         number
+  month:        number
+  generated_at: string
+  size_bytes:   number
 }
 
 export const api = {
@@ -576,7 +601,7 @@ export const api = {
       "range_entry_pct" | "entry_if_favorable" |
       "deletion_strategy" | "extraction_instructions" |
       "trading_hours_enabled" | "trading_hours_start" | "trading_hours_end" | "trading_hours_days" |
-      "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window"
+      "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window" | "eco_calendar_strategy"
     >>
   ) {
     return call<{ ok: boolean }>(
@@ -656,20 +681,34 @@ export const api = {
 
   // ── Drawdown alert (Feature 6) ────────────────────────────────────────────
 
-  /** Stato drawdown: se il trading è sospeso e la soglia configurata. */
+  /** Stato drawdown: se il trading è sospeso, la soglia e le impostazioni periodo/strategia. */
   getDrawdownStatus(userId: string) {
-    return call<{ paused: boolean; threshold: number | null }>(
+    return call<{
+      paused:       boolean
+      threshold:    number | null
+      period:       "daily" | "weekly" | "monthly" | "custom"
+      period_days:  number
+      strategy:     string | null
+    }>(
       "GET",
       `/api/dashboard/user/${encodeURIComponent(userId)}/drawdown-status`
     )
   },
 
-  /** Aggiorna la soglia drawdown giornaliero (% balance). null = disabilitato. */
-  updateDrawdownSettings(userId: string, pct: number | null) {
+  /** Aggiorna le impostazioni drawdown complete (soglia, periodo, giorni custom, strategia). */
+  updateDrawdownSettings(
+    userId: string,
+    settings: {
+      drawdown_alert_pct?:   number | null
+      drawdown_period?:      "daily" | "weekly" | "monthly" | "custom"
+      drawdown_period_days?: number
+      drawdown_strategy?:    string | null
+    }
+  ) {
     return call<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/drawdown-settings`,
-      { drawdown_alert_pct: pct }
+      settings
     )
   },
 
@@ -679,6 +718,59 @@ export const api = {
       "POST",
       `/api/dashboard/user/${encodeURIComponent(userId)}/resume-drawdown`
     )
+  },
+
+  // ── Report on-demand (Feature 8) ─────────────────────────────────────────
+
+  /**
+   * Genera un PDF per gli ultimi `days` giorni e lo scarica nel browser.
+   * Invia anche via Telegram se send_telegram=true (default).
+   */
+  async generateReport(userId: string, days = 30, sendTelegram = true): Promise<void> {
+    const url =
+      `${BASE_URL}/api/dashboard/user/${encodeURIComponent(userId)}/generate-report` +
+      `?days=${days}&send_telegram=${sendTelegram}`
+    const res = await fetch(url, { method: "POST" })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = objUrl
+    a.download = `report_${days}d_${new Date().toISOString().slice(0, 10)}.pdf`
+    a.click()
+    URL.revokeObjectURL(objUrl)
+  },
+
+  // ── Saved monthly reports (Feature 8) ────────────────────────────────────
+
+  /** Returns metadata list (no PDF bytes) for all saved monthly reports of a user. */
+  listReports(userId: string) {
+    return call<{ reports: SavedReport[] }>(
+      "GET",
+      `/api/dashboard/user/${encodeURIComponent(userId)}/reports`
+    )
+  },
+
+  /**
+   * Downloads a saved monthly PDF report and triggers a browser save dialog.
+   */
+  async downloadSavedReport(userId: string, year: number, month: number): Promise<void> {
+    const url = `${BASE_URL}/api/dashboard/user/${encodeURIComponent(userId)}/reports/${year}/${month}`
+    const res = await fetch(url)
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = objUrl
+    a.download = `report_${year}_${String(month).padStart(2, "0")}.pdf`
+    a.click()
+    URL.revokeObjectURL(objUrl)
   },
 
   // ── Backtest ──────────────────────────────────────────────────────────────

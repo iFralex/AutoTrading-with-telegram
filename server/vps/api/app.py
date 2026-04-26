@@ -51,6 +51,8 @@ from vps.services.backtest_store import BacktestStore
 from vps.services.backtest_engine import BacktestEngine
 from vps.services.vps_monitor import VpsMonitor
 from vps.services.economic_calendar import EconomicCalendarService
+from vps.services.monthly_report import MonthlyReportGenerator
+from vps.services.monthly_report_store import MonthlyReportStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -168,6 +170,19 @@ async def lifespan(app: FastAPI):
         strategy_executor = None
         logger.warning("StrategyExecutor non attivo (GEMINI_API_KEY mancante)")
 
+    # Monthly report generator (opzionale: richiede Gemini key + matplotlib + fpdf2)
+    if gemini_key:
+        monthly_report_gen = MonthlyReportGenerator(gemini_api_key=gemini_key)
+        logger.info("MonthlyReportGenerator attivo")
+    else:
+        monthly_report_gen = None
+    app.state.monthly_report_gen = monthly_report_gen
+
+    # Monthly report store (persiste i PDF mensili nel DB)
+    monthly_report_store = MonthlyReportStore(_db_path)
+    await monthly_report_store.init()
+    app.state.monthly_report_store = monthly_report_store
+
     # Backtest store + engine
     backtest_store = BacktestStore(_db_path)
     await backtest_store.init()
@@ -192,8 +207,10 @@ async def lifespan(app: FastAPI):
     # Task asyncio attivi per run_id (usato per la cancellazione)
     app.state.backtest_tasks: dict[str, object] = {}
 
-    # Utenti con trading sospeso per drawdown alert (reset a mezzanotte UTC)
+    # Utenti con trading sospeso per drawdown alert
     app.state.drawdown_paused_users: set[str] = set()
+    # Periodo drawdown per ciascun utente sospeso (per il reset selettivo a mezzanotte)
+    app.state.drawdown_paused_periods: dict[str, str] = {}
 
     # Calendario economico ForexFactory (Feature 7)
     eco_calendar = EconomicCalendarService(refresh_hours=6)
@@ -286,8 +303,24 @@ async def lifespan(app: FastAPI):
                     dd_user = await store.get_user(user_id)
                     threshold_pct = dd_user.get("drawdown_alert_pct") if dd_user else None
                     if threshold_pct and threshold_pct > 0:
-                        today_pnl = await closed_trade_store.get_today_pnl(user_id)
-                        if today_pnl < 0:
+                        dd_period      = dd_user.get("drawdown_period") or "daily"
+                        dd_period_days = int(dd_user.get("drawdown_period_days") or 1)
+                        dd_strategy    = (dd_user.get("drawdown_strategy") or "").strip()
+
+                        if dd_period == "monthly":
+                            period_pnl = await closed_trade_store.get_current_month_pnl(user_id)
+                        elif dd_period == "daily":
+                            period_pnl = await closed_trade_store.get_today_pnl(user_id)
+                        else:  # weekly / custom
+                            days = 7 if dd_period == "weekly" else max(1, dd_period_days)
+                            period_pnl = await closed_trade_store.get_period_pnl(user_id, days)
+
+                        period_label = {
+                            "daily": "giornaliero", "weekly": "settimanale",
+                            "monthly": "mensile", "custom": f"ultimi {dd_period_days}g",
+                        }.get(dd_period, "giornaliero")
+
+                        if period_pnl < 0:
                             mt5_l = dd_user.get("mt5_login")
                             mt5_p = dd_user.get("mt5_password")
                             mt5_s = dd_user.get("mt5_server")
@@ -299,21 +332,60 @@ async def lifespan(app: FastAPI):
                                     mt5_server=mt5_s,
                                 )
                                 if acc:
-                                    balance   = acc.get("balance", 0)
-                                    loss_pct  = abs(today_pnl) / balance * 100 if balance > 0 else 0
+                                    balance  = acc.get("balance", 0)
+                                    loss_pct = abs(period_pnl) / balance * 100 if balance > 0 else 0
                                     if loss_pct >= threshold_pct:
-                                        app.state.drawdown_paused_users.add(user_id)
                                         ulog.warning(
-                                            "Utente %s: drawdown %.1f%% >= soglia %.1f%% — trading sospeso",
-                                            user_id, loss_pct, threshold_pct,
+                                            "Utente %s: drawdown %s %.1f%% >= soglia %.1f%%",
+                                            user_id, period_label, loss_pct, threshold_pct,
                                         )
-                                        await tm.send_to_user(
-                                            user_id,
-                                            f"⛔ Trading sospeso\n\n"
-                                            f"📉 Drawdown giornaliero: {loss_pct:.1f}%\n"
-                                            f"🔴 Soglia: {threshold_pct}%\n\n"
-                                            f"Riprendi manualmente dal dashboard quando sei pronto.",
-                                        )
+                                        if dd_strategy and strategy_executor:
+                                            # Esegui la strategia di drawdown invece di bloccare
+                                            await tm.send_to_user(
+                                                user_id,
+                                                f"⚠️ Drawdown {period_label} {loss_pct:.1f}% ≥ soglia {threshold_pct}%\n"
+                                                f"📊 Balance: {balance:.2f} | Perdita periodo: {period_pnl:.2f}\n"
+                                                f"🤖 Esecuzione strategia drawdown in corso…",
+                                            )
+                                            try:
+                                                result = await strategy_executor.on_event(
+                                                    user_id             = user_id,
+                                                    event_type          = "drawdown_alert",
+                                                    event_data          = {
+                                                        "period": dd_period,
+                                                        "period_pnl": round(period_pnl, 2),
+                                                        "loss_pct": round(loss_pct, 2),
+                                                        "threshold_pct": threshold_pct,
+                                                        "balance": round(balance, 2),
+                                                    },
+                                                    management_strategy = dd_strategy,
+                                                    mt5_login           = int(mt5_l),
+                                                    mt5_password        = mt5_p,
+                                                    mt5_server          = mt5_s,
+                                                )
+                                                await strategy_log_store.insert(
+                                                    user_id             = user_id,
+                                                    event_type          = "drawdown_alert",
+                                                    event_data          = {"period": dd_period, "loss_pct": round(loss_pct,2)},
+                                                    management_strategy = dd_strategy,
+                                                    tool_calls          = result.tool_calls,
+                                                    final_response      = result.final_response,
+                                                    error_msg           = result.error,
+                                                )
+                                            except Exception as _strat_exc:
+                                                ulog.warning("Drawdown strategy exec fallita: %s — sospendo trading", _strat_exc)
+                                                app.state.drawdown_paused_users.add(user_id)
+                                                app.state.drawdown_paused_periods[user_id] = dd_period
+                                        else:
+                                            app.state.drawdown_paused_users.add(user_id)
+                                            app.state.drawdown_paused_periods[user_id] = dd_period
+                                            await tm.send_to_user(
+                                                user_id,
+                                                f"⛔ Trading sospeso\n\n"
+                                                f"📉 Drawdown {period_label}: {loss_pct:.1f}%\n"
+                                                f"🔴 Soglia: {threshold_pct}%\n\n"
+                                                f"Riprendi manualmente dal dashboard quando sei pronto.",
+                                            )
                 except Exception as dd_exc:
                     ulog.warning("Drawdown check utente %s fallito: %s", user_id, dd_exc)
 
@@ -559,14 +631,27 @@ async def lifespan(app: FastAPI):
                     datetime.now(timezone.utc), window
                 )
                 if blocked:
-                    ulog.info(
-                        "Utente %s: segnale ignorato — evento macroeconomico (%s, finestra %dm)",
-                        user_id, event_str, window,
-                    )
-                    log_error_step = "eco_calendar"
-                    log_error_msg  = f"Segnale bloccato: evento macroeconomico ({event_str})"
-                    await _save_log()
-                    return
+                    eco_strategy = (group_settings or {}).get("eco_calendar_strategy") or ""
+                    if eco_strategy.strip():
+                        # Inietta la strategia nel prompt di estrazione e continua
+                        ulog.info(
+                            "Utente %s: evento macro (%s) — strategia eco-calendar iniettata",
+                            user_id, event_str,
+                        )
+                        eco_note = (
+                            f"\n\n[CONTESTO MACROECONOMICO] Evento ad alto impatto in corso: {event_str}."
+                            f"\nStrategia da applicare: {eco_strategy}"
+                        )
+                        extraction_instructions = (extraction_instructions or "") + eco_note
+                    else:
+                        ulog.info(
+                            "Utente %s: segnale ignorato — evento macroeconomico (%s, finestra %dm)",
+                            user_id, event_str, window,
+                        )
+                        log_error_step = "eco_calendar"
+                        log_error_msg  = f"Segnale bloccato: evento macroeconomico ({event_str})"
+                        await _save_log()
+                        return
             except Exception as _eco_exc:
                 ulog.warning("Controllo calendario economico fallito: %s", _eco_exc)
 
@@ -1050,10 +1135,16 @@ async def lifespan(app: FastAPI):
                     hour=0, minute=0, second=0, microsecond=0
                 )
                 await asyncio.sleep((tomorrow - now).total_seconds())
-                cleared = len(app.state.drawdown_paused_users)
-                app.state.drawdown_paused_users.clear()
-                if cleared:
-                    logger.info("Midnight reset: %d utenti rimossi da drawdown_paused", cleared)
+                # Reset solo utenti con periodo 'daily' (gli altri restano sospesi fino a resume manuale)
+                to_clear = {
+                    uid for uid in app.state.drawdown_paused_users
+                    if app.state.drawdown_paused_periods.get(uid, "daily") == "daily"
+                }
+                app.state.drawdown_paused_users -= to_clear
+                for uid in to_clear:
+                    app.state.drawdown_paused_periods.pop(uid, None)
+                if to_clear:
+                    logger.info("Midnight reset: %d utenti (daily) rimossi da drawdown_paused", len(to_clear))
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -1065,56 +1156,81 @@ async def lifespan(app: FastAPI):
 
     # ── Report mensile (primo del mese alle 09:00 UTC) ────────────────────────
 
-    async def _fetch_btc_monthly_return() -> float | None:
-        """Rendimento % BTC del mese precedente via Binance public API."""
-        import urllib.request as _urllib_req
-        import json as _json
-        try:
-            def _fetch_sync():
-                url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1M&limit=3"
-                req = _urllib_req.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with _urllib_req.urlopen(req, timeout=10) as resp:
-                    return _json.loads(resp.read())
-            klines = await asyncio.get_event_loop().run_in_executor(None, _fetch_sync)
-            if len(klines) >= 2:
-                prev_close = float(klines[-2][4])
-                curr_close = float(klines[-1][4])
-                if prev_close > 0:
-                    return round((curr_close - prev_close) / prev_close * 100, 2)
-        except Exception as exc:
-            logger.warning("BTC monthly return fetch fallito: %s", exc)
-        return None
-
     async def _send_monthly_reports() -> None:
-        now     = datetime.now(timezone.utc)
-        month   = now.month - 1 if now.month > 1 else 12
-        year_m  = now.year if now.month > 1 else now.year - 1
-        btc_ret = await _fetch_btc_monthly_return()
+        now        = datetime.now(timezone.utc)
+        month      = now.month - 1 if now.month > 1 else 12
+        year_m     = now.year if now.month > 1 else now.year - 1
         month_names = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"]
-        users   = await store.get_active_users()
+        month_name  = month_names[month - 1]
+        users = await store.get_active_users()
         for u in users:
             uid = u["user_id"]
             try:
-                summary = await closed_trade_store.get_monthly_summary(uid, year_m, month)
-                if summary["total_trades"] == 0:
+                stats = await closed_trade_store.get_monthly_stats(uid, year_m, month)
+                if stats["total_trades"] == 0:
                     continue
-                pnl     = summary["total_profit"]
+
+                trades        = await closed_trade_store.get_monthly_trades(uid, year_m, month)
+                equity_curve  = await closed_trade_store.get_monthly_equity_curve(uid, year_m, month)
+                last_6        = await closed_trade_store.get_last_n_months_summaries(uid, n=6)
+                groups_stats       = await closed_trade_store.get_monthly_groups_stats(uid, year_m, month)
+                prev_groups_stats  = await closed_trade_store.get_monthly_groups_stats_prev(uid, year_m, month)
+
+                pnl     = stats["total_profit"]
                 pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
-                lines   = [
-                    f"📅 Report mensile — {month_names[month-1]} {year_m}",
+
+                lines = [
+                    f"📅 Report mensile — {month_name} {year_m}",
                     "",
-                    f"📈 Operazioni: {summary['total_trades']} "
-                    f"({summary['wins']} win / {summary['losses']} loss)",
-                    f"🎯 Win rate: {summary['win_rate']}%",
+                    f"📈 Operazioni: {stats['total_trades']} "
+                    f"({stats['wins']} win / {stats['losses']} loss)",
+                    f"🎯 Win rate: {stats['win_rate']}%",
                     f"💰 P&L: {pnl_str}",
                 ]
-                if btc_ret is not None:
-                    btc_str = f"+{btc_ret:.2f}%" if btc_ret >= 0 else f"{btc_ret:.2f}%"
-                    lines.append(f"₿  BTC mese: {btc_str}")
+                pf = stats.get("profit_factor")
+                if pf is not None:
+                    lines.append(f"📊 Profit Factor: {pf:.2f}")
+                if len(last_6) >= 2:
+                    prev_pnl = last_6[-2].get("total_profit", 0)
+                    prev_str = f"+{prev_pnl:.2f}" if prev_pnl >= 0 else f"{prev_pnl:.2f}"
+                    lines.append(f"📆 Mese prec.: {prev_str}")
+
+                # Generate PDF
+                pdf_bytes: bytes | None = None
+                if monthly_report_gen is not None:
+                    try:
+                        pdf_bytes = await monthly_report_gen.generate(
+                            uid, year_m, month, stats, trades, equity_curve, last_6,
+                            groups_stats=groups_stats,
+                            prev_groups_stats=prev_groups_stats,
+                        )
+                    except Exception as pdf_exc:
+                        logger.warning("PDF mensile utente %s fallito: %s", uid, pdf_exc)
+
+                # Persist PDF in DB so it can be retrieved from the dashboard
+                if pdf_bytes:
+                    try:
+                        await monthly_report_store.save(uid, year_m, month, pdf_bytes)
+                        logger.info("Report mensile utente %s salvato nel DB (%d bytes)", uid, len(pdf_bytes))
+                    except Exception as store_exc:
+                        logger.warning("Salvataggio report mensile utente %s fallito: %s", uid, store_exc)
+
+                if pdf_bytes:
+                    lines.append("")
+                    lines.append("📎 Report PDF completo allegato.")
+
                 text = "\n".join(lines)
+
                 await asyncio.get_event_loop().run_in_executor(
                     None, tm.notify_user, uid, text
                 )
+                if pdf_bytes:
+                    filename = f"report_{year_m}_{month:02d}.pdf"
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, tm.notify_user_with_file, uid, pdf_bytes, filename,
+                        f"Report {month_name} {year_m}",
+                    )
+
                 logger.info("Report mensile inviato a utente %s", uid)
             except Exception as exc:
                 logger.warning("Report mensile utente %s fallito: %s", uid, exc)

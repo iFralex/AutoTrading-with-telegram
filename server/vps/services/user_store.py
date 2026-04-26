@@ -71,6 +71,9 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN deletion_strategy TEXT",
     "ALTER TABLE users ADD COLUMN extraction_instructions TEXT",
     "ALTER TABLE users ADD COLUMN drawdown_alert_pct REAL",
+    "ALTER TABLE users ADD COLUMN drawdown_period TEXT NOT NULL DEFAULT 'daily'",
+    "ALTER TABLE users ADD COLUMN drawdown_period_days INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN drawdown_strategy TEXT",
 ]
 
 # ── Tabella multi-gruppo ──────────────────────────────────────────────────────
@@ -109,6 +112,7 @@ _MIGRATIONS_GROUPS = [
     "ALTER TABLE user_groups ADD COLUMN min_confidence INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE user_groups ADD COLUMN eco_calendar_enabled INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE user_groups ADD COLUMN eco_calendar_window INTEGER NOT NULL DEFAULT 30",
+    "ALTER TABLE user_groups ADD COLUMN eco_calendar_strategy TEXT",
 ]
 
 _CREATE_USER_GROUPS_INDEX = """
@@ -346,6 +350,7 @@ class UserStore:
             "trading_hours_enabled", "trading_hours_start", "trading_hours_end",
             "trading_hours_days",
             "min_confidence", "eco_calendar_enabled", "eco_calendar_window",
+            "eco_calendar_strategy",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -445,6 +450,33 @@ class UserStore:
             )
             await db.commit()
 
+    async def update_drawdown_settings_full(
+        self,
+        user_id: str,
+        *,
+        drawdown_alert_pct:   float | None = None,
+        drawdown_period:      str = "daily",
+        drawdown_period_days: int = 1,
+        drawdown_strategy:    str | None = None,
+    ) -> None:
+        """Aggiorna tutte le impostazioni drawdown in una singola query."""
+        valid_periods = {"daily", "weekly", "monthly", "custom"}
+        if drawdown_period not in valid_periods:
+            drawdown_period = "daily"
+        drawdown_period_days = max(1, int(drawdown_period_days))
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """UPDATE users SET
+                   drawdown_alert_pct   = ?,
+                   drawdown_period      = ?,
+                   drawdown_period_days = ?,
+                   drawdown_strategy    = ?
+                   WHERE user_id = ?""",
+                (drawdown_alert_pct, drawdown_period, drawdown_period_days,
+                 drawdown_strategy or None, user_id),
+            )
+            await db.commit()
+
     async def update_extraction_instructions(self, user_id: str, extraction_instructions: str | None) -> None:
         """Aggiorna le istruzioni custom iniettate nel prompt Pro di estrazione."""
         async with aiosqlite.connect(self._db_path) as db:
@@ -501,7 +533,10 @@ class UserStore:
                     "mt5_login": row["mt5_login"],
                     "mt5_password": mt5_password,
                     "mt5_server":   row["mt5_server"],
-                    "drawdown_alert_pct": row["drawdown_alert_pct"] if "drawdown_alert_pct" in row.keys() else None,
+                    "drawdown_alert_pct":   row["drawdown_alert_pct"]   if "drawdown_alert_pct"   in row.keys() else None,
+                    "drawdown_period":      row["drawdown_period"]      if "drawdown_period"      in row.keys() else "daily",
+                    "drawdown_period_days": row["drawdown_period_days"] if "drawdown_period_days" in row.keys() else 1,
+                    "drawdown_strategy":    row["drawdown_strategy"]    if "drawdown_strategy"    in row.keys() else None,
                     # Multi-gruppo
                     "group_ids": [g["group_id"] for g in active_groups],
                     "groups":    active_groups,
@@ -547,7 +582,10 @@ class UserStore:
             "mt5_server":   row["mt5_server"],
             "active":    bool(row["active"]),
             "created_at": row["created_at"],
-            "drawdown_alert_pct": row["drawdown_alert_pct"] if "drawdown_alert_pct" in row.keys() else None,
+            "drawdown_alert_pct":   row["drawdown_alert_pct"]   if "drawdown_alert_pct"   in row.keys() else None,
+            "drawdown_period":      row["drawdown_period"]      if "drawdown_period"      in row.keys() else "daily",
+            "drawdown_period_days": row["drawdown_period_days"] if "drawdown_period_days" in row.keys() else 1,
+            "drawdown_strategy":    row["drawdown_strategy"]    if "drawdown_strategy"    in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -590,7 +628,10 @@ class UserStore:
             "mt5_server":   row["mt5_server"],
             "active":    bool(row["active"]),
             "created_at": row["created_at"],
-            "drawdown_alert_pct": row["drawdown_alert_pct"] if "drawdown_alert_pct" in row.keys() else None,
+            "drawdown_alert_pct":   row["drawdown_alert_pct"]   if "drawdown_alert_pct"   in row.keys() else None,
+            "drawdown_period":      row["drawdown_period"]      if "drawdown_period"      in row.keys() else "daily",
+            "drawdown_period_days": row["drawdown_period_days"] if "drawdown_period_days" in row.keys() else 1,
+            "drawdown_strategy":    row["drawdown_strategy"]    if "drawdown_strategy"    in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -693,11 +734,13 @@ def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
         d["trading_hours_end"]     = None
         d["trading_hours_days"]    = None
     try:
-        d["min_confidence"]       = int(row["min_confidence"] or 0)
-        d["eco_calendar_enabled"] = bool(row["eco_calendar_enabled"] or 0)
-        d["eco_calendar_window"]  = int(row["eco_calendar_window"] or 30)
+        d["min_confidence"]         = int(row["min_confidence"] or 0)
+        d["eco_calendar_enabled"]   = bool(row["eco_calendar_enabled"] or 0)
+        d["eco_calendar_window"]    = int(row["eco_calendar_window"] or 30)
+        d["eco_calendar_strategy"]  = row["eco_calendar_strategy"] or None
     except (IndexError, KeyError):
-        d["min_confidence"]       = 0
-        d["eco_calendar_enabled"] = False
-        d["eco_calendar_window"]  = 30
+        d["min_confidence"]         = 0
+        d["eco_calendar_enabled"]   = False
+        d["eco_calendar_window"]    = 30
+        d["eco_calendar_strategy"]  = None
     return d

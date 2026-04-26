@@ -394,6 +394,36 @@ class ClosedTradeStore:
             "cumulative_pnl":        cumulative_pnl[-300:],  # max 300 punti per il grafico
         }
 
+    async def get_period_pnl(self, user_id: str, days: int) -> float:
+        """Ritorna il P&L degli ultimi N giorni (incluso oggi)."""
+        cutoff = f"date('now', '-{max(0, days - 1)} days')"
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                f"""
+                SELECT COALESCE(SUM(profit), 0)
+                FROM closed_trades
+                WHERE user_id = ? AND DATE(close_time) >= {cutoff}
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
+
+    async def get_current_month_pnl(self, user_id: str) -> float:
+        """Ritorna il P&L del mese corrente (UTC)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                """
+                SELECT COALESCE(SUM(profit), 0)
+                FROM closed_trades
+                WHERE user_id = ?
+                  AND strftime('%Y-%m', close_time) = strftime('%Y-%m', 'now')
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
+
     async def get_today_pnl(self, user_id: str) -> float:
         """Ritorna il P&L totale di oggi (UTC)."""
         async with aiosqlite.connect(self._db_path) as db:
@@ -409,19 +439,26 @@ class ClosedTradeStore:
         return float(row[0]) if row else 0.0
 
     async def get_group_trade_stats(self, user_id: str, group_id: int) -> dict:
-        """Statistiche trade per un gruppo specifico (via signal_group_id cross-table JOIN)."""
+        """Statistiche trade per un gruppo specifico con metriche estese per il Trust Score."""
+        _cte = """
+            WITH group_signal_ids AS (
+                SELECT DISTINCT signal_group_id FROM signal_logs
+                WHERE user_id = ? AND group_id = ? AND signal_group_id IS NOT NULL
+            )
+        """
         async with aiosqlite.connect(self._db_path) as db:
+            # Aggregate stats
             cur = await db.execute(
-                """
-                WITH group_signal_ids AS (
-                    SELECT DISTINCT signal_group_id FROM signal_logs
-                    WHERE user_id = ? AND group_id = ? AND signal_group_id IS NOT NULL
-                )
+                _cte + """
                 SELECT
-                    COUNT(*)                                                        AS total_trades,
-                    COALESCE(SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END), 0)      AS wins,
-                    COALESCE(SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END), 0)      AS losses,
-                    COALESCE(SUM(profit), 0)                                        AS total_profit
+                    COUNT(*)                                                               AS total_trades,
+                    COALESCE(SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END), 0)             AS wins,
+                    COALESCE(SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END), 0)             AS losses,
+                    COALESCE(SUM(profit), 0)                                               AS total_profit,
+                    COALESCE(SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END), 0)          AS gross_profit,
+                    COALESCE(ABS(SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END)), 0)    AS gross_loss,
+                    COALESCE(AVG(CASE WHEN profit > 0 THEN profit END), 0)                AS avg_win,
+                    COALESCE(AVG(CASE WHEN profit < 0 THEN profit END), 0)                AS avg_loss
                 FROM closed_trades
                 WHERE user_id = ?
                   AND signal_group_id IN (SELECT signal_group_id FROM group_signal_ids)
@@ -429,18 +466,59 @@ class ClosedTradeStore:
                 (user_id, group_id, user_id),
             )
             row = await cur.fetchone()
-        if row is None:
-            return {"total_trades": 0, "wins": 0, "losses": 0, "total_profit": 0.0}
-        total  = int(row[0] or 0)
-        wins   = int(row[1] or 0)
-        losses = int(row[2] or 0)
-        profit = float(row[3] or 0)
+            # Profits in order for consecutive-streak calculation
+            cur2 = await db.execute(
+                _cte + """
+                SELECT profit FROM closed_trades
+                WHERE user_id = ?
+                  AND signal_group_id IN (SELECT signal_group_id FROM group_signal_ids)
+                ORDER BY close_time ASC
+                """,
+                (user_id, group_id, user_id),
+            )
+            profit_rows = await cur2.fetchall()
+
+        if row is None or int(row[0] or 0) == 0:
+            return {
+                "total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
+                "total_profit": 0.0, "gross_profit": 0.0, "gross_loss": 0.0,
+                "profit_factor": None, "avg_win": 0.0, "avg_loss": 0.0,
+                "max_consecutive_wins": 0, "max_consecutive_losses": 0,
+            }
+
+        total        = int(row[0] or 0)
+        wins         = int(row[1] or 0)
+        losses       = int(row[2] or 0)
+        total_profit = float(row[3] or 0)
+        gross_profit = float(row[4] or 0)
+        gross_loss   = float(row[5] or 0)
+        avg_win      = float(row[6] or 0)
+        avg_loss     = float(row[7] or 0)
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else None
+
+        profits = [r[0] for r in profit_rows if r[0] is not None]
+        max_cw = max_cl = cur_w = cur_l = 0
+        for p in profits:
+            if p > 0:
+                cur_w += 1; cur_l = 0
+                max_cw = max(max_cw, cur_w)
+            else:
+                cur_l += 1; cur_w = 0
+                max_cl = max(max_cl, cur_l)
+
         return {
-            "total_trades": total,
-            "wins":         wins,
-            "losses":       losses,
-            "win_rate":     round(wins / total * 100, 1) if total else 0.0,
-            "total_profit": round(profit, 2),
+            "total_trades":          total,
+            "wins":                  wins,
+            "losses":                losses,
+            "win_rate":              round(wins / total * 100, 1) if total else 0.0,
+            "total_profit":          round(total_profit, 2),
+            "gross_profit":          round(gross_profit, 2),
+            "gross_loss":            round(gross_loss, 2),
+            "profit_factor":         profit_factor,
+            "avg_win":               round(avg_win, 2),
+            "avg_loss":              round(avg_loss, 2),
+            "max_consecutive_wins":  max_cw,
+            "max_consecutive_losses":max_cl,
         }
 
     async def get_monthly_summary(self, user_id: str, year: int, month: int) -> dict:
@@ -473,6 +551,399 @@ class ClosedTradeStore:
             "win_rate":     round(wins / total * 100, 1) if total else 0.0,
             "total_profit": round(profit, 2),
         }
+
+    async def _build_full_stats(self, db, where_clause: str, params: tuple) -> dict:
+        """
+        Calcola le statistiche complete per un insieme di trade definito
+        da where_clause (es. "user_id = ? AND strftime(...)").
+        Usato sia da get_monthly_stats che da get_period_stats.
+        """
+        db.row_factory = aiosqlite.Row
+
+        cur = await db.execute(
+            f"""
+            SELECT
+                COUNT(*)                                                             AS total_trades,
+                COALESCE(SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END), 0)           AS wins,
+                COALESCE(SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END), 0)           AS losses,
+                COALESCE(SUM(profit), 0)                                             AS total_profit,
+                COALESCE(SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END), 0)       AS gross_profit,
+                COALESCE(ABS(SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END)), 0)  AS gross_loss,
+                COALESCE(AVG(CASE WHEN profit > 0 THEN profit END), 0)              AS avg_win,
+                COALESCE(AVG(CASE WHEN profit < 0 THEN profit END), 0)              AS avg_loss,
+                COALESCE(MAX(profit), 0)                                             AS best_trade,
+                COALESCE(MIN(profit), 0)                                             AS worst_trade,
+                COALESCE(SUM(CASE WHEN reason='TP' THEN 1 ELSE 0 END), 0)           AS tp_count,
+                COALESCE(SUM(CASE WHEN reason='SL' THEN 1 ELSE 0 END), 0)           AS sl_count,
+                COALESCE(SUM(CASE WHEN reason NOT IN ('TP','SL') THEN 1 ELSE 0 END),0) AS manual_count,
+                COUNT(DISTINCT date(close_time))                                     AS active_days
+            FROM closed_trades
+            WHERE {where_clause}
+            """,
+            params,
+        )
+        row = await cur.fetchone()
+
+        cur2 = await db.execute(
+            f"""
+            SELECT symbol,
+                COUNT(*)                                                            AS total,
+                COALESCE(SUM(CASE WHEN profit > 0  THEN 1 ELSE 0 END), 0)          AS wins,
+                COALESCE(SUM(CASE WHEN profit <= 0 THEN 1 ELSE 0 END), 0)          AS losses,
+                COALESCE(SUM(profit), 0)                                            AS total_profit,
+                COALESCE(AVG(profit), 0)                                            AS avg_profit,
+                COALESCE(MAX(profit), 0)                                            AS best_trade,
+                COALESCE(MIN(profit), 0)                                            AS worst_trade,
+                COALESCE(SUM(CASE WHEN reason='TP' THEN 1 ELSE 0 END), 0)          AS tp_count,
+                COALESCE(SUM(CASE WHEN reason='SL' THEN 1 ELSE 0 END), 0)          AS sl_count
+            FROM closed_trades
+            WHERE {where_clause}
+            GROUP BY symbol ORDER BY total_profit DESC
+            """,
+            params,
+        )
+        sym_rows = await cur2.fetchall()
+
+        cur3 = await db.execute(
+            f"SELECT profit FROM closed_trades WHERE {where_clause} ORDER BY close_time ASC",
+            params,
+        )
+        profit_rows = await cur3.fetchall()
+
+        total  = int(row["total_trades"] or 0)
+        wins   = int(row["wins"] or 0)
+        losses = int(row["losses"] or 0)
+        gp     = float(row["gross_profit"] or 0)
+        gl     = float(row["gross_loss"]   or 0)
+
+        profits = [float(r[0]) for r in profit_rows if r[0] is not None]
+        max_cw = max_cl = cur_w = cur_l = 0
+        for p in profits:
+            if p > 0:
+                cur_w += 1; cur_l = 0
+                max_cw = max(max_cw, cur_w)
+            else:
+                cur_l += 1; cur_w = 0
+                max_cl = max(max_cl, cur_l)
+
+        by_symbol = []
+        for s in sym_rows:
+            t = int(s["total"] or 0)
+            by_symbol.append({
+                "symbol":       s["symbol"],
+                "total":        t,
+                "wins":         int(s["wins"] or 0),
+                "losses":       int(s["losses"] or 0),
+                "win_rate":     round(int(s["wins"] or 0) / t * 100, 1) if t else 0.0,
+                "total_profit": round(float(s["total_profit"] or 0), 2),
+                "avg_profit":   round(float(s["avg_profit"] or 0), 2),
+                "best_trade":   round(float(s["best_trade"] or 0), 2),
+                "worst_trade":  round(float(s["worst_trade"] or 0), 2),
+                "tp_count":     int(s["tp_count"] or 0),
+                "sl_count":     int(s["sl_count"] or 0),
+            })
+
+        return {
+            "total_trades":          total,
+            "wins":                  wins,
+            "losses":                losses,
+            "win_rate":              round(wins / total * 100, 1) if total else 0.0,
+            "total_profit":          round(float(row["total_profit"] or 0), 2),
+            "gross_profit":          round(gp, 2),
+            "gross_loss":            round(gl, 2),
+            "profit_factor":         round(gp / gl, 2) if gl > 0 else None,
+            "avg_win":               round(float(row["avg_win"] or 0), 2),
+            "avg_loss":              round(float(row["avg_loss"] or 0), 2),
+            "best_trade":            round(float(row["best_trade"] or 0), 2),
+            "worst_trade":           round(float(row["worst_trade"] or 0), 2),
+            "tp_count":              int(row["tp_count"] or 0),
+            "sl_count":              int(row["sl_count"] or 0),
+            "manual_count":          int(row["manual_count"] or 0),
+            "max_consecutive_wins":  max_cw,
+            "max_consecutive_losses":max_cl,
+            "active_trading_days":   int(row["active_days"] or 0),
+            "by_symbol":             by_symbol,
+        }
+
+    async def get_monthly_stats(self, user_id: str, year: int, month: int) -> dict:
+        """Stats complete di un mese specifico (per il report PDF)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_full_stats(
+                db,
+                "user_id = ? AND strftime('%Y', close_time) = ? AND strftime('%m', close_time) = ?",
+                (user_id, str(year), f"{month:02d}"),
+            )
+
+    async def get_period_stats(self, user_id: str, days: int) -> dict:
+        """Stats complete degli ultimi N giorni (per il report on-demand)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_full_stats(
+                db,
+                f"user_id = ? AND DATE(close_time) >= date('now', '-{max(0, days - 1)} days')",
+                (user_id,),
+            )
+
+    async def _build_groups_stats(
+        self, db, where_clause: str, params: tuple, user_id: str,
+        min_groups: int = 2,
+    ) -> list[dict]:
+        """
+        Per ogni gruppo Telegram con trade nel periodo, ritorna stats aggregate
+        incluso max_consecutive_losses (usato per il Trust Score).
+
+        min_groups=2  → per il periodo corrente (confronto utile solo con ≥2 canali)
+        min_groups=1  → per il periodo precedente (lookup per ogni canale presente)
+
+        Funziona anche dopo l'eliminazione di un gruppo da user_groups: i dati
+        restano in signal_logs e closed_trades e vengono recuperati tramite
+        signal_group_id (bridge tra i due store).
+        """
+        db.row_factory = aiosqlite.Row
+
+        cur = await db.execute(f"""
+            SELECT sl.group_id, MAX(sl.group_name) AS group_name
+            FROM closed_trades ct
+            JOIN signal_logs sl ON ct.signal_group_id = sl.signal_group_id
+            WHERE {where_clause} AND sl.group_id IS NOT NULL
+            GROUP BY sl.group_id
+            ORDER BY MAX(sl.group_name)
+        """, params)
+        groups = [(r["group_id"], r["group_name"]) for r in await cur.fetchall()]
+
+        if len(groups) < min_groups:
+            return []
+
+        _sg_subq = """
+            SELECT DISTINCT signal_group_id FROM signal_logs
+            WHERE user_id = ? AND group_id = ? AND signal_group_id IS NOT NULL
+        """
+
+        result = []
+        for gid, gname in groups:
+            sg_params = (user_id, gid)
+
+            cur2 = await db.execute(f"""
+                SELECT
+                    COUNT(ct.id)                                                              AS total_trades,
+                    COALESCE(SUM(CASE WHEN ct.profit > 0  THEN 1 ELSE 0 END), 0)             AS wins,
+                    COALESCE(SUM(CASE WHEN ct.profit <= 0 THEN 1 ELSE 0 END), 0)             AS losses,
+                    COALESCE(SUM(ct.profit), 0)                                               AS total_profit,
+                    COALESCE(SUM(CASE WHEN ct.profit > 0 THEN ct.profit ELSE 0 END), 0)      AS gross_profit,
+                    COALESCE(ABS(SUM(CASE WHEN ct.profit < 0 THEN ct.profit ELSE 0 END)), 0) AS gross_loss,
+                    COALESCE(AVG(CASE WHEN ct.profit > 0 THEN ct.profit END), 0)             AS avg_win,
+                    COALESCE(AVG(CASE WHEN ct.profit < 0 THEN ct.profit END), 0)             AS avg_loss,
+                    COALESCE(MAX(ct.profit), 0)                                               AS best_trade,
+                    COALESCE(MIN(ct.profit), 0)                                               AS worst_trade,
+                    COALESCE(SUM(CASE WHEN ct.reason='TP' THEN 1 ELSE 0 END), 0)             AS tp_count,
+                    COALESCE(SUM(CASE WHEN ct.reason='SL' THEN 1 ELSE 0 END), 0)             AS sl_count
+                FROM closed_trades ct
+                JOIN ({_sg_subq}) sg ON ct.signal_group_id = sg.signal_group_id
+                WHERE {where_clause}
+            """, sg_params + params)
+            row = await cur2.fetchone()
+
+            total = int(row["total_trades"] or 0)
+            if total == 0:
+                continue
+            wins = int(row["wins"] or 0)
+            gp   = float(row["gross_profit"] or 0)
+            gl   = float(row["gross_loss"]   or 0)
+
+            # Profits in chronological order for consecutive streak
+            cur3 = await db.execute(f"""
+                SELECT ct.profit FROM closed_trades ct
+                JOIN ({_sg_subq}) sg ON ct.signal_group_id = sg.signal_group_id
+                WHERE {where_clause}
+                ORDER BY ct.close_time ASC
+            """, sg_params + params)
+            profits = [r[0] for r in await cur3.fetchall() if r[0] is not None]
+            max_cw = max_cl = cur_w = cur_l = 0
+            for p in profits:
+                if p > 0:
+                    cur_w += 1; cur_l = 0
+                    max_cw = max(max_cw, cur_w)
+                else:
+                    cur_l += 1; cur_w = 0
+                    max_cl = max(max_cl, cur_l)
+
+            result.append({
+                "group_id":              gid,
+                "group_name":            gname or f"Gruppo {gid}",
+                "total_trades":          total,
+                "wins":                  wins,
+                "losses":                int(row["losses"] or 0),
+                "win_rate":              round(wins / total * 100, 1),
+                "total_profit":          round(float(row["total_profit"] or 0), 2),
+                "gross_profit":          round(gp, 2),
+                "gross_loss":            round(gl, 2),
+                "profit_factor":         round(gp / gl, 2) if gl > 0 else None,
+                "avg_win":               round(float(row["avg_win"]  or 0), 2),
+                "avg_loss":              round(float(row["avg_loss"] or 0), 2),
+                "best_trade":            round(float(row["best_trade"]  or 0), 2),
+                "worst_trade":           round(float(row["worst_trade"] or 0), 2),
+                "tp_count":              int(row["tp_count"] or 0),
+                "sl_count":              int(row["sl_count"] or 0),
+                "max_consecutive_losses": max_cl,
+                "max_consecutive_wins":   max_cw,
+            })
+
+        return result
+
+    async def get_monthly_groups_stats(self, user_id: str, year: int, month: int) -> list[dict]:
+        """Stats per-gruppo per un mese specifico. Ritorna [] se un solo gruppo."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_groups_stats(
+                db,
+                "user_id = ? AND strftime('%Y', close_time) = ? AND strftime('%m', close_time) = ?",
+                (user_id, str(year), f"{month:02d}"),
+                user_id,
+            )
+
+    async def get_monthly_groups_stats_prev(self, user_id: str, year: int, month: int) -> list[dict]:
+        """Stats per-gruppo per il mese precedente a (year, month). min_groups=1."""
+        if month == 1:
+            prev_year, prev_month = year - 1, 12
+        else:
+            prev_year, prev_month = year, month - 1
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_groups_stats(
+                db,
+                "user_id = ? AND strftime('%Y', close_time) = ? AND strftime('%m', close_time) = ?",
+                (user_id, str(prev_year), f"{prev_month:02d}"),
+                user_id,
+                min_groups=1,
+            )
+
+    async def get_period_groups_stats(self, user_id: str, days: int) -> list[dict]:
+        """Stats per-gruppo per gli ultimi N giorni. Ritorna [] se un solo gruppo."""
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_groups_stats(
+                db,
+                f"user_id = ? AND DATE(close_time) >= date('now', '-{max(0, days - 1)} days')",
+                (user_id,),
+                user_id,
+            )
+
+    async def get_period_groups_stats_prev(self, user_id: str, days: int) -> list[dict]:
+        """Stats per-gruppo per il periodo precedente (da 2*days fa a days fa). min_groups=1."""
+        d = max(0, days - 1)
+        async with aiosqlite.connect(self._db_path) as db:
+            return await self._build_groups_stats(
+                db,
+                f"user_id = ? AND DATE(close_time) >= date('now', '-{d * 2 + 1} days')"
+                f" AND DATE(close_time) < date('now', '-{d} days')",
+                (user_id,),
+                user_id,
+                min_groups=1,
+            )
+
+    async def get_period_trades(self, user_id: str, days: int) -> list[dict]:
+        """Tutti i trade degli ultimi N giorni (per il report on-demand)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                f"""
+                SELECT ticket, symbol, order_type, lots, entry_price, close_price,
+                       sl, tp, profit, reason, open_time, close_time
+                FROM closed_trades
+                WHERE user_id = ? AND DATE(close_time) >= date('now', '-{max(0, days - 1)} days')
+                ORDER BY close_time ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_period_equity_curve(self, user_id: str, days: int) -> list[dict]:
+        """P&L giornaliero e cumulativo degli ultimi N giorni (per l'equity chart on-demand)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                f"""
+                SELECT date(close_time) AS day, COALESCE(SUM(profit), 0) AS daily_pnl
+                FROM closed_trades
+                WHERE user_id = ? AND DATE(close_time) >= date('now', '-{max(0, days - 1)} days')
+                GROUP BY date(close_time)
+                ORDER BY day ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+        cumulative = 0.0
+        result = []
+        for row in rows:
+            daily = float(row[1] or 0)
+            cumulative += daily
+            result.append({
+                "day":            row[0],
+                "daily_pnl":      round(daily, 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result
+
+    async def get_monthly_trades(self, user_id: str, year: int, month: int) -> list[dict]:
+        """Tutti i trade di un mese specifico con dettagli completi (per la lista PDF)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT ticket, symbol, order_type, lots, entry_price, close_price,
+                       sl, tp, profit, reason, open_time, close_time
+                FROM closed_trades
+                WHERE user_id = ?
+                  AND strftime('%Y', close_time) = ?
+                  AND strftime('%m', close_time) = ?
+                ORDER BY close_time ASC
+                """,
+                (user_id, str(year), f"{month:02d}"),
+            )
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_monthly_equity_curve(self, user_id: str, year: int, month: int) -> list[dict]:
+        """P&L giornaliero e cumulativo per un mese specifico (per l'equity chart nel PDF)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                """
+                SELECT
+                    date(close_time)       AS day,
+                    COALESCE(SUM(profit), 0) AS daily_pnl
+                FROM closed_trades
+                WHERE user_id = ?
+                  AND strftime('%Y', close_time) = ?
+                  AND strftime('%m', close_time) = ?
+                GROUP BY date(close_time)
+                ORDER BY day ASC
+                """,
+                (user_id, str(year), f"{month:02d}"),
+            )
+            rows = await cur.fetchall()
+
+        cumulative = 0.0
+        result = []
+        for row in rows:
+            daily = float(row[1] or 0)
+            cumulative += daily
+            result.append({
+                "day":            row[0],
+                "daily_pnl":      round(daily, 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result
+
+    async def get_last_n_months_summaries(self, user_id: str, n: int = 6) -> list[dict]:
+        """Riepilogo mensile degli ultimi N mesi (incluso il corrente), in ordine cronologico."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        results = []
+        for i in range(n - 1, -1, -1):
+            month = now.month - i
+            year  = now.year
+            while month <= 0:
+                month += 12
+                year  -= 1
+            s = await self.get_monthly_summary(user_id, year, month)
+            results.append({"year": year, "month": month, **s})
+        return results
 
     async def get_last_week_summary(self, user_id: str) -> dict:
         """Ritorna un riepilogo dei trade degli ultimi 7 giorni per il report settimanale."""
