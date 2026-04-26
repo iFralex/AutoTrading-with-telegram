@@ -43,11 +43,22 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     group_name       TEXT,
     mt5_login        INTEGER,
     mt5_password_enc TEXT,
-    mt5_server          TEXT,
+    mt5_server              TEXT,
     sizing_strategy         TEXT,
     management_strategy     TEXT,
     deletion_strategy       TEXT,
     extraction_instructions TEXT,
+    range_entry_pct         INTEGER DEFAULT 50,
+    entry_if_favorable      INTEGER DEFAULT 0,
+    min_confidence          INTEGER DEFAULT 0,
+    trading_hours_enabled   INTEGER DEFAULT 0,
+    trading_hours_start     INTEGER DEFAULT 8,
+    trading_hours_end       INTEGER DEFAULT 22,
+    trading_hours_days      TEXT,
+    eco_calendar_enabled    INTEGER DEFAULT 0,
+    eco_calendar_window     INTEGER DEFAULT 30,
+    eco_calendar_strategy   TEXT,
+    community_visible       INTEGER DEFAULT 0,
     updated_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -58,6 +69,11 @@ _ALLOWED_FIELDS = {
     "group_id", "group_name", "mt5_login", "mt5_server",
     "sizing_strategy", "management_strategy", "deletion_strategy",
     "extraction_instructions",
+    "range_entry_pct", "entry_if_favorable", "min_confidence",
+    "trading_hours_enabled", "trading_hours_start", "trading_hours_end",
+    "trading_hours_days",
+    "eco_calendar_enabled", "eco_calendar_window", "eco_calendar_strategy",
+    "community_visible",
 }
 
 # Mappatura nomi frontend → colonne DB
@@ -111,6 +127,17 @@ class SetupSessionStore:
                 "ALTER TABLE setup_sessions ADD COLUMN management_strategy TEXT",
                 "ALTER TABLE setup_sessions ADD COLUMN deletion_strategy TEXT",
                 "ALTER TABLE setup_sessions ADD COLUMN extraction_instructions TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN range_entry_pct INTEGER DEFAULT 50",
+                "ALTER TABLE setup_sessions ADD COLUMN entry_if_favorable INTEGER DEFAULT 0",
+                "ALTER TABLE setup_sessions ADD COLUMN min_confidence INTEGER DEFAULT 0",
+                "ALTER TABLE setup_sessions ADD COLUMN trading_hours_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE setup_sessions ADD COLUMN trading_hours_start INTEGER DEFAULT 8",
+                "ALTER TABLE setup_sessions ADD COLUMN trading_hours_end INTEGER DEFAULT 22",
+                "ALTER TABLE setup_sessions ADD COLUMN trading_hours_days TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN eco_calendar_enabled INTEGER DEFAULT 0",
+                "ALTER TABLE setup_sessions ADD COLUMN eco_calendar_window INTEGER DEFAULT 30",
+                "ALTER TABLE setup_sessions ADD COLUMN eco_calendar_strategy TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN community_visible INTEGER DEFAULT 0",
             ]:
                 try:
                     await db.execute(_sql)
@@ -136,6 +163,8 @@ class SetupSessionStore:
         if row is None:
             return None
 
+        import json as _json
+        raw_days = row["trading_hours_days"]
         return {
             "phone":               row["phone"],
             "api_id":              row["api_id"],
@@ -151,6 +180,17 @@ class SetupSessionStore:
             "management_strategy":     row["management_strategy"],
             "deletion_strategy":       row["deletion_strategy"],
             "extraction_instructions": row["extraction_instructions"],
+            "range_entry_pct":         row["range_entry_pct"] if row["range_entry_pct"] is not None else 50,
+            "entry_if_favorable":      bool(row["entry_if_favorable"] or 0),
+            "min_confidence":          row["min_confidence"] if row["min_confidence"] is not None else 0,
+            "trading_hours_enabled":   bool(row["trading_hours_enabled"] or 0),
+            "trading_hours_start":     row["trading_hours_start"] if row["trading_hours_start"] is not None else 8,
+            "trading_hours_end":       row["trading_hours_end"] if row["trading_hours_end"] is not None else 22,
+            "trading_hours_days":      _json.loads(raw_days) if raw_days else ["MON","TUE","WED","THU","FRI"],
+            "eco_calendar_enabled":    bool(row["eco_calendar_enabled"] or 0),
+            "eco_calendar_window":     row["eco_calendar_window"] if row["eco_calendar_window"] is not None else 30,
+            "eco_calendar_strategy":   row["eco_calendar_strategy"],
+            "community_visible":       bool(row["community_visible"] or 0),
         }
 
     async def get_mt5_password(self, phone: str) -> str | None:
@@ -184,11 +224,14 @@ class SetupSessionStore:
             sizing_strategy
         """
         # Cifra la password se presente
+        import json as _json
         db_fields: dict = {}
         for k, v in fields.items():
             col = _FIELD_MAP.get(k, k)
             if k == "mt5_password":
                 db_fields[col] = _encrypt(v) if v else None
+            elif k == "trading_hours_days":
+                db_fields[col] = _json.dumps(v) if isinstance(v, list) else v
             elif col in _ALLOWED_FIELDS or col == "mt5_password_enc":
                 db_fields[col] = v
 

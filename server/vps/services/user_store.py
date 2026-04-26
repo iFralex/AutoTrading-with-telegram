@@ -309,10 +309,20 @@ class UserStore:
         entry_if_favorable: bool = False,
         deletion_strategy: str | None = None,
         extraction_instructions: str | None = None,
+        min_confidence: int = 0,
+        trading_hours_enabled: bool = False,
+        trading_hours_start: int = 0,
+        trading_hours_end: int = 22,
+        trading_hours_days: list[str] | None = None,
+        eco_calendar_enabled: bool = False,
+        eco_calendar_window: int = 30,
+        eco_calendar_strategy: str | None = None,
+        community_visible: bool = False,
         active: bool = True,
     ) -> None:
         """Inserisce o aggiorna un gruppo utente."""
         import secrets as _secrets
+        import json as _json
         new_token = _secrets.token_hex(8)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
@@ -321,8 +331,11 @@ class UserStore:
                     (user_id, group_id, group_name,
                      sizing_strategy, management_strategy, range_entry_pct,
                      entry_if_favorable, deletion_strategy, extraction_instructions,
+                     min_confidence, trading_hours_enabled, trading_hours_start,
+                     trading_hours_end, trading_hours_days,
+                     eco_calendar_enabled, eco_calendar_window, eco_calendar_strategy,
                      active, community_token, community_visible, is_community_follow)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(user_id, group_id) DO UPDATE SET
                     group_name              = excluded.group_name,
                     sizing_strategy         = excluded.sizing_strategy,
@@ -331,6 +344,15 @@ class UserStore:
                     entry_if_favorable      = excluded.entry_if_favorable,
                     deletion_strategy       = excluded.deletion_strategy,
                     extraction_instructions = excluded.extraction_instructions,
+                    min_confidence          = excluded.min_confidence,
+                    trading_hours_enabled   = excluded.trading_hours_enabled,
+                    trading_hours_start     = excluded.trading_hours_start,
+                    trading_hours_end       = excluded.trading_hours_end,
+                    trading_hours_days      = excluded.trading_hours_days,
+                    eco_calendar_enabled    = excluded.eco_calendar_enabled,
+                    eco_calendar_window     = excluded.eco_calendar_window,
+                    eco_calendar_strategy   = excluded.eco_calendar_strategy,
+                    community_visible       = excluded.community_visible,
                     active                  = excluded.active,
                     community_token         = COALESCE(community_token, excluded.community_token)
                 """,
@@ -340,8 +362,17 @@ class UserStore:
                     max(0, min(100, int(range_entry_pct))),
                     1 if entry_if_favorable else 0,
                     deletion_strategy, extraction_instructions,
+                    max(0, min(100, int(min_confidence))),
+                    1 if trading_hours_enabled else 0,
+                    max(0, min(23, int(trading_hours_start))),
+                    max(0, min(23, int(trading_hours_end))),
+                    _json.dumps(trading_hours_days) if trading_hours_days else None,
+                    1 if eco_calendar_enabled else 0,
+                    max(5, min(120, int(eco_calendar_window))),
+                    eco_calendar_strategy or None,
                     1 if active else 0,
                     new_token,
+                    1 if community_visible else 0,
                 ),
             )
             await db.commit()

@@ -57,6 +57,17 @@ export interface CompleteSetupPayload {
   management_strategy?: string
   deletion_strategy?: string
   extraction_instructions?: string
+  range_entry_pct?: number
+  entry_if_favorable?: boolean
+  min_confidence?: number
+  trading_hours_enabled?: boolean
+  trading_hours_start?: number
+  trading_hours_end?: number
+  trading_hours_days?: string[]
+  eco_calendar_enabled?: boolean
+  eco_calendar_window?: number
+  eco_calendar_strategy?: string
+  community_visible?: boolean
 }
 
 export interface SetupSession {
@@ -77,6 +88,17 @@ export interface SetupSession {
   management_strategy?: string | null
   deletion_strategy?: string | null
   extraction_instructions?: string | null
+  range_entry_pct?: number | null
+  entry_if_favorable?: boolean | null
+  min_confidence?: number | null
+  trading_hours_enabled?: boolean | null
+  trading_hours_start?: number | null
+  trading_hours_end?: number | null
+  trading_hours_days?: string[] | null
+  eco_calendar_enabled?: boolean | null
+  eco_calendar_window?: number | null
+  eco_calendar_strategy?: string | null
+  community_visible?: boolean | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
@@ -96,6 +118,17 @@ export interface SaveSessionPayload {
   management_strategy?: string
   deletion_strategy?: string
   extraction_instructions?: string
+  range_entry_pct?: number
+  entry_if_favorable?: boolean
+  min_confidence?: number
+  trading_hours_enabled?: boolean
+  trading_hours_start?: number
+  trading_hours_end?: number
+  trading_hours_days?: string[]
+  eco_calendar_enabled?: boolean
+  eco_calendar_window?: number
+  eco_calendar_strategy?: string
+  community_visible?: boolean
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────

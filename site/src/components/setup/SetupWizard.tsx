@@ -34,21 +34,30 @@ function ErrBox({ msg }: { msg: string }) {
 
 const PLAN_ORDER: PlanId[] = ["core", "pro", "elite"]
 
-const FIELD_PLAN_MAP: { field: keyof SetupData; label: string; minPlan: PlanId }[] = [
-  { field: "extractionInstructions", label: "AI extraction instructions", minPlan: "pro"   },
-  { field: "managementStrategy",     label: "Position management",        minPlan: "elite" },
-  { field: "deletionStrategy",       label: "Signal deletion handling",   minPlan: "elite" },
+const FIELD_PLAN_MAP: { field: keyof SetupData; label: string; minPlan: PlanId; isSet?: (d: SetupData) => boolean }[] = [
+  { field: "extractionInstructions", label: "AI extraction instructions",   minPlan: "pro"   },
+  { field: "minConfidence",          label: "AI confidence threshold",      minPlan: "pro",   isSet: d => Number(d.minConfidence) > 0 },
+  { field: "managementStrategy",     label: "Position management",          minPlan: "elite" },
+  { field: "deletionStrategy",       label: "Signal deletion handling",     minPlan: "elite" },
+  { field: "tradingHoursEnabled",    label: "Trading hours filter",         minPlan: "elite", isSet: d => d.tradingHoursEnabled },
+  { field: "ecoCalendarEnabled",     label: "Economic calendar filter",     minPlan: "elite", isSet: d => d.ecoCalendarEnabled },
+  { field: "communityVisible",       label: "Community room visibility",    minPlan: "elite", isSet: d => d.communityVisible },
 ]
 
 function getMinPlan(data: SetupData): PlanId {
-  if ((data.managementStrategy || data.deletionStrategy).trim()) return "elite"
-  if (data.extractionInstructions.trim()) return "pro"
+  const check = (f: typeof FIELD_PLAN_MAP[0]) =>
+    f.isSet ? f.isSet(data) : !!(data[f.field] as string)?.trim?.()
+  if (FIELD_PLAN_MAP.filter(f => f.minPlan === "elite").some(check)) return "elite"
+  if (FIELD_PLAN_MAP.filter(f => f.minPlan === "pro").some(check)) return "pro"
   return "core"
 }
 
 function getAffectedFields(plan: PlanId, data: SetupData) {
   const planIdx = PLAN_ORDER.indexOf(plan)
-  return FIELD_PLAN_MAP.filter(f => PLAN_ORDER.indexOf(f.minPlan) > planIdx && (data[f.field] as string).trim())
+  return FIELD_PLAN_MAP.filter(f => {
+    if (PLAN_ORDER.indexOf(f.minPlan) <= planIdx) return false
+    return f.isSet ? f.isSet(data) : !!(data[f.field] as string)?.trim?.()
+  })
 }
 
 function PlanBadge({ plan }: { plan: PlanId }) {
@@ -157,6 +166,17 @@ export interface SetupData {
   extractionInstructions: string
   managementStrategy: string
   deletionStrategy: string
+  rangeEntryPct: string
+  entryIfFavorable: boolean
+  minConfidence: string
+  tradingHoursEnabled: boolean
+  tradingHoursStart: string
+  tradingHoursEnd: string
+  tradingHoursDays: string[]
+  ecoCalendarEnabled: boolean
+  ecoCalendarWindow: string
+  ecoCalendarStrategy: string
+  communityVisible: boolean
 }
 
 const EMPTY: SetupData = {
@@ -164,6 +184,12 @@ const EMPTY: SetupData = {
   userId: "", groupId: "", groupName: "", mt5Login: "", mt5Password: "",
   mt5Server: "", mt5AccountName: "", sizingStrategy: "",
   extractionInstructions: "", managementStrategy: "", deletionStrategy: "",
+  rangeEntryPct: "50", entryIfFavorable: false,
+  minConfidence: "0",
+  tradingHoursEnabled: false, tradingHoursStart: "8", tradingHoursEnd: "22",
+  tradingHoursDays: ["MON","TUE","WED","THU","FRI"],
+  ecoCalendarEnabled: false, ecoCalendarWindow: "30", ecoCalendarStrategy: "",
+  communityVisible: false,
 }
 
 interface StepProps {
@@ -284,6 +310,17 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
           extractionInstructions: res.extraction_instructions ?? "",
           managementStrategy:     res.management_strategy ?? "",
           deletionStrategy:       res.deletion_strategy ?? "",
+          rangeEntryPct:          String(res.range_entry_pct ?? 50),
+          entryIfFavorable:       !!(res.entry_if_favorable),
+          minConfidence:          String(res.min_confidence ?? 0),
+          tradingHoursEnabled:    !!(res.trading_hours_enabled),
+          tradingHoursStart:      String(res.trading_hours_start ?? 8),
+          tradingHoursEnd:        String(res.trading_hours_end ?? 22),
+          tradingHoursDays:       res.trading_hours_days ?? ["MON","TUE","WED","THU","FRI"],
+          ecoCalendarEnabled:     !!(res.eco_calendar_enabled),
+          ecoCalendarWindow:      String(res.eco_calendar_window ?? 30),
+          ecoCalendarStrategy:    res.eco_calendar_strategy ?? "",
+          communityVisible:       !!(res.community_visible),
         })
         setSub("session_found")
       } else {
@@ -802,6 +839,46 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           </div>
         </div>
 
+        {/* Range entry — Core */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Range entry position</span>
+            <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+            <PlanBadge plan="core" />
+          </div>
+          <div className="flex items-center gap-4">
+            <input type="range" min={0} max={100} step={5} value={Number(data.rangeEntryPct)}
+              onChange={e => update({ rangeEntryPct: e.target.value })}
+              className="flex-1 accent-emerald-400 cursor-pointer" />
+            <span className="text-sm font-mono text-white/55 w-10 text-right shrink-0">{data.rangeEntryPct}%</span>
+          </div>
+          <p className="text-xs text-white/22 mt-1.5">Where to place a limit order within the signal&apos;s entry range. 0% = bottom, 50% = middle, 100% = top.</p>
+        </div>
+
+        {/* Entry if favorable — Core */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Market entry if price is favorable</span>
+            <PlanBadge plan="core" />
+          </div>
+          <div className="space-y-1.5">
+            {([
+              { val: false, label: "Disabled", desc: "Always place a pending order at the target price" },
+              { val: true,  label: "Enabled",  desc: "Enter at market immediately if price is already past the entry target" },
+            ] as const).map(opt => (
+              <button key={String(opt.val)} type="button" onClick={() => update({ entryIfFavorable: opt.val })}
+                className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
+                  data.entryIfFavorable === opt.val
+                    ? "border-emerald-400/25 bg-emerald-400/[0.06] text-white"
+                    : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
+                }`}>
+                <span className="text-xs font-semibold">{opt.label}</span>
+                <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Advanced toggle */}
         <button
           onClick={() => setShowAdv(v => !v)}
@@ -854,6 +931,171 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
               </div>
               <TA id="deletion" value={data.deletionStrategy} onChange={v => update({ deletionStrategy: v })} placeholder={"Example: " + DELETION_EX[0]} />
               <div className="space-y-1.5 mt-2">{DELETION_EX.map(p => <Preset key={p} text={p} onClick={() => update({ deletionStrategy: p })} />)}</div>
+            </div>
+
+            {/* AI confidence threshold — Pro */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">AI confidence threshold</span>
+                <span className="text-white/25 text-xs normal-case font-normal">Optional</span>
+                <PlanBadge plan="pro" />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-4">
+                  <input type="range" min={0} max={100} step={10} value={Number(data.minConfidence)}
+                    onChange={e => update({ minConfidence: e.target.value })}
+                    className="flex-1 accent-emerald-400 cursor-pointer" />
+                  <span className="text-sm font-mono text-white/55 w-10 text-right shrink-0">{data.minConfidence}</span>
+                </div>
+                <p className="text-xs text-white/28 italic">
+                  {Number(data.minConfidence) === 0
+                    ? "0 — Accept all signals regardless of AI confidence"
+                    : Number(data.minConfidence) >= 80
+                    ? `${data.minConfidence} — Only very clear, high-confidence signals`
+                    : `${data.minConfidence} — Discard low-confidence signals`}
+                </p>
+              </div>
+            </div>
+
+            {/* Trading hours filter — Elite */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Trading hours filter</span>
+                <PlanBadge plan="elite" />
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  {([
+                    { val: false, label: "Disabled", desc: "Execute signals 24/7 without restrictions" },
+                    { val: true,  label: "Enabled",  desc: "Block signals outside the configured time window" },
+                  ] as const).map(opt => (
+                    <button key={String(opt.val)} type="button" onClick={() => update({ tradingHoursEnabled: opt.val })}
+                      className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
+                        data.tradingHoursEnabled === opt.val
+                          ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
+                          : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
+                      }`}>
+                      <span className="text-xs font-semibold">{opt.label}</span>
+                      <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {data.tradingHoursEnabled && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <label className="text-xs text-white/30 mb-1.5 block">Start (UTC)</label>
+                        <input type="number" min={0} max={23} value={data.tradingHoursStart}
+                          onChange={e => update({ tradingHoursStart: String(Math.min(23, Math.max(0, Number(e.target.value)))) })}
+                          className={inp} />
+                      </div>
+                      <div className="pt-5 text-white/25 text-sm shrink-0">→</div>
+                      <div className="flex-1">
+                        <label className="text-xs text-white/30 mb-1.5 block">End (UTC)</label>
+                        <input type="number" min={0} max={23} value={data.tradingHoursEnd}
+                          onChange={e => update({ tradingHoursEnd: String(Math.min(23, Math.max(0, Number(e.target.value)))) })}
+                          className={inp} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-white/22 -mt-1">
+                      {Number(data.tradingHoursStart) <= Number(data.tradingHoursEnd)
+                        ? `Allowed ${data.tradingHoursStart.padStart(2,"0")}:00–${data.tradingHoursEnd.padStart(2,"0")}:59 UTC`
+                        : `Overnight: ${data.tradingHoursStart.padStart(2,"0")}:00–${data.tradingHoursEnd.padStart(2,"0")}:59 UTC (+1d)`}
+                    </p>
+                    <div>
+                      <p className="text-xs text-white/30 mb-2">Active days</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(["MON","TUE","WED","THU","FRI","SAT","SUN"] as const).map(day => {
+                          const sel = data.tradingHoursDays.includes(day)
+                          const labels: Record<string, string> = { MON:"Mon",TUE:"Tue",WED:"Wed",THU:"Thu",FRI:"Fri",SAT:"Sat",SUN:"Sun" }
+                          return (
+                            <button key={day} type="button"
+                              onClick={() => update({ tradingHoursDays: sel
+                                ? data.tradingHoursDays.filter(d => d !== day)
+                                : [...data.tradingHoursDays, day] })}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                                sel ? "border-amber-400/25 bg-amber-400/[0.08] text-amber-300"
+                                    : "border-white/8 text-white/30 hover:border-white/15 hover:text-white/60"
+                              }`}>
+                              {labels[day]}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Economic calendar — Elite */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Economic calendar filter</span>
+                <PlanBadge plan="elite" />
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  {([
+                    { val: false, label: "Disabled", desc: "Does not check the economic calendar" },
+                    { val: true,  label: "Enabled",  desc: "Adjusts signals near high-impact macro events (ForexFactory)" },
+                  ] as const).map(opt => (
+                    <button key={String(opt.val)} type="button" onClick={() => update({ ecoCalendarEnabled: opt.val })}
+                      className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
+                        data.ecoCalendarEnabled === opt.val
+                          ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
+                          : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
+                      }`}>
+                      <span className="text-xs font-semibold">{opt.label}</span>
+                      <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {data.ecoCalendarEnabled && (
+                  <>
+                    <div>
+                      <label className="text-xs text-white/30 mb-1.5 block">Event window (minutes before/after)</label>
+                      <div className="flex items-center gap-2">
+                        <input type="number" min={5} max={120} value={data.ecoCalendarWindow}
+                          onChange={e => update({ ecoCalendarWindow: String(Math.min(120, Math.max(5, Number(e.target.value)))) })}
+                          className={`${inp} w-24`} />
+                        <span className="text-xs text-white/30">min (5–120)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/30 mb-1.5 block">AI strategy during event <span className="text-white/20">(optional)</span></label>
+                      <TA id="eco-strategy" value={data.ecoCalendarStrategy}
+                        onChange={v => update({ ecoCalendarStrategy: v })}
+                        placeholder="Example: Reduce lot size to 50% and widen SL" />
+                      <p className="text-xs text-white/22 mt-1.5">If set, the AI applies this strategy instead of blocking the signal.</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Community visibility — Elite */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-white/45 uppercase tracking-wider">Signal room visibility</span>
+                <PlanBadge plan="elite" />
+              </div>
+              <div className="space-y-1.5">
+                {([
+                  { val: false, label: "Private", desc: "Your signal room is not listed in the community" },
+                  { val: true,  label: "Public",  desc: "Elite users can discover and follow your signal room" },
+                ] as const).map(opt => (
+                  <button key={String(opt.val)} type="button" onClick={() => update({ communityVisible: opt.val })}
+                    className={`w-full text-left rounded-xl border px-4 py-2.5 transition-all ${
+                      data.communityVisible === opt.val
+                        ? "border-amber-400/25 bg-amber-400/[0.05] text-white"
+                        : "border-white/8 text-white/40 hover:border-white/15 hover:text-white/65"
+                    }`}>
+                    <span className="text-xs font-semibold">{opt.label}</span>
+                    <span className="block text-[11px] text-white/30 mt-0.5">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -917,9 +1159,15 @@ function PaymentStep({ data, update, onNext, onBack }: StepProps) {
     { label: "Signal room",         value: data.groupName,                                            minPlan: "core"  as PlanId, show: !!data.groupId },
     { label: "MT5 account",         value: data.mt5AccountName || data.mt5Login,                     minPlan: "core"  as PlanId, show: !!data.mt5Login },
     { label: "Position sizing",     value: "Configured",                                             minPlan: "core"  as PlanId, show: !!data.sizingStrategy },
-    { label: "AI extraction rules", value: "Configured",                                             minPlan: "pro"   as PlanId, show: !!data.extractionInstructions },
-    { label: "Position management", value: "Configured",                                             minPlan: "elite" as PlanId, show: !!data.managementStrategy },
-    { label: "Deletion handling",   value: "Configured",                                             minPlan: "elite" as PlanId, show: !!data.deletionStrategy },
+    { label: "Range entry position",        value: `${data.rangeEntryPct}%`,                                         minPlan: "core"  as PlanId, show: Number(data.rangeEntryPct) !== 50 },
+    { label: "Market entry if favorable",   value: "Enabled",                                                        minPlan: "core"  as PlanId, show: data.entryIfFavorable },
+    { label: "AI extraction rules",         value: "Configured",                                                     minPlan: "pro"   as PlanId, show: !!data.extractionInstructions },
+    { label: "AI confidence threshold",     value: `≥ ${data.minConfidence}`,                                        minPlan: "pro"   as PlanId, show: Number(data.minConfidence) > 0 },
+    { label: "Position management",         value: "Configured",                                                     minPlan: "elite" as PlanId, show: !!data.managementStrategy },
+    { label: "Deletion handling",           value: "Configured",                                                     minPlan: "elite" as PlanId, show: !!data.deletionStrategy },
+    { label: "Trading hours",               value: `${data.tradingHoursStart}:00–${data.tradingHoursEnd}:59 UTC`,   minPlan: "elite" as PlanId, show: data.tradingHoursEnabled },
+    { label: "Economic calendar filter",    value: `±${data.ecoCalendarWindow} min`,                                 minPlan: "elite" as PlanId, show: data.ecoCalendarEnabled },
+    { label: "Community room",              value: "Public",                                                         minPlan: "elite" as PlanId, show: data.communityVisible },
   ].filter(f => f.show)
 
   const minPlanObj = PLANS.find(p => p.id === minPlan)!
@@ -1107,6 +1355,17 @@ function LaunchStep({ data, onBack }: StepProps) {
         extraction_instructions: data.extractionInstructions || undefined,
         management_strategy:     data.managementStrategy || undefined,
         deletion_strategy:       data.deletionStrategy || undefined,
+        range_entry_pct:         Number(data.rangeEntryPct),
+        entry_if_favorable:      data.entryIfFavorable,
+        min_confidence:          Number(data.minConfidence),
+        trading_hours_enabled:   data.tradingHoursEnabled,
+        trading_hours_start:     Number(data.tradingHoursStart),
+        trading_hours_end:       Number(data.tradingHoursEnd),
+        trading_hours_days:      data.tradingHoursDays,
+        eco_calendar_enabled:    data.ecoCalendarEnabled,
+        eco_calendar_window:     Number(data.ecoCalendarWindow),
+        eco_calendar_strategy:   data.ecoCalendarStrategy || undefined,
+        community_visible:       data.communityVisible,
       })
       setDone(true)
     } catch (ex) {
@@ -1224,7 +1483,24 @@ export function SetupWizard() {
         case 1:
           await api.saveSession({ phone: data.phone, mt5_login: Number(data.mt5Login), mt5_server: data.mt5Server, mt5_password: data.mt5Password }); break
         case 2:
-          await api.saveSession({ phone: data.phone, sizing_strategy: data.sizingStrategy, extraction_instructions: data.extractionInstructions || undefined, management_strategy: data.managementStrategy || undefined, deletion_strategy: data.deletionStrategy || undefined }); break
+          await api.saveSession({
+            phone: data.phone,
+            sizing_strategy: data.sizingStrategy,
+            extraction_instructions: data.extractionInstructions || undefined,
+            management_strategy: data.managementStrategy || undefined,
+            deletion_strategy: data.deletionStrategy || undefined,
+            range_entry_pct: Number(data.rangeEntryPct),
+            entry_if_favorable: data.entryIfFavorable,
+            min_confidence: Number(data.minConfidence),
+            trading_hours_enabled: data.tradingHoursEnabled,
+            trading_hours_start: Number(data.tradingHoursStart),
+            trading_hours_end: Number(data.tradingHoursEnd),
+            trading_hours_days: data.tradingHoursDays,
+            eco_calendar_enabled: data.ecoCalendarEnabled,
+            eco_calendar_window: Number(data.ecoCalendarWindow),
+            eco_calendar_strategy: data.ecoCalendarStrategy || undefined,
+            community_visible: data.communityVisible,
+          }); break
       }
     } catch { /* non-blocking */ }
     setStep(s => Math.min(s + 1, 4))
@@ -1237,8 +1513,21 @@ export function SetupWizard() {
           await api.clearSessionFields(data.phone, ["mt5_login", "mt5_password", "mt5_server"])
           update({ mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "" }); break
         case 2:
-          await api.clearSessionFields(data.phone, ["sizing_strategy", "extraction_instructions", "management_strategy", "deletion_strategy"])
-          update({ sizingStrategy: "", extractionInstructions: "", managementStrategy: "", deletionStrategy: "" }); break
+          await api.clearSessionFields(data.phone, [
+            "sizing_strategy", "extraction_instructions", "management_strategy", "deletion_strategy",
+            "range_entry_pct", "entry_if_favorable", "min_confidence",
+            "trading_hours_enabled", "trading_hours_start", "trading_hours_end", "trading_hours_days",
+            "eco_calendar_enabled", "eco_calendar_window", "eco_calendar_strategy", "community_visible",
+          ])
+          update({
+            sizingStrategy: "", extractionInstructions: "", managementStrategy: "", deletionStrategy: "",
+            rangeEntryPct: "50", entryIfFavorable: false,
+            minConfidence: "0",
+            tradingHoursEnabled: false, tradingHoursStart: "8", tradingHoursEnd: "22",
+            tradingHoursDays: ["MON","TUE","WED","THU","FRI"],
+            ecoCalendarEnabled: false, ecoCalendarWindow: "30", ecoCalendarStrategy: "",
+            communityVisible: false,
+          }); break
       }
     } catch { /* non-blocking */ }
     setStep(s => Math.max(s - 1, 0))

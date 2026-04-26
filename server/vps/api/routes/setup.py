@@ -69,6 +69,17 @@ class SaveSessionBody(BaseModel):
     management_strategy: str | None = None
     deletion_strategy: str | None = None
     extraction_instructions: str | None = None
+    range_entry_pct: int | None = None
+    entry_if_favorable: bool | None = None
+    min_confidence: int | None = None
+    trading_hours_enabled: bool | None = None
+    trading_hours_start: int | None = None
+    trading_hours_end: int | None = None
+    trading_hours_days: list[str] | None = None
+    eco_calendar_enabled: bool | None = None
+    eco_calendar_window: int | None = None
+    eco_calendar_strategy: str | None = None
+    community_visible: bool | None = None
 
 
 class ClearSessionFieldsBody(BaseModel):
@@ -116,6 +127,17 @@ class CompleteSetupBody(BaseModel):
     management_strategy: str | None = None
     deletion_strategy: str | None = None
     extraction_instructions: str | None = None
+    range_entry_pct: int = 0
+    entry_if_favorable: bool = False
+    min_confidence: int = 0
+    trading_hours_enabled: bool = False
+    trading_hours_start: int = 0
+    trading_hours_end: int = 22
+    trading_hours_days: list[str] | None = None
+    eco_calendar_enabled: bool = False
+    eco_calendar_window: int = 30
+    eco_calendar_strategy: str | None = None
+    community_visible: bool = False
 
 
 # ── Session endpoints ────────────────────────────────────────────────────────
@@ -496,6 +518,17 @@ async def complete_setup(
             management_strategy=body.management_strategy,
             deletion_strategy=body.deletion_strategy,
             extraction_instructions=body.extraction_instructions,
+            range_entry_pct=body.range_entry_pct,
+            entry_if_favorable=body.entry_if_favorable,
+            min_confidence=body.min_confidence,
+            trading_hours_enabled=body.trading_hours_enabled,
+            trading_hours_start=body.trading_hours_start,
+            trading_hours_end=body.trading_hours_end,
+            trading_hours_days=body.trading_hours_days,
+            eco_calendar_enabled=body.eco_calendar_enabled,
+            eco_calendar_window=body.eco_calendar_window,
+            eco_calendar_strategy=body.eco_calendar_strategy,
+            community_visible=body.community_visible,
         )
 
         tm.add_user(
