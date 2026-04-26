@@ -376,6 +376,7 @@ export interface CommunityGroup {
   alias:                  string
   score:                  number | null
   label:                  string
+  is_following:           boolean
   trade_count:            number
   win_rate:               number | null
   total_profit:           number
@@ -809,9 +810,10 @@ export const api = {
 
   // ── Community Groups (Elite) ──────────────────────────────────────────────
 
-  /** List all public community groups sorted by trust score. */
-  listCommunityGroups() {
-    return call<{ groups: CommunityGroup[] }>("GET", "/api/dashboard/community/groups")
+  /** List all public community groups sorted by trust score. When userId is provided, is_following is populated per group. */
+  listCommunityGroups(userId?: string) {
+    const q = userId ? `?user_id=${encodeURIComponent(userId)}` : ""
+    return call<{ groups: CommunityGroup[] }>("GET", `/api/dashboard/community/groups${q}`)
   },
 
   /** Detailed stats for a community group (equity curve, recent trades, score). */

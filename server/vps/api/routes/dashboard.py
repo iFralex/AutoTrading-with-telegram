@@ -945,12 +945,27 @@ def _group_alias(token: str) -> str:
 
 @router.get("/community/groups")
 async def list_community_groups(
+    user_id: str | None = Query(None, description="When provided, adds is_following per group"),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Lists all public community groups with trust score, sorted by score descending."""
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
     closed_trade_store = request.app.state.closed_trade_store
+    group_follow_store = request.app.state.group_follow_store
+
+    # Pre-build the set of tokens the viewer is following (one query, O(1) lookup)
+    followed_tokens: set[str] = set()
+    if user_id:
+        try:
+            following = await group_follow_store.get_following(user_id)
+            # Build token set by looking up each source group
+            for f in following:
+                src_grp = await store.get_user_group(f["source_user_id"], f["source_group_id"])
+                if src_grp and src_grp.get("community_token"):
+                    followed_tokens.add(src_grp["community_token"])
+        except Exception:
+            pass
 
     community_groups = await store.get_all_community_groups()
     results = []
@@ -970,6 +985,7 @@ async def list_community_groups(
             "alias":                  _group_alias(token),
             "score":                  score_data["score"],
             "label":                  score_data["label"],
+            "is_following":           token in followed_tokens,
             "trade_count":            int(trade_stats.get("total_trades") or 0),
             "win_rate":               trade_stats.get("win_rate") if trade_stats.get("total_trades") else None,
             "total_profit":           trade_stats.get("total_profit", 0.0),

@@ -51,15 +51,16 @@ function GroupCard({
   selected,
   onSelect,
   userId,
-  onFollowChange,
+  following,
+  onFollowToggle,
 }: {
   group: CommunityGroup
   selected: boolean
   onSelect: () => void
   userId: string | undefined
-  onFollowChange: () => void
+  following: boolean
+  onFollowToggle: (token: string, newState: boolean) => void
 }) {
-  const [following, setFollowing] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const handleFollow = async (e: React.MouseEvent) => {
@@ -69,12 +70,11 @@ function GroupCard({
     try {
       if (following) {
         await api.unfollowCommunityGroup(group.token, userId)
-        setFollowing(false)
+        onFollowToggle(group.token, false)
       } else {
         await api.followCommunityGroup(group.token, userId)
-        setFollowing(true)
+        onFollowToggle(group.token, true)
       }
-      onFollowChange()
     } catch {
       // silently ignore
     } finally {
@@ -145,11 +145,13 @@ function GroupCard({
 function DetailPanel({
   token,
   userId,
-  onFollowChange,
+  following,
+  onFollowToggle,
 }: {
   token: string
   userId: string | undefined
-  onFollowChange: () => void
+  following: boolean
+  onFollowToggle: (token: string, newState: boolean) => void
 }) {
   const [detail, setDetail] = useState<CommunityGroupDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -170,17 +172,16 @@ function DetailPanel({
   useEffect(() => { load() }, [load])
 
   const handleFollow = async () => {
-    if (!userId || !detail) return
+    if (!userId) return
     setFollowBusy(true)
     try {
-      if (detail.is_following) {
+      if (following) {
         await api.unfollowCommunityGroup(token, userId)
-        setDetail(d => d ? { ...d, is_following: false } : d)
+        onFollowToggle(token, false)
       } else {
         await api.followCommunityGroup(token, userId)
-        setDetail(d => d ? { ...d, is_following: true } : d)
+        onFollowToggle(token, true)
       }
-      onFollowChange()
     } catch {
       // silently ignore
     } finally {
@@ -220,13 +221,13 @@ function DetailPanel({
             disabled={followBusy}
             className={`
               flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40
-              ${detail.is_following
+              ${following
                 ? "bg-red-600/10 text-red-400 hover:bg-red-600/20 border border-red-500/20"
                 : "bg-indigo-600 hover:bg-indigo-500 text-white"
               }
             `}
           >
-            {detail.is_following
+            {following
               ? <><UserMinus className="w-3 h-3" /> Unfollow</>
               : <><UserPlus className="w-3 h-3" /> Follow & copy strategies</>
             }
@@ -407,23 +408,30 @@ export function CommunityPage({ userId }: { userId?: string }) {
   const [error, setError]           = useState<string | null>(null)
   const [selectedToken, setSelectedToken] = useState<string | null>(null)
   const [followRefresh, setFollowRefresh] = useState(0)
+  const [followStates, setFollowStates]   = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.listCommunityGroups()
+      const res = await api.listCommunityGroups(userId)
       setGroups(res.groups)
+      const initial: Record<string, boolean> = {}
+      for (const g of res.groups) initial[g.token] = g.is_following
+      setFollowStates(initial)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Load failed")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => { load() }, [load])
 
-  const onFollowChange = () => setFollowRefresh(n => n + 1)
+  const onFollowToggle = (token: string, newState: boolean) => {
+    setFollowStates(prev => ({ ...prev, [token]: newState }))
+    setFollowRefresh(n => n + 1)
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -484,10 +492,16 @@ export function CommunityPage({ userId }: { userId?: string }) {
                 selected={selectedToken === g.token}
                 onSelect={() => setSelectedToken(t => t === g.token ? null : g.token)}
                 userId={userId}
-                onFollowChange={onFollowChange}
+                following={followStates[g.token] ?? false}
+                onFollowToggle={onFollowToggle}
               />
               {selectedToken === g.token && (
-                <DetailPanel token={g.token} userId={userId} onFollowChange={onFollowChange} />
+                <DetailPanel
+                  token={g.token}
+                  userId={userId}
+                  following={followStates[g.token] ?? false}
+                  onFollowToggle={onFollowToggle}
+                />
               )}
             </div>
           ))}
