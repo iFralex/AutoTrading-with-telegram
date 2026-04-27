@@ -947,6 +947,18 @@ async def _sim_full(
                         if ai_result["actions"] or ai_result["tool_calls"]:
                             ev["ai_result"] = ai_result
                         sig_events.append(ev)
+                        # If AI closed the position during deletion, record P&L
+                        if (position_ticket and trade_state == "open"
+                                and state.get_position(position_ticket) is None
+                                and order_open_price is not None):
+                            pnl = _calc_pnl(order_type, order_open_price, price, lot, symbol, symbol_specs)
+                            total_pnl += pnl
+                            state.balance    += pnl
+                            state.equity      = state.balance
+                            state.free_margin = state.balance
+                            sig_events.append({"t": t_norm, "type": "close", "price": price,
+                                               "pnl": round(pnl, 2),
+                                               "description": f"Position closed by AI @ {price:.5f}  ({pnl:+.2f})"})
                         trade_state = "deleted"
                         break
 
