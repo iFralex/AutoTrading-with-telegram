@@ -182,6 +182,8 @@ def _simulate_trade(
             entry_price   = bars[start_idx]["open"]
     else:
         # Ordine pendente: cerca il trigger
+        _pre_sl = signal.stop_loss
+        _pre_tp = signal.take_profit
         for i in range(start_idx, len(bars)):
             b = bars[i]
             if b["time"] > horizon_unix:
@@ -198,6 +200,17 @@ def _simulate_trade(
                 entry_bar_idx = i
                 entry_price   = target_entry
                 break
+            # Entry NOT triggered this bar — check pre-entry SL/TP invalidation
+            if _pre_sl is not None and (
+                (ot == "BUY"  and b["low"]  <= _pre_sl) or
+                (ot == "SELL" and b["high"] >= _pre_sl)
+            ):
+                return SimResult("expired", None, None, None, None, None, None)
+            if _pre_tp is not None and (
+                (ot == "BUY"  and b["high"] >= _pre_tp) or
+                (ot == "SELL" and b["low"]  <= _pre_tp)
+            ):
+                return SimResult("expired", None, None, None, None, None, None)
 
     if entry_bar_idx is None or entry_price is None:
         return _not_filled

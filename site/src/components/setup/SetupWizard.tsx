@@ -1281,7 +1281,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
 
         {/* Simulation markers */}
         {simMarkers.map((m, i) => {
-          const color = m.type === "tp" ? "#34d399" : m.type === "sl" ? "#f87171" : m.type === "entry" ? "#a3e635" : "#fb923c"
+          const color = m.type === "tp" ? "#34d399" : m.type === "sl" ? "#f87171" : m.type === "entry" ? "#a3e635" : m.type === "expired" ? "#facc15" : "#fb923c"
           return (
             <g key={i}>
               <circle cx={m.cx} cy={m.cy} r={5} fill={color} fillOpacity={0.9} />

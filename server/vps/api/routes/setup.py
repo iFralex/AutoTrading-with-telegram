@@ -416,6 +416,24 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
                     state = "open"
                     sig_events.append({"t": t_norm, "type": "entry", "price": actual_entry,
                                         "description": f"Limit {order_type} triggered @ {actual_entry:.5f}"})
+                else:
+                    # Pre-entry invalidation: SL or TP reached before entry
+                    if sl is not None and (
+                        (order_type == "BUY"  and price <= sl) or
+                        (order_type == "SELL" and price >= sl)
+                    ):
+                        sig_events.append({"t": t_norm, "type": "expired", "price": sl,
+                                            "description": f"Signal expired — SL {sl:.5f} hit before entry"})
+                        state = "expired"
+                        break
+                    if tp is not None and (
+                        (order_type == "BUY"  and price >= tp) or
+                        (order_type == "SELL" and price <= tp)
+                    ):
+                        sig_events.append({"t": t_norm, "type": "expired", "price": tp,
+                                            "description": f"Signal expired — TP {tp:.5f} hit before entry"})
+                        state = "expired"
+                        break
 
             if state == "open" and order_open_price is not None:
                 if sl is not None:
@@ -957,6 +975,24 @@ async def _sim_full(
                     trade_state = "open"
                     sig_events.append({"t": t_norm, "type": "entry", "price": actual_entry,
                                        "description": f"Limit {order_type} triggered @ {actual_entry:.5f}"})
+                else:
+                    # Pre-entry invalidation: SL or TP reached before entry
+                    if sl is not None and (
+                        (order_type == "BUY"  and price <= sl) or
+                        (order_type == "SELL" and price >= sl)
+                    ):
+                        sig_events.append({"t": t_norm, "type": "expired", "price": sl,
+                                           "description": f"Signal expired — SL {sl:.5f} hit before entry"})
+                        trade_state = "expired"
+                        break
+                    if tp is not None and (
+                        (order_type == "BUY"  and price >= tp) or
+                        (order_type == "SELL" and price <= tp)
+                    ):
+                        sig_events.append({"t": t_norm, "type": "expired", "price": tp,
+                                           "description": f"Signal expired — TP {tp:.5f} hit before entry"})
+                        trade_state = "expired"
+                        break
 
             if trade_state != "open" or order_open_price is None:
                 continue
