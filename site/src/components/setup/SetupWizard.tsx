@@ -818,7 +818,13 @@ type SimExtracted = {
   order_mode: string; confidence: number | null
 }
 
-type SimEvent = { t: number; type: string; price: number; pnl?: number; description: string }
+type SimAIResult = {
+  tool_calls: Array<{ name: string; args: Record<string, unknown>; result: Record<string, unknown> }>
+  actions: Array<{ tool: string; [key: string]: unknown }>
+  final_response: string
+}
+
+type SimEvent = { t: number; type: string; price: number; pnl?: number; description: string; ai_result?: SimAIResult }
 
 type SimResult = {
   per_signal: Array<{ signal_index: number; symbol: string; order_type: string; entry: number | null; sl: number | null; tp: number | null; events: SimEvent[]; state: string }>
@@ -941,8 +947,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   const [pretradeLoading,   setPretradeLoading]   = useState(false)
   const [pretradeResult,    setPretradeResult]    = useState<PretradeResult | null>(null)
   const [expandedToolCalls, setExpandedToolCalls] = useState(false)
-  const [eventSimLoading,   setEventSimLoading]   = useState<Record<string, boolean>>({})
-  const [eventSimResults,   setEventSimResults]   = useState<Record<string, PretradeResult>>({})
 
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -1063,23 +1067,47 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   async function handleRunSim() {
     if (!activeMsg.trim() || pricePath.length < 2) return
     setSimLoading(true)
+    setPretradeResult(null)
     try {
       const symbolSpecs: Record<string, number> = {}
       for (const sp of mockSymbolPrices) {
         if (sp.symbol && sp.contract_size) symbolSpecs[sp.symbol] = parseFloat(sp.contract_size) || 0
       }
-      const res = await api.simulateSignal({
-        message: activeMsg,
-        sizing_strategy: data.sizingStrategy || undefined,
-        extraction_instructions: data.extractionInstructions || undefined,
-        management_strategy: data.managementStrategy || undefined,
-        deletion_strategy: data.deletionStrategy || undefined,
-        price_path: pricePath,
-        timeline_events: tEvents,
-        symbol_specs: Object.keys(symbolSpecs).length ? symbolSpecs : undefined,
-      })
-      setSimResult(res.simulation)
-      if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
+      const specs = Object.keys(symbolSpecs).length ? symbolSpecs : undefined
+      const hasStrategy = !!(data.managementStrategy?.trim() || data.sizingStrategy?.trim())
+
+      if (hasStrategy) {
+        // Full pipeline: extract → pretrade AI → stateful walk-forward with auto AI events
+        const res = await api.simulateFull({
+          message: activeMsg,
+          sizing_strategy: data.sizingStrategy || undefined,
+          extraction_instructions: data.extractionInstructions || undefined,
+          management_strategy: data.managementStrategy || undefined,
+          deletion_strategy: data.deletionStrategy || undefined,
+          price_path: pricePath,
+          timeline_events: tEvents,
+          symbol_specs: specs,
+          mock_state: buildMockState(),
+        })
+        setSimResult(res.simulation)
+        if (res.pretrade) setPretradeResult(res.pretrade)
+        if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
+        if (isSignal === null && res.is_signal !== null) setIsSignal(res.is_signal)
+      } else {
+        // No strategy — pure price path simulation (fast, no AI calls)
+        const res = await api.simulateSignal({
+          message: activeMsg,
+          sizing_strategy: data.sizingStrategy || undefined,
+          extraction_instructions: data.extractionInstructions || undefined,
+          management_strategy: data.managementStrategy || undefined,
+          deletion_strategy: data.deletionStrategy || undefined,
+          price_path: pricePath,
+          timeline_events: tEvents,
+          symbol_specs: specs,
+        })
+        setSimResult(res.simulation)
+        if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
+      }
     } catch {}
     setSimLoading(false)
   }
@@ -1143,24 +1171,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       setPretradeResult(res)
     } catch {}
     setPretradeLoading(false)
-  }
-
-  async function handleSimEvent(evKey: string, evType: string, evData: Record<string, unknown>) {
-    setEventSimLoading(p => ({ ...p, [evKey]: true }))
-    try {
-      const res = await api.simulatePretrade({
-        signals: extracted as Parameters<typeof api.simulatePretrade>[0]["signals"],
-        message: activeMsg,
-        management_strategy: data.managementStrategy || undefined,
-        deletion_strategy: data.deletionStrategy || undefined,
-        sizing_strategy: data.sizingStrategy || undefined,
-        event_type: evType,
-        event_data: evData,
-        mock_state: buildMockState(),
-      })
-      setEventSimResults(p => ({ ...p, [evKey]: res }))
-    } catch {}
-    setEventSimLoading(p => ({ ...p, [evKey]: false }))
   }
 
   // ── Render helpers ──────────────────────────────────────────────────────────
@@ -1708,12 +1718,49 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
               disabled={simLoading || pricePath.length < 2 || !activeMsg.trim()}
               className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-500 to-purple-500 text-white font-bold rounded-xl py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(139,92,246,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none">
               {simLoading && <Spin />}
-              {simLoading ? "Running simulation…" : pricePath.length < 2 ? "Draw a price path first" : "Run simulation →"}
+              {simLoading
+                ? "Running full simulation…"
+                : pricePath.length < 2
+                  ? "Draw a price path first"
+                  : (data.managementStrategy?.trim() || data.sizingStrategy?.trim())
+                    ? "Run full simulation (pretrade + AI events) →"
+                    : "Run simulation →"}
             </button>
 
             {/* Simulation result */}
             {simResult && (
               <div className="space-y-3">
+                {/* Pretrade decisions — shown here when produced by Run simulation */}
+                {pretradeResult && pretradeResult.decisions.length > 0 && (
+                  <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.02] px-3 py-2.5 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-violet-300/60 uppercase tracking-wider">Pre-trade AI decisions</p>
+                    {pretradeResult.decisions.map((d, di) => {
+                      const sig = extracted[d.signal_index]
+                      const isModified = d.approved && (d.modified_lots != null || d.modified_sl != null || d.modified_tp != null)
+                      return (
+                        <div key={di} className={`flex items-start gap-2 text-[10px] px-2 py-1.5 rounded-lg ${
+                          !d.approved ? "bg-red-400/[0.06] text-red-300/80"
+                          : isModified ? "bg-amber-400/[0.06] text-amber-300/80"
+                          : "bg-emerald-400/[0.04] text-emerald-300/80"
+                        }`}>
+                          <span className={`font-bold shrink-0 ${!d.approved ? "text-red-400" : isModified ? "text-amber-400" : "text-emerald-400"}`}>
+                            {!d.approved ? "✗" : isModified ? "~" : "✓"}
+                          </span>
+                          <span className="font-mono text-white/50 shrink-0">{sig ? `${sig.order_type} ${sig.symbol}` : `Signal ${d.signal_index}`}</span>
+                          {isModified && (
+                            <span className="font-mono text-amber-300/60">
+                              {d.modified_lots != null && `lots:${d.modified_lots} `}
+                              {d.modified_sl != null && `SL:${d.modified_sl} `}
+                              {d.modified_tp != null && `TP:${d.modified_tp}`}
+                            </span>
+                          )}
+                          <span className="text-white/30 flex-1 leading-relaxed">{d.reason}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
                 <div className={`flex items-center justify-between px-4 py-3 rounded-xl border ${simResult.total_pnl >= 0 ? "border-emerald-400/20 bg-emerald-400/[0.05]" : "border-red-400/20 bg-red-400/[0.04]"}`}>
                   <span className="text-sm font-semibold text-white/70">Simulated P&amp;L</span>
                   <span className={`text-lg font-bold font-mono ${simResult.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
@@ -1727,20 +1774,44 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                       <p className="text-xs text-white/20 italic">No events — price never crossed key levels</p>
                     ) : (
                       sig.events.map((ev, ei) => (
-                        <div key={ei} className={`flex items-center gap-3 text-xs px-3 py-2 rounded-lg ${
-                          ev.type === "tp" ? "bg-emerald-400/[0.04] text-emerald-300/80"
-                          : ev.type === "sl" ? "bg-red-400/[0.04] text-red-300/80"
-                          : ev.type === "entry" ? "bg-white/[0.03] text-white/55"
-                          : "bg-orange-400/[0.04] text-orange-300/80"
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            ev.type === "tp" ? "bg-emerald-400" : ev.type === "sl" ? "bg-red-400" : ev.type === "entry" ? "bg-white/40" : "bg-orange-400"
-                          }`} />
-                          <span className="flex-1">{ev.description}</span>
-                          {ev.pnl !== undefined && (
-                            <span className={`font-mono font-bold ${ev.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                              {ev.pnl >= 0 ? "+" : ""}{ev.pnl.toFixed(2)}
-                            </span>
+                        <div key={ei} className="space-y-1">
+                          <div className={`flex items-center gap-3 text-xs px-3 py-2 rounded-lg ${
+                            ev.type === "tp" ? "bg-emerald-400/[0.04] text-emerald-300/80"
+                            : ev.type === "sl" ? "bg-red-400/[0.04] text-red-300/80"
+                            : ev.type === "entry" ? "bg-white/[0.03] text-white/55"
+                            : "bg-orange-400/[0.04] text-orange-300/80"
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              ev.type === "tp" ? "bg-emerald-400" : ev.type === "sl" ? "bg-red-400" : ev.type === "entry" ? "bg-white/40" : "bg-orange-400"
+                            }`} />
+                            <span className="flex-1">{ev.description}</span>
+                            {ev.pnl !== undefined && (
+                              <span className={`font-mono font-bold ${ev.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                {ev.pnl >= 0 ? "+" : ""}{ev.pnl.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          {/* Inline AI reaction for this event */}
+                          {ev.ai_result && (ev.ai_result.actions.length > 0 || ev.ai_result.tool_calls.length > 0 || ev.ai_result.final_response) && (
+                            <div className="ml-4 rounded-lg border border-violet-400/12 bg-violet-400/[0.025] px-2.5 py-2 space-y-1.5">
+                              <p className="text-[9px] font-semibold text-violet-300/50 uppercase tracking-wider">AI reaction</p>
+                              {ev.ai_result.actions.length > 0 && (
+                                <div className="space-y-1">
+                                  {ev.ai_result.actions.map((ac, ai) => {
+                                    const { tool, simulated: _s, ...rest } = ac as { tool: string; simulated?: unknown; [k: string]: unknown }
+                                    return (
+                                      <div key={ai} className="rounded border border-amber-400/10 bg-amber-400/[0.03] px-2 py-1 font-mono text-[9px]">
+                                        <span className="text-amber-300 font-semibold">{tool}</span>
+                                        <span className="text-white/25 ml-1.5">{JSON.stringify(rest).slice(0, 80)}</span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                              {ev.ai_result.final_response && (
+                                <p className="text-[9px] text-white/35 leading-relaxed">{ev.ai_result.final_response.slice(0, 200)}{ev.ai_result.final_response.length > 200 ? "…" : ""}</p>
+                              )}
+                            </div>
                           )}
                         </div>
                       ))
@@ -1993,74 +2064,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                       </div>
                     )}
 
-                    {/* Per-event simulation buttons */}
-                    {simResult && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Simulate AI reactions to events</p>
-                        {simResult.per_signal.flatMap((sig, si) =>
-                          sig.events
-                            .filter(ev => ev.type === "price_level" || ev.type === "signal_deleted")
-                            .map((ev, ei) => {
-                              const evKey = `${si}-${ei}-${ev.type}`
-                              const evType = ev.type === "signal_deleted" ? "message_deleted" : "price_level_reached"
-                              const evData = ev.type === "signal_deleted"
-                                ? { symbol: sig.symbol, order_type: sig.order_type, entry: sig.entry, sl: sig.sl, tp: sig.tp }
-                                : { symbol: sig.symbol, order_type: sig.order_type, price: ev.price, trigger_price: ev.price }
-                              const evResult = eventSimResults[evKey]
-                              const evLoading = eventSimLoading[evKey]
-                              return (
-                                <div key={evKey} className="rounded-xl border border-white/8 bg-white/[0.02] p-3 space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <div className="text-[10px] text-white/40">
-                                      <span className={`font-semibold ${ev.type === "signal_deleted" ? "text-orange-400/80" : "text-blue-400/80"}`}>
-                                        {ev.type === "signal_deleted" ? "Signal deleted" : "Price level reached"}
-                                      </span>
-                                      {" — "}{sig.order_type} {sig.symbol} @ {ev.price?.toFixed(5)}
-                                    </div>
-                                    <button type="button" onClick={() => handleSimEvent(evKey, evType, evData)}
-                                      disabled={evLoading}
-                                      className="text-[10px] px-2 py-1 rounded-lg border border-violet-400/20 bg-violet-400/[0.05] text-violet-300 hover:bg-violet-400/[0.1] transition-all disabled:opacity-40 flex items-center gap-1">
-                                      {evLoading && <Spin />}
-                                      {evLoading ? "Running…" : "Simulate AI reaction"}
-                                    </button>
-                                  </div>
-                                  {evResult && (
-                                    <div className="space-y-1.5">
-                                      {evResult.actions && evResult.actions.length > 0 && (
-                                        <div className="space-y-1">
-                                          <p className="text-[9px] font-semibold text-amber-400/50 uppercase tracking-wider">Actions taken</p>
-                                          {evResult.actions.map((ac, ai) => {
-                                            const { tool, simulated: _s, ...rest } = ac
-                                            return (
-                                              <div key={ai} className="rounded-lg border border-amber-400/12 bg-amber-400/[0.03] px-2 py-1.5 font-mono text-[10px]">
-                                                <span className="text-amber-300">{tool}</span>
-                                                <span className="text-white/25 ml-1.5">{JSON.stringify(rest).slice(0, 70)}</span>
-                                              </div>
-                                            )
-                                          })}
-                                        </div>
-                                      )}
-                                      {evResult.tool_calls.length > 0 && (
-                                        <div className="space-y-1">
-                                          {evResult.tool_calls.map((tc, ti) => (
-                                            <div key={ti} className="rounded-lg bg-white/[0.015] border border-white/5 px-2 py-1.5 font-mono text-[10px]">
-                                              <span className="text-violet-300">{tc.name}</span>
-                                              <span className="text-white/20 ml-2">{JSON.stringify(tc.args).slice(0, 60)}</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                      {evResult.final_response && (
-                                        <p className="text-[10px] text-white/40 leading-relaxed">{evResult.final_response}</p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

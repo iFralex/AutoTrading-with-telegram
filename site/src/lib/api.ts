@@ -582,6 +582,65 @@ export const api = {
     }>("POST", "/api/setup/simulate-signal", payload)
   },
 
+  /**
+   * Full stateful pipeline simulation: extract → pretrade AI → walk-forward with auto AI events.
+   * Returns pretrade decisions and simulation events with embedded AI results.
+   */
+  simulateFull(payload: {
+    message: string
+    sizing_strategy?: string
+    extraction_instructions?: string
+    management_strategy?: string
+    deletion_strategy?: string
+    price_path: { t: number; price: number }[]
+    timeline_events?: { t: number; type: string }[]
+    lot_size?: number
+    symbol_specs?: Record<string, number>
+    mock_state?: {
+      balance?: number; equity?: number; free_margin?: number; leverage?: number
+      currency?: string; server?: string
+      daily_pnl?: number; weekly_pnl?: number; monthly_pnl?: number
+      open_positions?: unknown[]; pending_orders?: unknown[]
+      prices?: Record<string, unknown>
+    }
+  }) {
+    return call<{
+      is_signal: boolean
+      extracted: Array<{
+        symbol: string; order_type: string
+        entry_price: number | [number, number] | null
+        stop_loss: number | null; take_profit: number | null
+        lot_size: number | null; order_mode: string; confidence: number | null
+      }>
+      pretrade: {
+        event_type: string
+        decisions: Array<{
+          signal_index: number; approved: boolean; reason: string
+          modified_lots?: number | null; modified_sl?: number | null; modified_tp?: number | null
+        }>
+        tool_calls: Array<{ name: string; args: Record<string, unknown>; result: Record<string, unknown> }>
+        actions: Array<{ tool: string; [key: string]: unknown }>
+        final_response: string
+      } | null
+      simulation: {
+        per_signal: Array<{
+          signal_index: number; symbol: string; order_type: string
+          entry: number | null; sl: number | null; tp: number | null
+          events: Array<{
+            t: number; type: string; price: number; pnl?: number; description: string
+            ai_result?: {
+              tool_calls: Array<{ name: string; args: Record<string, unknown>; result: Record<string, unknown> }>
+              actions: Array<{ tool: string; [key: string]: unknown }>
+              final_response: string
+            }
+          }>
+          state: string
+        }>
+        total_pnl: number
+      } | null
+    }>("POST", "/api/setup/simulate-full", payload)
+  },
+
   /** Mock AI pre_trade / on_event simulation — real Gemini agent with mocked MT5 tools. */
   simulatePretrade(payload: {
     signals: Array<{

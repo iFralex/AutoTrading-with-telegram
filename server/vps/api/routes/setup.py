@@ -645,6 +645,609 @@ class MockMT5Trader:
                          price=price, lots=lots, sl=sl, tp=tp)
 
 
+# ── Stateful simulation helpers ───────────────────────────────────────────────
+
+class _SimState:
+    """Mutable account state for the full stateful walk-forward simulation."""
+
+    def __init__(self, mock_state: dict) -> None:
+        self.balance      = float(mock_state.get("balance",     10_000))
+        self.equity       = float(mock_state.get("equity",      self.balance))
+        self.free_margin  = float(mock_state.get("free_margin", self.equity))
+        self.leverage     = int(mock_state.get("leverage",   100))
+        self.currency     = str(mock_state.get("currency",  "USD"))
+        self._daily_pnl   = float(mock_state.get("daily_pnl",   0))
+        self._weekly_pnl  = float(mock_state.get("weekly_pnl",  0))
+        self._monthly_pnl = float(mock_state.get("monthly_pnl", 0))
+        self.open_positions: list[dict] = list(mock_state.get("open_positions",  []))
+        self.pending_orders: list[dict] = list(mock_state.get("pending_orders",  []))
+        self.prices: dict[str, dict]    = dict(mock_state.get("prices", {}))
+        self._next_ticket               = 1000
+
+    def alloc_ticket(self) -> int:
+        t = self._next_ticket
+        self._next_ticket += 1
+        return t
+
+    def add_position(self, ticket: int, symbol: str, order_type: str, lots: float,
+                     open_price: float, sl: float | None, tp: float | None) -> None:
+        self.open_positions.append({
+            "ticket": ticket, "symbol": symbol, "order_type": order_type,
+            "lots": lots, "open_price": open_price, "sl": sl, "tp": tp, "profit": 0,
+        })
+
+    def get_position(self, ticket: int) -> dict | None:
+        for p in self.open_positions:
+            if p.get("ticket") == ticket:
+                return p
+        return None
+
+    def remove_position(self, ticket: int) -> dict | None:
+        for i, p in enumerate(self.open_positions):
+            if p.get("ticket") == ticket:
+                return self.open_positions.pop(i)
+        return None
+
+    def remove_pending_order(self, ticket: int) -> dict | None:
+        for i, o in enumerate(self.pending_orders):
+            if o.get("ticket") == ticket:
+                return self.pending_orders.pop(i)
+        return None
+
+    def update_price(self, symbol: str, price: float) -> None:
+        sym = symbol.upper()
+        entry = self.prices.setdefault(sym, {})
+        entry.update({"bid": price, "ask": price, "last": price})
+
+    def apply_write(self, tool: str, kwargs: dict) -> None:
+        if tool == "open_market_order":
+            sym = str(kwargs.get("symbol", "")).upper()
+            current_price = self.prices.get(sym, {}).get("bid", 0.0)
+            ticket = self.alloc_ticket()
+            self.add_position(
+                ticket=ticket,
+                symbol=kwargs.get("symbol", ""),
+                order_type=kwargs.get("order_type", "BUY"),
+                lots=float(kwargs.get("lots", 0.01)),
+                open_price=current_price,
+                sl=kwargs.get("sl"),
+                tp=kwargs.get("tp"),
+            )
+        elif tool == "place_pending_order":
+            ticket = self.alloc_ticket()
+            self.pending_orders.append({
+                "ticket": ticket,
+                "symbol": kwargs.get("symbol", ""),
+                "order_type": kwargs.get("order_type", "BUY_LIMIT"),
+                "lots": float(kwargs.get("lots", 0.01)),
+                "price": float(kwargs.get("price", 0)),
+                "sl": kwargs.get("sl"),
+                "tp": kwargs.get("tp"),
+            })
+        elif tool == "close_position":
+            self.remove_position(int(kwargs.get("ticket", 0)))
+        elif tool == "cancel_order":
+            self.remove_pending_order(int(kwargs.get("ticket", 0)))
+        elif tool == "modify_position":
+            pos = self.get_position(int(kwargs.get("ticket", 0)))
+            if pos:
+                if kwargs.get("new_sl") is not None:
+                    pos["sl"] = kwargs["new_sl"]
+                if kwargs.get("new_tp") is not None:
+                    pos["tp"] = kwargs["new_tp"]
+        elif tool == "set_breakeven":
+            pos = self.get_position(int(kwargs.get("ticket", 0)))
+            if pos:
+                offset = float(kwargs.get("offset_pips", 0)) * 0.0001
+                pos["sl"] = float(pos.get("open_price", 0)) + offset
+
+
+class StatefulMockMT5Trader(MockMT5Trader):
+    """Like MockMT5Trader but backed by _SimState — mutates state on every write call."""
+
+    def __init__(self, state: _SimState, actions_log: list[dict]) -> None:
+        self._state       = state
+        self._actions     = actions_log
+        # Point mutable fields at the exact same objects in state (shared by reference)
+        self._open_pos    = state.open_positions
+        self._pending_ord = state.pending_orders
+        self._prices      = state.prices
+        # Scalar fields — copy current values
+        self._balance     = state.balance
+        self._equity      = state.equity
+        self._free_margin = state.free_margin
+        self._currency    = state.currency
+        self._leverage    = state.leverage
+        self._daily_pnl   = state._daily_pnl
+        self._weekly_pnl  = state._weekly_pnl
+        self._monthly_pnl = state._monthly_pnl
+        self._ms          = {}  # unused; satisfies parent references
+
+    def _rec(self, tool: str, **kwargs) -> dict:
+        self._state.apply_write(tool, kwargs)
+        entry = {"tool": tool, **{k: v for k, v in kwargs.items() if v is not None}}
+        self._actions.append(entry)
+        return {"ok": True, "simulated": True}
+
+
+async def _fire_ai_event(
+    mock_exec,
+    sp,
+    state: _SimState,
+    event_type: str,
+    event_data: dict,
+    management_strategy: str,
+    deletion_strategy: str,
+) -> dict:
+    """
+    Fire a single AI event against the current _SimState.
+    StatefulMockMT5Trader mutates `state` when the AI issues write calls.
+    Returns {tool_calls, actions, final_response}.
+    """
+    import json
+    from google.genai import types as _types
+    from vps.services.strategy_executor import (
+        _ExecCtx, PreTradeDecision,
+        _build_system_prompt, _format_event_prompt, _make_tools, _compact, _PRO_MODEL,
+    )
+
+    strategy = deletion_strategy if event_type == "message_deleted" else management_strategy
+    if not strategy:
+        return {"tool_calls": [], "actions": [], "final_response": ""}
+
+    actions_log: list[dict] = []
+    trader  = StatefulMockMT5Trader(state, actions_log)
+    ctx     = _ExecCtx(trader, "sim", 0, "", "sim")
+    decisions: dict[int, PreTradeDecision] = {}
+
+    event_prompt = _format_event_prompt(event_type, event_data)
+    open_pos = state.open_positions
+    if open_pos:
+        pos_parts = [
+            f"#{p.get('ticket','?')} {p.get('order_type')} {p.get('symbol')}"
+            f" lots={p.get('lots')} profit={p.get('profit', 0)}"
+            for p in open_pos
+        ]
+        event_prompt += (
+            "\n\nPre-fetched context:\n"
+            f"  open_positions ({len(open_pos)}): " + " | ".join(pos_parts)
+        )
+
+    system_prompt = _build_system_prompt(strategy)
+    tools  = _make_tools(event_type)
+    config = _types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        tools=tools,  # type: ignore[arg-type]
+    )
+    chat = sp._client.aio.chats.create(model=_PRO_MODEL, config=config)
+
+    try:
+        response = await chat.send_message(event_prompt)
+    except Exception as exc:
+        logger.warning("_fire_ai_event (%s): %s", event_type, exc)
+        return {"tool_calls": [], "actions": [], "final_response": f"Error: {exc}"}
+
+    tool_calls_log: list[dict] = []
+    final_text = ""
+
+    for _ in range(8):
+        fn_calls = response.function_calls or []
+        if not fn_calls:
+            final_text = (response.text or "").strip()
+            break
+        fn_parts = []
+        for fc in fn_calls:
+            name = fc.name
+            args = dict(fc.args)
+            result_data = await mock_exec._dispatch(name, args, ctx, decisions)
+            tool_calls_log.append({"name": name, "args": args, "result": result_data})
+            fn_parts.append(_types.Part.from_function_response(
+                name=name,
+                response={"result": json.dumps(_compact(result_data), separators=(",", ":"), default=str)},
+            ))
+        try:
+            response = await chat.send_message(fn_parts)
+        except Exception:
+            break
+
+    return {"tool_calls": tool_calls_log, "actions": actions_log, "final_response": final_text}
+
+
+async def _sim_full(
+    signals: list[dict],
+    price_path: list[dict],
+    timeline_events: list[dict],
+    default_lot: float,
+    management_strategy: str | None,
+    deletion_strategy: str | None,
+    mock_state: dict,
+    symbol_specs: dict | None,
+    sp,
+    mock_exec,
+) -> dict:
+    """
+    Stateful walk-forward simulation.
+
+    Unlike _sim_price_events (pure price path), this keeps a _SimState that
+    evolves as positions are opened and closed.  AI events (price_level_reached,
+    message_deleted) fire against the live state so the AI sees the open
+    positions that actually exist at that moment.
+    """
+    state      = _SimState(mock_state)
+    per_signal = []
+    total_pnl  = 0.0
+    n          = len(price_path)
+
+    mgmt = (management_strategy or "").strip()
+    delt = (deletion_strategy   or "").strip()
+
+    for sig_idx, sig_dict in enumerate(signals):
+        symbol      = str(sig_dict.get("symbol", ""))
+        order_type  = str(sig_dict.get("order_type", "BUY"))
+        entry_raw   = sig_dict.get("entry_price")
+        sl          = sig_dict.get("stop_loss")
+        tp          = sig_dict.get("take_profit")
+        lot         = float(sig_dict.get("lot_size") or default_lot)
+        prices_list: list[float] = sig_dict.get("prices") or []
+
+        if isinstance(entry_raw, list) and len(entry_raw) == 2:
+            actual_entry: float | None = (float(entry_raw[0]) + float(entry_raw[1])) / 2.0
+        elif entry_raw is not None:
+            actual_entry = float(entry_raw)
+        else:
+            actual_entry = None
+
+        trade_state     = "market_pending" if actual_entry is None else "pending"
+        order_open_price: float | None = None
+        position_ticket: int   | None  = None
+        sig_events: list[dict]         = []
+
+        for i, pt in enumerate(price_path):
+            t_norm = i / max(n - 1, 1)
+            price  = float(pt.get("price", 0))
+
+            if trade_state in ("closed", "deleted"):
+                break
+
+            state.update_price(symbol, price)
+
+            # ── Timeline events (signal deleted) ─────────────────────────────
+            for te in timeline_events:
+                if abs(float(te.get("t", -1)) - t_norm) < (1.5 / max(n, 1)):
+                    if te.get("type") == "signal_deleted":
+                        ev_data = {"symbol": symbol, "order_type": order_type,
+                                   "entry": actual_entry, "sl": sl, "tp": tp}
+                        ai_result = await _fire_ai_event(
+                            mock_exec, sp, state, "message_deleted", ev_data, mgmt, delt,
+                        )
+                        desc = "Signal deleted"
+                        if delt:
+                            preview = delt[:60] + ("…" if len(delt) > 60 else "")
+                            desc += f' — AI action: "{preview}"'
+                        ev: dict = {"t": t_norm, "type": "signal_deleted",
+                                    "price": price, "description": desc}
+                        if ai_result["actions"] or ai_result["tool_calls"]:
+                            ev["ai_result"] = ai_result
+                        sig_events.append(ev)
+                        trade_state = "deleted"
+                        break
+
+            if trade_state in ("closed", "deleted"):
+                break
+
+            # ── Entry ────────────────────────────────────────────────────────
+            if trade_state == "market_pending":
+                order_open_price = price
+                position_ticket  = state.alloc_ticket()
+                state.add_position(position_ticket, symbol, order_type, lot,
+                                   order_open_price, sl, tp)
+                trade_state = "open"
+                sig_events.append({"t": t_norm, "type": "entry", "price": price,
+                                   "description": f"Market {order_type} opened @ {price:.5f}"})
+
+            elif trade_state == "pending" and actual_entry is not None:
+                prev_price = float(price_path[i - 1].get("price", 0)) if i > 0 else None
+                hit = (prev_price is not None
+                       and (prev_price - actual_entry) * (price - actual_entry) <= 0)
+                if hit:
+                    order_open_price = actual_entry
+                    position_ticket  = state.alloc_ticket()
+                    state.add_position(position_ticket, symbol, order_type, lot,
+                                       order_open_price, sl, tp)
+                    trade_state = "open"
+                    sig_events.append({"t": t_norm, "type": "entry", "price": actual_entry,
+                                       "description": f"Limit {order_type} triggered @ {actual_entry:.5f}"})
+
+            if trade_state != "open" or order_open_price is None:
+                continue
+
+            # ── Read live SL/TP from state (AI may have modified them) ───────
+            pos     = state.get_position(position_ticket) if position_ticket else None
+            live_sl = pos["sl"] if pos else sl
+            live_tp = pos["tp"] if pos else tp
+
+            # SL check
+            if live_sl is not None:
+                sl_hit = ((order_type == "BUY"  and price <= live_sl) or
+                          (order_type == "SELL" and price >= live_sl))
+                if sl_hit:
+                    pnl = _calc_pnl(order_type, order_open_price, live_sl, lot, symbol, symbol_specs)
+                    total_pnl += pnl
+                    state.remove_position(position_ticket)
+                    sig_events.append({"t": t_norm, "type": "sl", "price": live_sl,
+                                       "pnl": round(pnl, 2),
+                                       "description": f"Stop Loss @ {live_sl:.5f}  ({pnl:+.2f})"})
+                    trade_state = "closed"
+                    break
+
+            # TP check
+            if live_tp is not None:
+                tp_hit = ((order_type == "BUY"  and price >= live_tp) or
+                          (order_type == "SELL" and price <= live_tp))
+                if tp_hit:
+                    pnl = _calc_pnl(order_type, order_open_price, live_tp, lot, symbol, symbol_specs)
+                    total_pnl += pnl
+                    state.remove_position(position_ticket)
+                    sig_events.append({"t": t_norm, "type": "tp", "price": live_tp,
+                                       "pnl": round(pnl, 2),
+                                       "description": f"Take Profit @ {live_tp:.5f}  ({pnl:+.2f})"})
+                    trade_state = "closed"
+                    break
+
+            # Price-level events → fire management AI with live state
+            for pl in prices_list:
+                already = any(e["type"] == "price_level" and e.get("trigger_price") == pl
+                              for e in sig_events)
+                if not already:
+                    pl_hit = ((order_type == "BUY"  and price >= pl) or
+                              (order_type == "SELL" and price <= pl))
+                    if pl_hit:
+                        ev_data = {"symbol": symbol, "order_type": order_type,
+                                   "price": price, "trigger_price": pl}
+                        ai_result = await _fire_ai_event(
+                            mock_exec, sp, state, "price_level_reached", ev_data, mgmt, delt,
+                        )
+                        ev = {"t": t_norm, "type": "price_level", "price": pl,
+                              "trigger_price": pl,
+                              "description": f"Strategy price level reached @ {pl:.5f}"}
+                        if ai_result["actions"] or ai_result["tool_calls"]:
+                            ev["ai_result"] = ai_result
+                        sig_events.append(ev)
+
+            # Position closed by AI (e.g. AI called close_position_by_ticket)
+            if position_ticket and state.get_position(position_ticket) is None:
+                trade_state = "closed"
+                break
+
+        per_signal.append({
+            "signal_index": sig_idx,
+            "symbol":       symbol,
+            "order_type":   order_type,
+            "entry":        actual_entry,
+            "sl":           sl,
+            "tp":           tp,
+            "prices":       prices_list,
+            "events":       sig_events,
+            "state":        trade_state,
+        })
+
+    return {"per_signal": per_signal, "total_pnl": round(total_pnl, 2)}
+
+
+# ── Full pipeline simulation endpoint ─────────────────────────────────────────
+
+class SimulateFullBody(BaseModel):
+    message: str
+    sizing_strategy: str | None = None
+    extraction_instructions: str | None = None
+    management_strategy: str | None = None
+    deletion_strategy: str | None = None
+    price_path: list[dict]
+    timeline_events: list[dict] = []
+    lot_size: float = 0.1
+    symbol_specs: dict[str, float] | None = None
+    mock_state: dict = {}
+
+
+@router.post("/simulate-full")
+async def simulate_full_endpoint(
+    body: SimulateFullBody,
+    request: Request,
+):
+    """
+    Full stateful pipeline:
+      1. Extract signals from message
+      2. Run pretrade AI (if any strategy configured) — uses MockMT5Trader
+      3. Apply pretrade decisions (modify lots/SL/TP, skip rejected)
+      4. Walk-forward with _sim_full — fires AI events against live _SimState
+    Returns {is_signal, extracted, pretrade, simulation}.
+    """
+    import json
+    from google.genai import types as _types
+    from vps.services.signal_processor import SignalProcessor
+    from vps.services.strategy_executor import (
+        StrategyExecutor, _ExecCtx, PreTradeDecision,
+        _build_system_prompt, _make_tools, _compact, _PRO_MODEL,
+    )
+
+    sp: SignalProcessor | None = request.app.state.signal_processor
+    if sp is None:
+        raise HTTPException(503, detail="Signal processor not available (GEMINI_API_KEY missing)")
+
+    try:
+        is_signal = await sp.detect_signal(body.message)
+        if not is_signal:
+            return {"is_signal": False, "extracted": [], "pretrade": None, "simulation": None}
+
+        signals, _, _ = await sp.extract_signals(
+            body.message,
+            sizing_strategy=body.sizing_strategy,
+            extraction_instructions=body.extraction_instructions,
+            management_strategy=body.management_strategy,
+        )
+    except Exception as exc:
+        logger.error("simulate_full_endpoint extract: %s", exc)
+        raise HTTPException(500, detail=str(exc))
+
+    from dataclasses import asdict
+    extracted = [asdict(s) for s in signals]
+
+    if not extracted:
+        return {"is_signal": True, "extracted": [], "pretrade": None, "simulation": None}
+
+    mock_exec = StrategyExecutor.__new__(StrategyExecutor)
+    mock_exec._closed_trade_store = None
+
+    has_strategy = bool((body.management_strategy or "").strip() or
+                        (body.sizing_strategy or "").strip())
+
+    # ── Pretrade AI ───────────────────────────────────────────────────────────
+    pretrade: dict | None  = None
+    signals_for_sim        = extracted
+
+    if has_strategy:
+        try:
+            pt_actions: list[dict] = []
+            pt_trader = MockMT5Trader(body.mock_state, pt_actions)
+            ctx       = _ExecCtx(pt_trader, "sim", 0, "", "sim")
+            decisions: dict[int, PreTradeDecision] = {}
+
+            ms       = body.mock_state
+            balance  = float(ms.get("balance",     10_000))
+            equity   = float(ms.get("equity",      balance))
+            free_m   = float(ms.get("free_margin", equity))
+            currency = str(ms.get("currency", "USD"))
+            leverage = int(ms.get("leverage", 100))
+            open_pos = list(ms.get("open_positions", []))
+
+            sigs_text = "\n".join(
+                f"  [{i}] {s.get('order_type')} {s.get('symbol')}"
+                f" entry={s.get('entry_price')} SL={s.get('stop_loss')} TP={s.get('take_profit')}"
+                f" lots={s.get('lot_size')} mode={s.get('order_mode')}"
+                for i, s in enumerate(extracted)
+            )
+            event_prompt = (
+                "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
+                f"Source message:\n{body.message}\n\n"
+                f"Signals to evaluate:\n{sigs_text}\n\n"
+                "For each signal call approve_signal, reject_signal or modify_signal.\n"
+                "If you call no tool for a signal, it will be approved by default.\n"
+                "Use read tools if your strategy requires it.\n\n"
+                "Pre-fetched context (do not re-query these):\n"
+                f"  account: balance={balance} equity={equity} free_margin={free_m}"
+                f" currency={currency} leverage={leverage}\n"
+                f"  open_positions_count: {len(open_pos)}"
+            )
+
+            strategy     = (body.management_strategy or "").strip()
+            sizing       = (body.sizing_strategy or "").strip()
+            system_prompt = _build_system_prompt(strategy or "No management strategy configured.")
+            if sizing:
+                system_prompt = (
+                    "SIZING STRATEGY (use this to determine lot sizes — call "
+                    "calculate_lot_for_risk or calculate_lot_for_risk_percent as needed):\n"
+                    f"{sizing}\n\n"
+                ) + system_prompt
+
+            tools  = _make_tools("pretrade")
+            config = _types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                tools=tools,  # type: ignore[arg-type]
+            )
+            chat     = sp._client.aio.chats.create(model=_PRO_MODEL, config=config)
+            response = await chat.send_message(event_prompt)
+
+            tool_calls_log: list[dict] = []
+            final_text = ""
+            for _ in range(8):
+                fn_calls = response.function_calls or []
+                if not fn_calls:
+                    final_text = (response.text or "").strip()
+                    break
+                fn_parts = []
+                for fc in fn_calls:
+                    name = fc.name
+                    args = dict(fc.args)
+                    result_data = await mock_exec._dispatch(name, args, ctx, decisions)
+                    tool_calls_log.append({"name": name, "args": args, "result": result_data})
+                    fn_parts.append(_types.Part.from_function_response(
+                        name=name,
+                        response={"result": json.dumps(_compact(result_data),
+                                                       separators=(",", ":"), default=str)},
+                    ))
+                try:
+                    response = await chat.send_message(fn_parts)
+                except Exception:
+                    break
+
+            all_decisions = []
+            for i in range(len(extracted)):
+                d = decisions.get(i)
+                if d is None:
+                    all_decisions.append({"signal_index": i, "approved": True,
+                                          "modified_lots": None, "modified_sl": None,
+                                          "modified_tp": None,
+                                          "reason": "Not mentioned — approved by default"})
+                else:
+                    all_decisions.append({
+                        "signal_index":  d.signal_index, "approved": d.approved,
+                        "modified_lots": d.modified_lots, "modified_sl": d.modified_sl,
+                        "modified_tp":   d.modified_tp,  "reason": d.reason,
+                    })
+
+            pretrade = {
+                "event_type":     "pretrade",
+                "decisions":      all_decisions,
+                "tool_calls":     tool_calls_log,
+                "actions":        pt_actions,
+                "final_response": final_text,
+            }
+
+            # Apply decisions: filter rejected, apply modified lots/sl/tp
+            approved_sigs = []
+            for i, sig in enumerate(extracted):
+                d = all_decisions[i] if i < len(all_decisions) else None
+                if d and not d["approved"]:
+                    continue
+                sig_copy = dict(sig)
+                if d:
+                    if d.get("modified_lots"): sig_copy["lot_size"]    = d["modified_lots"]
+                    if d.get("modified_sl"):   sig_copy["stop_loss"]   = d["modified_sl"]
+                    if d.get("modified_tp"):   sig_copy["take_profit"] = d["modified_tp"]
+                approved_sigs.append(sig_copy)
+            if approved_sigs:
+                signals_for_sim = approved_sigs
+
+        except Exception as exc:
+            logger.warning("simulate_full_endpoint: pretrade AI failed: %s", exc)
+
+    # ── Stateful walk-forward simulation ──────────────────────────────────────
+    simulation: dict | None = None
+    if body.price_path and len(body.price_path) >= 2:
+        try:
+            simulation = await _sim_full(
+                signals_for_sim,
+                body.price_path,
+                body.timeline_events,
+                body.lot_size,
+                body.management_strategy,
+                body.deletion_strategy,
+                body.mock_state,
+                body.symbol_specs,
+                sp,
+                mock_exec,
+            )
+        except Exception as exc:
+            logger.warning("simulate_full_endpoint: _sim_full failed: %s", exc)
+
+    return {
+        "is_signal":  True,
+        "extracted":  extracted,
+        "pretrade":   pretrade,
+        "simulation": simulation,
+    }
+
+
 @router.post("/simulate-pretrade")
 async def simulate_pretrade_endpoint(
     body: SimulatePretradeBody,
