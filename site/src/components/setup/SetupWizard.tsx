@@ -1734,7 +1734,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
             )}
 
             {/* ── AI Strategy simulation panel ─────────────────────────────── */}
-            {(data.managementStrategy || data.deletionStrategy) && extracted.length > 0 && (
+            {extracted.length > 0 && (
               <div className="rounded-2xl border border-violet-400/15 bg-violet-400/[0.02] p-4 space-y-4">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-violet-400/10 flex items-center justify-center">
