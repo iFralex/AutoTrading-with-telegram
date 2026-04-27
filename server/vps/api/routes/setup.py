@@ -1098,6 +1098,23 @@ async def simulate_full_endpoint(
     mock_exec = StrategyExecutor.__new__(StrategyExecutor)
     mock_exec._closed_trade_store = None
 
+    # Inject first chart price for every signal symbol so get_symbol_tick
+    # returns the price the chart starts at (not a stale mock default).
+    effective_mock_state = dict(body.mock_state)
+    if body.price_path:
+        first_price = float(body.price_path[0].get("price", 0))
+        prices_override = dict(body.mock_state.get("prices", {}))
+        for sig in extracted:
+            sym = str(sig.get("symbol", "")).upper()
+            if sym:
+                prices_override[sym] = {
+                    "bid":   first_price,
+                    "ask":   first_price,
+                    "last":  first_price,
+                    "spread_pips": 0,
+                }
+        effective_mock_state["prices"] = prices_override
+
     has_strategy = bool((body.management_strategy or "").strip() or
                         (body.sizing_strategy or "").strip())
 
@@ -1108,11 +1125,11 @@ async def simulate_full_endpoint(
     if has_strategy:
         try:
             pt_actions: list[dict] = []
-            pt_trader = MockMT5Trader(body.mock_state, pt_actions)
+            pt_trader = MockMT5Trader(effective_mock_state, pt_actions)
             ctx       = _ExecCtx(pt_trader, "sim", 0, "", "sim")
             decisions: dict[int, PreTradeDecision] = {}
 
-            ms       = body.mock_state
+            ms       = effective_mock_state
             balance  = float(ms.get("balance",     10_000))
             equity   = float(ms.get("equity",      balance))
             free_m   = float(ms.get("free_margin", equity))
@@ -1130,11 +1147,6 @@ async def simulate_full_endpoint(
                 "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
                 f"Source message:\n{body.message}\n\n"
                 f"Signals to evaluate:\n{sigs_text}\n\n"
-                "IMPORTANT: entry_price is the PENDING ORDER trigger price, not the current "
-                "market price. The bot will place a limit/stop order and wait for price to "
-                "reach entry_price before opening the trade. Do NOT reject a signal solely "
-                "because the current market price differs from entry_price or is on the wrong "
-                "side of SL — that is expected for pending orders.\n\n"
                 "For each signal call approve_signal, reject_signal or modify_signal.\n"
                 "If you call no tool for a signal, it will be approved by default.\n"
                 "Use read tools if your strategy requires it.\n\n"
@@ -1236,7 +1248,7 @@ async def simulate_full_endpoint(
                 body.lot_size,
                 body.management_strategy,
                 body.deletion_strategy,
-                body.mock_state,
+                effective_mock_state,
                 body.symbol_specs,
                 sp,
                 mock_exec,
@@ -1318,11 +1330,6 @@ async def simulate_pretrade_endpoint(
             "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
             f"Source message:\n{body.message}\n\n"
             f"Signals to evaluate:\n{sigs_text}\n\n"
-            "IMPORTANT: entry_price is the PENDING ORDER trigger price, not the current "
-            "market price. The bot places a limit/stop order and waits for price to reach "
-            "entry_price before opening the trade. Do NOT reject a signal solely because "
-            "the current market price differs from entry_price or is on the wrong side of "
-            "SL — that is expected for pending orders.\n\n"
             "For each signal call approve_signal, reject_signal or modify_signal.\n"
             "If you call no tool for a signal, it will be approved by default.\n"
             "Use read tools (get_account_info, get_daily_pnl, etc.) if your strategy requires it.\n\n"

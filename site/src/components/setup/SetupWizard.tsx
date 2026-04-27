@@ -845,7 +845,6 @@ type PretradeResult = {
 }
 type MockPos   = { ticket: string; symbol: string; order_type: string; lots: string; profit: string }
 type MockOrd   = { ticket: string; symbol: string; order_type: string; lots: string; price: string }
-type MockPrice = { symbol: string; bid: string; ask: string; spread: string; contract_size: string }
 
 const CHART_W = 560
 const CHART_H = 200
@@ -901,13 +900,6 @@ function PipelineCard({
   )
 }
 
-function defaultContractSize(symbol: string): string {
-  const s = symbol.toUpperCase()
-  if (["BTC", "ETH", "LTC", "XRP", "SOL", "ADA", "BNB"].some(k => s.includes(k))) return "1"
-  if (s.includes("XAU")) return "100"
-  if (s.includes("XAG")) return "5000"
-  return "100000"
-}
 
 function RulesStep({ data, update, onNext, onBack }: StepProps) {
   const [phase, setPhase]           = useState<SimPhase>("signal")
@@ -942,7 +934,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   const [mockMonthlyPnl,    setMockMonthlyPnl]    = useState("0")
   const [mockOpenPositions, setMockOpenPositions] = useState<MockPos[]>([])
   const [mockPendingOrders, setMockPendingOrders] = useState<MockOrd[]>([])
-  const [mockSymbolPrices,  setMockSymbolPrices]  = useState<MockPrice[]>([])
   const [openMockSec,       setOpenMockSec]        = useState<string | null>(null)
   const [pretradeLoading,   setPretradeLoading]   = useState(false)
   const [pretradeResult,    setPretradeResult]    = useState<PretradeResult | null>(null)
@@ -979,18 +970,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       }
     }
   }, [extracted, priceMin, priceMax])
-
-  // Pre-populate symbol prices from extracted signals (only new symbols)
-  useEffect(() => {
-    if (extracted.length === 0) return
-    const syms = [...new Set(extracted.map(s => s.symbol).filter(Boolean))]
-    setMockSymbolPrices(prev => {
-      const existing = new Set(prev.map(p => p.symbol))
-      const toAdd = syms.filter(s => !existing.has(s))
-      if (toAdd.length === 0) return prev
-      return [...prev, ...toAdd.map(s => ({ symbol: s, bid: "", ask: "", spread: "", contract_size: defaultContractSize(s) }))]
-    })
-  }, [extracted])
 
   const activeMsg = selectedMsg || pasteMsg
 
@@ -1069,11 +1048,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     setSimLoading(true)
     setPretradeResult(null)
     try {
-      const symbolSpecs: Record<string, number> = {}
-      for (const sp of mockSymbolPrices) {
-        if (sp.symbol && sp.contract_size) symbolSpecs[sp.symbol] = parseFloat(sp.contract_size) || 0
-      }
-      const specs = Object.keys(symbolSpecs).length ? symbolSpecs : undefined
       const hasStrategy = !!(data.managementStrategy?.trim() || data.sizingStrategy?.trim())
 
       if (hasStrategy) {
@@ -1086,7 +1060,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           deletion_strategy: data.deletionStrategy || undefined,
           price_path: pricePath,
           timeline_events: tEvents,
-          symbol_specs: specs,
           mock_state: buildMockState(),
         })
         setSimResult(res.simulation)
@@ -1103,7 +1076,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           deletion_strategy: data.deletionStrategy || undefined,
           price_path: pricePath,
           timeline_events: tEvents,
-          symbol_specs: specs,
         })
         setSimResult(res.simulation)
         if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
@@ -1113,20 +1085,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   }
 
   function buildMockState() {
-    const prices: Record<string, unknown> = {}
-    for (const sp of mockSymbolPrices) {
-      if (!sp.symbol) continue
-      const bid = parseFloat(sp.bid) || undefined
-      const ask = parseFloat(sp.ask) || undefined
-      if (bid || ask) {
-        prices[sp.symbol] = {
-          bid: bid ?? ask, ask: ask ?? bid,
-          spread_pips: parseFloat(sp.spread) || 0,
-          last: ((bid ?? 0) + (ask ?? 0)) / (bid && ask ? 2 : 1),
-          contract_size: parseFloat(sp.contract_size) || undefined,
-        }
-      }
-    }
     return {
       balance:       parseFloat(mockBalance)    || 10000,
       equity:        parseFloat(mockEquity)     || 10000,
@@ -1151,7 +1109,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         lots:       parseFloat(o.lots)  || 0.01,
         price:      parseFloat(o.price) || 0,
       })),
-      prices,
     }
   }
 
@@ -1941,36 +1898,6 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                         </div>
                       )}
 
-                      {/* Symbol prices */}
-                      {secBtn("prices", "Symbol prices", mockSymbolPrices.length > 0 ? mockSymbolPrices.map(p => p.symbol).join(", ") : "defaults")}
-                      {openMockSec === "prices" && (
-                        <div className="px-1 pb-1 space-y-1.5">
-                          <p className="text-[9px] text-white/20 italic">Leave blank to use built-in defaults. CS = contract size (e.g. 1 for crypto, 100 for gold, 100000 for forex).</p>
-                          {mockSymbolPrices.map((sp, spi) => (
-                            <div key={spi} className="flex gap-1.5 items-center flex-wrap">
-                              <input placeholder="Symbol" value={sp.symbol}
-                                onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, symbol: e.target.value.toUpperCase(), contract_size: x.contract_size || defaultContractSize(e.target.value) } : x))}
-                                className={`${mockInp} w-20`} />
-                              <input placeholder="Bid" type="number" step="any" value={sp.bid} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, bid: e.target.value } : x))}
-                                className={`${mockInp} w-24`} />
-                              <input placeholder="Ask" type="number" step="any" value={sp.ask} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, ask: e.target.value } : x))}
-                                className={`${mockInp} w-24`} />
-                              <input placeholder="Spread" type="number" step="any" value={sp.spread} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, spread: e.target.value } : x))}
-                                className={`${mockInp} w-16`} />
-                              <div className="flex items-center gap-1">
-                                <span className="text-[9px] text-white/25 shrink-0">CS:</span>
-                                <input placeholder="CS" type="number" step="any" value={sp.contract_size} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, contract_size: e.target.value } : x))}
-                                  className={`${mockInp} w-20`} />
-                              </div>
-                              <button type="button" onClick={() => setMockSymbolPrices(p => p.filter((_, i) => i !== spi))}
-                                className="text-white/20 hover:text-red-400 transition-colors shrink-0 px-1">✕</button>
-                            </div>
-                          ))}
-                          <button type="button"
-                            onClick={() => setMockSymbolPrices(p => [...p, { symbol: "", bid: "", ask: "", spread: "", contract_size: "" }])}
-                            className="text-[10px] text-violet-400/70 hover:text-violet-400 transition-colors">+ Add symbol</button>
-                        </div>
-                      )}
                     </div>
                   )
                 })()}
