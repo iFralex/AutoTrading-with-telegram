@@ -552,6 +552,7 @@ export const api = {
     price_path?: { t: number; price: number }[]
     timeline_events?: { t: number; type: string }[]
     lot_size?: number
+    symbol_specs?: Record<string, number>  // symbol → contract_size override
   }) {
     return call<{
       is_signal: boolean
@@ -613,6 +614,7 @@ export const api = {
         modified_tp?: number | null
       }>
       tool_calls: Array<{ name: string; args: Record<string, unknown>; result: Record<string, unknown> }>
+      actions: Array<{ tool: string; [key: string]: unknown }>
       final_response: string
     }>("POST", "/api/setup/simulate-pretrade", payload)
   },

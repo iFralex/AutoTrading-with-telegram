@@ -299,6 +299,7 @@ class SimulateSignalBody(BaseModel):
     price_path: list[dict] | None = None    # [{"t": 0-1, "price": float}, ...]
     timeline_events: list[dict] | None = None  # [{"t": 0-1, "type": "signal_deleted"}, ...]
     lot_size: float = 0.1
+    symbol_specs: dict[str, float] | None = None  # symbol → contract_size override
 
 
 @router.post("/simulate-signal")
@@ -342,12 +343,14 @@ async def simulate_signal_endpoint(
             body.timeline_events or [],
             body.lot_size,
             body.deletion_strategy,
+            body.symbol_specs or {},
         )
 
     return {"is_signal": True, "extracted": extracted, "simulation": simulation}
 
 
-def _sim_price_events(signals, price_path, timeline_events, default_lot, deletion_strategy):
+def _sim_price_events(signals, price_path, timeline_events, default_lot, deletion_strategy,
+                      symbol_specs: dict | None = None):
     """Pure price-path simulation — no MT5."""
     per_signal = []
     total_pnl = 0.0
@@ -418,7 +421,7 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
                 if sl is not None:
                     sl_hit = (order_type == "BUY" and price <= sl) or (order_type == "SELL" and price >= sl)
                     if sl_hit:
-                        pnl = _calc_pnl(order_type, order_open_price, sl, lot)
+                        pnl = _calc_pnl(order_type, order_open_price, sl, lot, sig.symbol, symbol_specs)
                         total_pnl += pnl
                         sig_events.append({"t": t_norm, "type": "sl", "price": sl,
                                             "pnl": round(pnl, 2),
@@ -429,7 +432,7 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
                 if tp is not None:
                     tp_hit = (order_type == "BUY" and price >= tp) or (order_type == "SELL" and price <= tp)
                     if tp_hit:
-                        pnl = _calc_pnl(order_type, order_open_price, tp, lot)
+                        pnl = _calc_pnl(order_type, order_open_price, tp, lot, sig.symbol, symbol_specs)
                         total_pnl += pnl
                         sig_events.append({"t": t_norm, "type": "tp", "price": tp,
                                             "pnl": round(pnl, 2),
@@ -465,22 +468,181 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
     return {"per_signal": per_signal, "total_pnl": round(total_pnl, 2)}
 
 
-def _calc_pnl(order_type: str, open_price: float, close_price: float, lot: float) -> float:
+def _contract_size(symbol: str, symbol_specs: dict | None = None) -> float:
+    """Returns MT5 contract size for a symbol. User override wins if provided."""
+    if symbol_specs:
+        cs = symbol_specs.get(symbol) or symbol_specs.get(symbol.upper())
+        if cs:
+            return float(cs)
+    s = symbol.upper()
+    if any(k in s for k in ("BTC", "ETH", "LTC", "XRP", "SOL", "ADA", "BNB")):
+        return 1.0
+    if "XAU" in s:
+        return 100.0
+    if "XAG" in s:
+        return 5_000.0
+    if "XPD" in s or "XPT" in s:
+        return 100.0
+    return 100_000.0
+
+
+def _calc_pnl(order_type: str, open_price: float, close_price: float, lot: float,
+              symbol: str = "", symbol_specs: dict | None = None) -> float:
     diff = (close_price - open_price) if order_type == "BUY" else (open_price - close_price)
-    return diff * lot * 100000  # approximate; pip value varies by instrument
+    return diff * lot * _contract_size(symbol, symbol_specs)
 
 
-# ── AI strategy mock simulation ───────────────────────────────────────────────
+# ── AI strategy simulation (real agent, mock MT5 trader) ──────────────────────
 
 class SimulatePretradeBody(BaseModel):
-    signals: list[dict]         # extracted signals (from simulate-signal)
-    message: str = ""           # original signal message (for pretrade prompt)
+    signals: list[dict]                 # extracted signals (from simulate-signal)
+    message: str = ""                   # original signal message
     management_strategy: str | None = None
     deletion_strategy: str | None = None
     sizing_strategy: str | None = None
-    event_type: str = "pretrade"   # "pretrade" | "message_deleted" | "price_level_reached"
-    event_data: dict | None = None # for non-pretrade events
+    extraction_instructions: str | None = None
+    event_type: str = "pretrade"        # "pretrade" | "message_deleted" | "price_level_reached"
+    event_data: dict | None = None
     mock_state: dict = {}
+
+
+class MockMT5Trader:
+    """
+    Drop-in replacement for MT5Trader used inside simulate_pretrade_endpoint.
+
+    READ methods return data derived from mock_state.
+    WRITE methods record the action in actions_log and return a simulated-ok dict,
+    so the real StrategyExecutor._dispatch() logic (including calculate_lot_for_risk)
+    runs unchanged while no real MT5 order is ever sent.
+    """
+
+    _PRICE_DEFAULTS: dict[str, dict] = {
+        "XAUUSD": {"bid": 2340.00, "ask": 2340.50, "spread_pips": 0.5,  "last": 2340.25},
+        "XAGUSD": {"bid":   29.50, "ask":   29.51,  "spread_pips": 0.1,  "last":   29.50},
+        "EURUSD": {"bid":   1.085, "ask":   1.0851, "spread_pips": 0.1,  "last":   1.085},
+        "GBPUSD": {"bid":  1.2650, "ask":   1.2651, "spread_pips": 0.1,  "last":  1.2650},
+        "USDJPY": {"bid": 149.50,  "ask":  149.51,  "spread_pips": 0.1,  "last": 149.50},
+        "BTCUSD": {"bid": 65000.0, "ask": 65010.0,  "spread_pips": 10.0, "last": 65005.0},
+        "ETHUSD": {"bid":  3500.0, "ask":  3502.0,  "spread_pips": 2.0,  "last":  3501.0},
+    }
+
+    _SPEC_DEFAULTS: dict[str, dict] = {
+        "XAU": {"pip_value_per_lot": 10.0,  "contract_size":  100, "digits": 2,
+                "volume_min": 0.01, "volume_max":  50.0, "volume_step": 0.01, "currency_profit": "USD"},
+        "XAG": {"pip_value_per_lot": 50.0,  "contract_size": 5000, "digits": 3,
+                "volume_min": 0.01, "volume_max": 100.0, "volume_step": 0.01, "currency_profit": "USD"},
+        "BTC": {"pip_value_per_lot":  1.0,  "contract_size":    1, "digits": 2,
+                "volume_min": 0.01, "volume_max":  10.0, "volume_step": 0.01, "currency_profit": "USD"},
+        "ETH": {"pip_value_per_lot":  1.0,  "contract_size":    1, "digits": 2,
+                "volume_min": 0.01, "volume_max":  50.0, "volume_step": 0.01, "currency_profit": "USD"},
+    }
+    _SPEC_FOREX = {"pip_value_per_lot": 10.0, "contract_size": 100_000, "digits": 5,
+                   "volume_min": 0.01, "volume_max": 100.0, "volume_step": 0.01, "currency_profit": "USD"}
+
+    def __init__(self, mock_state: dict, actions_log: list[dict]) -> None:
+        self._ms      = mock_state
+        self._actions = actions_log
+        self._balance     = float(mock_state.get("balance",     10_000))
+        self._equity      = float(mock_state.get("equity",      self._balance))
+        self._free_margin = float(mock_state.get("free_margin", self._equity))
+        self._currency    = str(mock_state.get("currency",  "USD"))
+        self._leverage    = int(mock_state.get("leverage",   100))
+        self._open_pos    = list(mock_state.get("open_positions",  []))
+        self._pending_ord = list(mock_state.get("pending_orders",  []))
+        self._daily_pnl   = float(mock_state.get("daily_pnl",   0))
+        self._weekly_pnl  = float(mock_state.get("weekly_pnl",  0))
+        self._monthly_pnl = float(mock_state.get("monthly_pnl", 0))
+        self._prices      = dict(mock_state.get("prices", {}))
+
+    def _rec(self, tool: str, **kwargs) -> dict:
+        entry = {"tool": tool, **{k: v for k, v in kwargs.items() if v is not None}}
+        self._actions.append(entry)
+        return {"ok": True, "simulated": True}
+
+    # ── READ methods ──────────────────────────────────────────────────────────
+
+    async def get_full_account_info(self, user_id, login, password, server):
+        return {
+            "balance":         self._balance,
+            "equity":          self._equity,
+            "margin":          self._balance - self._free_margin,
+            "free_margin":     self._free_margin,
+            "profit_floating": self._equity - self._balance,
+            "leverage":        self._leverage,
+            "currency":        self._currency,
+            "login":           login or 0,
+            "server":          self._ms.get("server", "SimBroker-Demo"),
+        }
+
+    async def get_pnl_for_period(self, user_id, login, password, server, from_, to):
+        from datetime import datetime, timezone
+        now   = datetime.now(timezone.utc)
+        delta = now - from_
+        if delta.total_seconds() <= 86_400:
+            return self._daily_pnl
+        if delta.total_seconds() <= 7 * 86_400:
+            return self._weekly_pnl
+        return self._monthly_pnl
+
+    async def get_symbol_tick(self, user_id, login, password, server, symbol: str):
+        sym = symbol.upper()
+        if sym in self._prices:
+            p = self._prices[sym]
+            bid = float(p.get("bid", 0))
+            ask = float(p.get("ask", bid))
+            spread = float(p.get("spread_pips", abs(ask - bid) * 10))
+            return {"bid": bid, "ask": ask, "spread_pips": spread, "last": bid}
+        default = self._PRICE_DEFAULTS.get(sym)
+        if default:
+            return dict(default)
+        return {"bid": 1.0, "ask": 1.0001, "spread_pips": 0.1, "last": 1.0}
+
+    async def get_symbol_specs(self, user_id, login, password, server, symbol: str):
+        sym = symbol.upper()
+        for prefix, specs in self._SPEC_DEFAULTS.items():
+            if prefix in sym:
+                return dict(specs)
+        return dict(self._SPEC_FOREX)
+
+    async def get_positions(self, user_id, login, password, server, symbol=None):
+        if symbol:
+            return [p for p in self._open_pos if str(p.get("symbol", "")).upper() == symbol.upper()]
+        return list(self._open_pos)
+
+    async def get_pending_orders_list(self, user_id, login, password, server, symbol=None):
+        if symbol:
+            return [o for o in self._pending_ord if str(o.get("symbol", "")).upper() == symbol.upper()]
+        return list(self._pending_ord)
+
+    async def get_closed_deals(self, user_id, login, password, server, days=1, symbol=None):
+        return []
+
+    # ── WRITE methods (record action, return simulated-ok) ────────────────────
+
+    async def modify_position(self, user_id, login, password, server, ticket, new_sl=None, new_tp=None):
+        return self._rec("modify_position", ticket=ticket, new_sl=new_sl, new_tp=new_tp)
+
+    async def set_breakeven(self, user_id, login, password, server, ticket, offset_pips=0.0):
+        return self._rec("set_breakeven", ticket=ticket, offset_pips=offset_pips)
+
+    async def close_position_by_ticket(self, user_id, login, password, server, ticket, lots=None):
+        return self._rec("close_position", ticket=ticket, lots=lots)
+
+    async def cancel_order_by_ticket(self, user_id, login, password, server, ticket):
+        return self._rec("cancel_order", ticket=ticket)
+
+    async def modify_order_by_ticket(self, user_id, login, password, server, ticket,
+                                     new_price=None, new_sl=None, new_tp=None):
+        return self._rec("modify_order", ticket=ticket, new_price=new_price, new_sl=new_sl, new_tp=new_tp)
+
+    async def open_new_market_order(self, user_id, login, password, server,
+                                    symbol, order_type, lots, sl=None, tp=None):
+        return self._rec("open_market_order", symbol=symbol, order_type=order_type, lots=lots, sl=sl, tp=tp)
+
+    async def place_new_pending_order(self, user_id, login, password, server,
+                                      symbol, order_type, price, lots, sl=None, tp=None):
+        return self._rec("place_pending_order", symbol=symbol, order_type=order_type,
+                         price=price, lots=lots, sl=sl, tp=tp)
 
 
 @router.post("/simulate-pretrade")
@@ -489,11 +651,20 @@ async def simulate_pretrade_endpoint(
     request: Request,
 ):
     """
-    Simula pre_trade / on_event con un agente Gemini reale ma con tool MT5 mockati.
-    Il mock_state (account, P&L, posizioni) è fornito dall'utente ed è editabile.
-    Non apre MT5, non piazza ordini reali.
+    Simula pre_trade / on_event usando il vero StrategyExecutor._dispatch() con un
+    MockMT5Trader al posto del vero MT5Trader.  I tool di lettura restituiscono i
+    dati di mock_state; i tool di scrittura registrano l'azione senza aprire MT5.
+    Il calcolo dei lot (calculate_lot_for_risk / _percent) usa la stessa logica
+    esatta della produzione, alimentata dai dati del conto mock.
     """
+    import json
+    from google.genai import types as _types
     from vps.services.signal_processor import SignalProcessor
+    from vps.services.strategy_executor import (
+        StrategyExecutor, _ExecCtx, PreTradeDecision,
+        _build_system_prompt, _format_event_prompt, _make_tools, _compact, _PRO_MODEL,
+    )
+
     sp: SignalProcessor | None = request.app.state.signal_processor
     if sp is None:
         raise HTTPException(503, detail="Signal processor not available (GEMINI_API_KEY missing)")
@@ -501,168 +672,55 @@ async def simulate_pretrade_endpoint(
     strategy = (body.management_strategy or "").strip()
     if body.event_type == "message_deleted":
         strategy = (body.deletion_strategy or "").strip()
-
     sizing = (body.sizing_strategy or "").strip()
+
     if not strategy and not sizing:
-        return {"decisions": [], "tool_calls": [], "final_response": "No strategy configured.", "event_type": body.event_type}
+        return {
+            "event_type": body.event_type, "decisions": [],
+            "tool_calls": [], "actions": [], "final_response": "No strategy configured.",
+        }
 
-    try:
-        result = await _run_mock_agent(
-            client=sp._client,
-            management_strategy=strategy,
-            sizing_strategy=sizing,
-            signals=body.signals,
-            message=body.message,
-            event_type=body.event_type,
-            event_data=body.event_data or {},
-            mock_state=body.mock_state,
-        )
-    except Exception as exc:
-        logger.error("simulate_pretrade_endpoint: %s", exc)
-        raise HTTPException(500, detail=str(exc))
+    # ── Build mock infrastructure ─────────────────────────────────────────────
+    actions_log: list[dict] = []
+    mock_trader = MockMT5Trader(body.mock_state, actions_log)
 
-    return result
+    # Minimal StrategyExecutor shell — reuses the Gemini client from SignalProcessor
+    mock_exec = StrategyExecutor.__new__(StrategyExecutor)
+    mock_exec._closed_trade_store = None
 
+    ctx = _ExecCtx(mock_trader, "sim", 0, "", "sim")
+    decisions: dict[int, PreTradeDecision] = {}
 
-async def _run_mock_agent(
-    client,
-    management_strategy: str,
-    sizing_strategy: str,
-    signals: list[dict],
-    message: str,
-    event_type: str,
-    event_data: dict,
-    mock_state: dict,
-) -> dict:
-    """
-    Esegue il vero agente Gemini con tool MT5 mockati.
-    Restituisce: decisions, tool_calls, final_response.
-    """
-    import json
-    from datetime import datetime, timezone
+    # ── Build event prompt (mirrors production pre_trade / on_event) ──────────
+    ms       = body.mock_state
+    balance  = float(ms.get("balance",     10_000))
+    equity   = float(ms.get("equity",      balance))
+    free_m   = float(ms.get("free_margin", equity))
+    currency = str(ms.get("currency", "USD"))
+    leverage = int(ms.get("leverage", 100))
+    open_pos = list(ms.get("open_positions", []))
 
-    from google.genai import types as _types
-    from vps.services.strategy_executor import (
-        _make_tools, _build_system_prompt, _PRO_MODEL, _compact, _format_event_prompt,
-    )
-
-    decisions: dict[int, dict] = {}
-    tool_calls_log: list[dict] = []
-
-    # ── Mock account values ───────────────────────────────────────────────────
-    balance      = float(mock_state.get("balance", 10000))
-    equity       = float(mock_state.get("equity", balance))
-    free_margin  = float(mock_state.get("free_margin", equity))
-    currency     = str(mock_state.get("currency", "USD"))
-    leverage     = int(mock_state.get("leverage", 100))
-    open_pos     = list(mock_state.get("open_positions", []))
-    pending_ord  = list(mock_state.get("pending_orders", []))
-    daily_pnl    = float(mock_state.get("daily_pnl", 0))
-    weekly_pnl   = float(mock_state.get("weekly_pnl", 0))
-    monthly_pnl  = float(mock_state.get("monthly_pnl", 0))
-    mock_prices  = dict(mock_state.get("prices", {}))
-
-    _SYMBOL_DEFAULTS: dict[str, dict] = {
-        "XAUUSD":  {"bid": 2340.0,  "ask": 2340.5,  "spread_pips": 0.5,  "last": 2340.25},
-        "EURUSD":  {"bid": 1.0850,  "ask": 1.0851,  "spread_pips": 0.1,  "last": 1.0850},
-        "GBPUSD":  {"bid": 1.2650,  "ask": 1.2651,  "spread_pips": 0.1,  "last": 1.2650},
-        "USDJPY":  {"bid": 149.50,  "ask": 149.51,  "spread_pips": 0.1,  "last": 149.50},
-        "BTCUSD":  {"bid": 65000.0, "ask": 65010.0, "spread_pips": 10.0, "last": 65005.0},
-        "XAGUSD":  {"bid": 29.50,   "ask": 29.51,   "spread_pips": 0.1,  "last": 29.50},
-    }
-
-    def _mock_dispatch(name: str, args: dict) -> dict:
-        if name == "get_account_info":
-            return {"balance": balance, "equity": equity, "margin": balance - free_margin,
-                    "free_margin": free_margin, "profit_floating": equity - balance,
-                    "leverage": leverage, "currency": currency,
-                    "login": 12345678, "server": mock_state.get("server", "SimBroker-Demo")}
-        if name == "get_open_positions":
-            return {"positions": open_pos}
-        if name == "get_pending_orders":
-            return {"orders": pending_ord}
-        if name == "count_open_positions":
-            return {"count": len(open_pos)}
-        if name == "count_pending_orders":
-            return {"count": len(pending_ord)}
-        if name == "get_position_history":
-            return {"positions": []}
-        if name == "get_daily_pnl":
-            return {"pnl": daily_pnl, "currency": currency}
-        if name == "get_weekly_pnl":
-            return {"pnl": weekly_pnl}
-        if name == "get_monthly_pnl":
-            return {"pnl": monthly_pnl}
-        if name == "get_current_datetime":
-            now = datetime.now(timezone.utc)
-            return {"date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H:%M:%S"),
-                    "weekday_name": now.strftime("%A"), "weekday_number": now.weekday(),
-                    "hour": now.hour, "minute": now.minute, "is_weekend": now.weekday() >= 5}
-        if name == "get_current_price":
-            sym = str(args.get("symbol", ""))
-            return mock_prices.get(sym) or _SYMBOL_DEFAULTS.get(sym) or {"bid": 1.0, "ask": 1.0001, "spread_pips": 0.1, "last": 1.0}
-        if name == "get_symbol_info":
-            sym = str(args.get("symbol", ""))
-            if "XAU" in sym or "GOLD" in sym.upper():
-                return {"pip_value_per_lot": 10.0, "contract_size": 100, "digits": 2,
-                        "volume_min": 0.01, "volume_max": 50.0, "volume_step": 0.01, "currency_profit": "USD"}
-            return {"pip_value_per_lot": 10.0, "contract_size": 100000, "digits": 5,
-                    "volume_min": 0.01, "volume_max": 100.0, "volume_step": 0.01, "currency_profit": "USD"}
-        if name == "calculate_lot_for_risk":
-            risk_amount = float(args.get("risk_amount", 100))
-            sl_pips = max(0.001, float(args.get("sl_pips", 20)))
-            return {"lot_size": max(0.01, round(risk_amount / (sl_pips * 10), 2))}
-        if name == "calculate_lot_for_risk_percent":
-            pct = float(args.get("risk_percent", 1))
-            sl_pips = max(0.001, float(args.get("sl_pips", 20)))
-            return {"lot_size": max(0.01, round(balance * pct / 100 / (sl_pips * 10), 2))}
-        # Decision tools
-        if name == "approve_signal":
-            idx = int(args.get("signal_index", 0))
-            decisions[idx] = {"approved": True, "reason": str(args.get("reason", ""))}
-            return {"ok": True}
-        if name == "reject_signal":
-            idx = int(args.get("signal_index", 0))
-            decisions[idx] = {"approved": False, "reason": str(args.get("reason", "rejected by strategy"))}
-            return {"ok": True}
-        if name == "modify_signal":
-            idx = int(args.get("signal_index", 0))
-            decisions[idx] = {
-                "approved": True,
-                "modified_lots": args.get("new_lots"),
-                "modified_sl":   args.get("new_sl"),
-                "modified_tp":   args.get("new_tp"),
-                "reason":        str(args.get("reason", "modified by strategy")),
-            }
-            return {"ok": True}
-        # Action tools for on_event (simulated — no real MT5)
-        return {"ok": True, "simulated": True, "note": f"Mock: {name} would execute in production"}
-
-    # ── Build event prompt ────────────────────────────────────────────────────
-    if event_type == "pretrade":
+    if body.event_type == "pretrade":
         sigs_text = "\n".join(
             f"  [{i}] {s.get('order_type')} {s.get('symbol')}"
             f" entry={s.get('entry_price')} SL={s.get('stop_loss')} TP={s.get('take_profit')}"
             f" lots={s.get('lot_size')} mode={s.get('order_mode')}"
-            for i, s in enumerate(signals)
+            for i, s in enumerate(body.signals)
         )
         event_prompt = (
             "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
-            f"Source message:\n{message}\n\n"
+            f"Source message:\n{body.message}\n\n"
             f"Signals to evaluate:\n{sigs_text}\n\n"
             "For each signal call approve_signal, reject_signal or modify_signal.\n"
             "If you call no tool for a signal, it will be approved by default.\n"
-            "Use read tools (get_account_info, get_daily_pnl, etc.) if your strategy requires it."
-        )
-        # Pre-fetch context (mirrors production behaviour)
-        event_prompt += (
-            f"\n\nPre-fetched context (do not re-query these):\n"
-            f"  account: balance={balance} equity={equity} free_margin={free_margin}"
+            "Use read tools (get_account_info, get_daily_pnl, etc.) if your strategy requires it.\n\n"
+            "Pre-fetched context (do not re-query these):\n"
+            f"  account: balance={balance} equity={equity} free_margin={free_m}"
             f" currency={currency} leverage={leverage}\n"
             f"  open_positions_count: {len(open_pos)}"
         )
     else:
-        event_prompt = _format_event_prompt(event_type, event_data)
+        event_prompt = _format_event_prompt(body.event_type, body.event_data or {})
         if open_pos:
             pos_parts = [
                 f"#{p.get('ticket','?')} {p.get('order_type')} {p.get('symbol')}"
@@ -670,30 +728,36 @@ async def _run_mock_agent(
                 for p in open_pos
             ]
             event_prompt += (
-                f"\n\nPre-fetched context:\n"
+                "\n\nPre-fetched context:\n"
                 f"  open_positions ({len(open_pos)}): " + " | ".join(pos_parts)
             )
 
-    # ── Run Gemini agent loop with mock tools ─────────────────────────────────
-    tools        = _make_tools(event_type)
-    system_prompt = _build_system_prompt(management_strategy)
-    if sizing_strategy:
+    # ── System prompt (sizing strategy prepended for pretrade) ────────────────
+    system_prompt = _build_system_prompt(strategy or "No management strategy configured.")
+    if sizing and body.event_type == "pretrade":
         system_prompt = (
-            f"SIZING STRATEGY (use to determine lot sizes — call calculate_lot_for_risk"
-            f" or calculate_lot_for_risk_percent as required):\n{sizing_strategy}\n\n"
+            "SIZING STRATEGY (use this to determine lot sizes — call "
+            "calculate_lot_for_risk or calculate_lot_for_risk_percent as needed):\n"
+            f"{sizing}\n\n"
         ) + system_prompt
+
+    # ── Gemini agent loop — real _dispatch(), mock trader ────────────────────
+    tools  = _make_tools(body.event_type)
     config = _types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=tools,  # type: ignore[arg-type]
     )
-    chat = client.aio.chats.create(model=_PRO_MODEL, config=config)
+    chat = sp._client.aio.chats.create(model=_PRO_MODEL, config=config)
 
     try:
         response = await chat.send_message(event_prompt)
     except Exception as exc:
-        return {"decisions": [], "tool_calls": [], "final_response": f"AI error: {exc}", "event_type": event_type}
+        logger.error("simulate_pretrade_endpoint: initial send: %s", exc)
+        raise HTTPException(500, detail=str(exc))
 
+    tool_calls_log: list[dict] = []
     final_text = ""
+
     for _ in range(8):
         fn_calls = response.function_calls or []
         if not fn_calls:
@@ -704,7 +768,7 @@ async def _run_mock_agent(
         for fc in fn_calls:
             name = fc.name
             args = dict(fc.args)
-            result_data = _mock_dispatch(name, args)
+            result_data = await mock_exec._dispatch(name, args, ctx, decisions)
             tool_calls_log.append({"name": name, "args": args, "result": result_data})
             fn_response_parts.append(
                 _types.Part.from_function_response(
@@ -716,21 +780,36 @@ async def _run_mock_agent(
         try:
             response = await chat.send_message(fn_response_parts)
         except Exception as exc:
-            return {"decisions": list(decisions.values()), "tool_calls": tool_calls_log,
-                    "final_response": f"AI error mid-loop: {exc}", "event_type": event_type}
+            logger.error("simulate_pretrade_endpoint: mid-loop: %s", exc)
+            break
 
-    # Default approval for any signal not explicitly handled
-    all_decisions = [
-        decisions.get(i, {"approved": True, "reason": "Not mentioned — approved by default"})
-        for i in range(len(signals))
-    ]
-    for i, d in enumerate(all_decisions):
-        d["signal_index"] = i
+    # ── Build final decisions list (pretrade only) ────────────────────────────
+    if body.event_type == "pretrade":
+        all_decisions = []
+        for i in range(len(body.signals)):
+            d = decisions.get(i)
+            if d is None:
+                all_decisions.append({"signal_index": i, "approved": True,
+                                      "modified_lots": None, "modified_sl": None,
+                                      "modified_tp": None,
+                                      "reason": "Not mentioned — approved by default"})
+            else:
+                all_decisions.append({
+                    "signal_index":  d.signal_index,
+                    "approved":      d.approved,
+                    "modified_lots": d.modified_lots,
+                    "modified_sl":   d.modified_sl,
+                    "modified_tp":   d.modified_tp,
+                    "reason":        d.reason,
+                })
+    else:
+        all_decisions = []
 
     return {
-        "event_type":     event_type,
+        "event_type":     body.event_type,
         "decisions":      all_decisions,
         "tool_calls":     tool_calls_log,
+        "actions":        actions_log,
         "final_response": final_text,
     }
 

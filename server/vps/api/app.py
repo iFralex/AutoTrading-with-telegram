@@ -170,6 +170,7 @@ async def lifespan(app: FastAPI):
     else:
         strategy_executor = None
         logger.warning("StrategyExecutor non attivo (GEMINI_API_KEY mancante)")
+    app.state.strategy_executor = strategy_executor
 
     # Monthly report generator (opzionale: richiede Gemini key + matplotlib + fpdf2)
     if gemini_key:

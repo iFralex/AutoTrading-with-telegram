@@ -832,13 +832,14 @@ type PretradeDecision = {
   modified_lots?: number | null; modified_sl?: number | null; modified_tp?: number | null
 }
 type PretradeToolCall = { name: string; args: Record<string, unknown>; result: Record<string, unknown> }
+type PretradeAction = { tool: string; [key: string]: unknown }
 type PretradeResult = {
   event_type: string; decisions: PretradeDecision[]
-  tool_calls: PretradeToolCall[]; final_response: string
+  tool_calls: PretradeToolCall[]; actions: PretradeAction[]; final_response: string
 }
 type MockPos   = { ticket: string; symbol: string; order_type: string; lots: string; profit: string }
 type MockOrd   = { ticket: string; symbol: string; order_type: string; lots: string; price: string }
-type MockPrice = { symbol: string; bid: string; ask: string; spread: string }
+type MockPrice = { symbol: string; bid: string; ask: string; spread: string; contract_size: string }
 
 const CHART_W = 560
 const CHART_H = 200
@@ -892,6 +893,14 @@ function PipelineCard({
       {expanded && <div className="px-4 pb-4 space-y-3">{children}</div>}
     </div>
   )
+}
+
+function defaultContractSize(symbol: string): string {
+  const s = symbol.toUpperCase()
+  if (["BTC", "ETH", "LTC", "XRP", "SOL", "ADA", "BNB"].some(k => s.includes(k))) return "1"
+  if (s.includes("XAU")) return "100"
+  if (s.includes("XAG")) return "5000"
+  return "100000"
 }
 
 function RulesStep({ data, update, onNext, onBack }: StepProps) {
@@ -975,7 +984,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       const existing = new Set(prev.map(p => p.symbol))
       const toAdd = syms.filter(s => !existing.has(s))
       if (toAdd.length === 0) return prev
-      return [...prev, ...toAdd.map(s => ({ symbol: s, bid: "", ask: "", spread: "" }))]
+      return [...prev, ...toAdd.map(s => ({ symbol: s, bid: "", ask: "", spread: "", contract_size: defaultContractSize(s) }))]
     })
   }, [extracted])
 
@@ -1055,6 +1064,10 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     if (!activeMsg.trim() || pricePath.length < 2) return
     setSimLoading(true)
     try {
+      const symbolSpecs: Record<string, number> = {}
+      for (const sp of mockSymbolPrices) {
+        if (sp.symbol && sp.contract_size) symbolSpecs[sp.symbol] = parseFloat(sp.contract_size) || 0
+      }
       const res = await api.simulateSignal({
         message: activeMsg,
         sizing_strategy: data.sizingStrategy || undefined,
@@ -1063,6 +1076,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         deletion_strategy: data.deletionStrategy || undefined,
         price_path: pricePath,
         timeline_events: tEvents,
+        symbol_specs: Object.keys(symbolSpecs).length ? symbolSpecs : undefined,
       })
       setSimResult(res.simulation)
       if (!extracted.length && res.extracted.length) setExtracted(res.extracted)
@@ -1081,6 +1095,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           bid: bid ?? ask, ask: ask ?? bid,
           spread_pips: parseFloat(sp.spread) || 0,
           last: ((bid ?? 0) + (ask ?? 0)) / (bid && ask ? 2 : 1),
+          contract_size: parseFloat(sp.contract_size) || undefined,
         }
       }
     }
@@ -1859,23 +1874,29 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                       {secBtn("prices", "Symbol prices", mockSymbolPrices.length > 0 ? mockSymbolPrices.map(p => p.symbol).join(", ") : "defaults")}
                       {openMockSec === "prices" && (
                         <div className="px-1 pb-1 space-y-1.5">
-                          <p className="text-[9px] text-white/20 italic">Leave blank to use built-in defaults. Last = (bid+ask)/2.</p>
+                          <p className="text-[9px] text-white/20 italic">Leave blank to use built-in defaults. CS = contract size (e.g. 1 for crypto, 100 for gold, 100000 for forex).</p>
                           {mockSymbolPrices.map((sp, spi) => (
-                            <div key={spi} className="flex gap-1.5 items-center">
-                              <input placeholder="Symbol" value={sp.symbol} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, symbol: e.target.value.toUpperCase() } : x))}
-                                className={`${mockInp} w-24`} />
+                            <div key={spi} className="flex gap-1.5 items-center flex-wrap">
+                              <input placeholder="Symbol" value={sp.symbol}
+                                onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, symbol: e.target.value.toUpperCase(), contract_size: x.contract_size || defaultContractSize(e.target.value) } : x))}
+                                className={`${mockInp} w-20`} />
                               <input placeholder="Bid" type="number" step="any" value={sp.bid} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, bid: e.target.value } : x))}
                                 className={`${mockInp} w-24`} />
                               <input placeholder="Ask" type="number" step="any" value={sp.ask} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, ask: e.target.value } : x))}
                                 className={`${mockInp} w-24`} />
                               <input placeholder="Spread" type="number" step="any" value={sp.spread} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, spread: e.target.value } : x))}
-                                className={`${mockInp} w-20`} />
+                                className={`${mockInp} w-16`} />
+                              <div className="flex items-center gap-1">
+                                <span className="text-[9px] text-white/25 shrink-0">CS:</span>
+                                <input placeholder="CS" type="number" step="any" value={sp.contract_size} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, contract_size: e.target.value } : x))}
+                                  className={`${mockInp} w-20`} />
+                              </div>
                               <button type="button" onClick={() => setMockSymbolPrices(p => p.filter((_, i) => i !== spi))}
                                 className="text-white/20 hover:text-red-400 transition-colors shrink-0 px-1">✕</button>
                             </div>
                           ))}
                           <button type="button"
-                            onClick={() => setMockSymbolPrices(p => [...p, { symbol: "", bid: "", ask: "", spread: "" }])}
+                            onClick={() => setMockSymbolPrices(p => [...p, { symbol: "", bid: "", ask: "", spread: "", contract_size: "" }])}
                             className="text-[10px] text-violet-400/70 hover:text-violet-400 transition-colors">+ Add symbol</button>
                         </div>
                       )}
@@ -1948,6 +1969,22 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                       </div>
                     )}
 
+                    {/* Write actions taken */}
+                    {pretradeResult.actions && pretradeResult.actions.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-semibold text-amber-400/60 uppercase tracking-wider">AI actions (simulated)</p>
+                        {pretradeResult.actions.map((ac, ai) => {
+                          const { tool, simulated: _s, ...rest } = ac
+                          return (
+                            <div key={ai} className="rounded-lg border border-amber-400/15 bg-amber-400/[0.04] px-2.5 py-2 font-mono text-[10px]">
+                              <span className="text-amber-300 font-semibold">{tool}</span>
+                              <span className="text-white/30 ml-2">{JSON.stringify(rest).slice(0, 100)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
                     {/* AI reasoning */}
                     {pretradeResult.final_response && (
                       <div className="rounded-xl bg-white/[0.02] border border-white/6 px-3 py-2.5">
@@ -1989,6 +2026,20 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                                   </div>
                                   {evResult && (
                                     <div className="space-y-1.5">
+                                      {evResult.actions && evResult.actions.length > 0 && (
+                                        <div className="space-y-1">
+                                          <p className="text-[9px] font-semibold text-amber-400/50 uppercase tracking-wider">Actions taken</p>
+                                          {evResult.actions.map((ac, ai) => {
+                                            const { tool, simulated: _s, ...rest } = ac
+                                            return (
+                                              <div key={ai} className="rounded-lg border border-amber-400/12 bg-amber-400/[0.03] px-2 py-1.5 font-mono text-[10px]">
+                                                <span className="text-amber-300">{tool}</span>
+                                                <span className="text-white/25 ml-1.5">{JSON.stringify(rest).slice(0, 70)}</span>
+                                              </div>
+                                            )
+                                          })}
+                                        </div>
+                                      )}
                                       {evResult.tool_calls.length > 0 && (
                                         <div className="space-y-1">
                                           {evResult.tool_calls.map((tc, ti) => (
