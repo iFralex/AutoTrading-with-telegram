@@ -1154,10 +1154,14 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       ? pricePath.map((pt, i) => `${i === 0 ? "M" : "L"} ${tToX(pt.t).toFixed(1)} ${priceToY(pt.price, pMin, pMax).toFixed(1)}`).join(" ")
       : null
 
-    // Grid lines — dynamic decimal count based on step magnitude
+    // Grid lines — decimal count from step magnitude, trailing zeros stripped
     const gridPrices = hasRange ? Array.from({ length: 5 }, (_, i) => pMin + (pMax - pMin) * i / 4) : []
     const step = hasRange ? (pMax - pMin) / 4 : 1
     const labelDecs = step < 0.0005 ? 6 : step < 0.005 ? 5 : step < 0.05 ? 4 : step < 0.5 ? 3 : step < 5 ? 2 : step < 50 ? 1 : 0
+    const fmtLabel = (n: number) => {
+      const s = parseFloat(n.toFixed(labelDecs)).toString()
+      return s.includes("e") ? n.toFixed(labelDecs) : s
+    }
 
     // Sim event markers on path
     const simMarkers: { cx: number; cy: number; type: string; pnl?: number }[] = []
@@ -1187,7 +1191,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           return (
             <g key={i}>
               <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="white" strokeOpacity={0.04} strokeDasharray="2,3" />
-              <text x={CHART_PAD.left - 4} y={y + 3.5} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{p.toFixed(labelDecs)}</text>
+              <text x={CHART_PAD.left - 4} y={y + 3.5} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{fmtLabel(p)}</text>
             </g>
           )
         })}
