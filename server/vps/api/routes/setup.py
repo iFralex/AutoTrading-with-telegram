@@ -1050,8 +1050,13 @@ async def _sim_full(
                             ev["ai_result"] = ai_result
                         sig_events.append(ev)
 
-            # Position closed by AI (e.g. AI called close_position_by_ticket)
+            # Position closed by AI — calculate P&L at current price
             if position_ticket and state.get_position(position_ticket) is None:
+                pnl = _calc_pnl(order_type, order_open_price, price, lot, symbol, symbol_specs)
+                total_pnl += pnl
+                sig_events.append({"t": t_norm, "type": "close", "price": price,
+                                   "pnl": round(pnl, 2),
+                                   "description": f"Position closed by AI @ {price:.5f}  ({pnl:+.2f})"})
                 trade_state = "closed"
                 break
 

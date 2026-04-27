@@ -1042,6 +1042,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   }
 
   function handleSvgMouseUp() {
+    if (!drawing) return
     setDrawing(false)
     if (pricePath.length < 2) return
     // Normalize t to [0, 1] so the path always fills the full chart width
@@ -1281,7 +1282,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
 
         {/* Simulation markers */}
         {simMarkers.map((m, i) => {
-          const color = m.type === "tp" ? "#34d399" : m.type === "sl" ? "#f87171" : m.type === "entry" ? "#a3e635" : m.type === "expired" ? "#facc15" : "#fb923c"
+          const color = m.type === "tp" ? "#34d399" : m.type === "sl" ? "#f87171" : m.type === "entry" ? "#a3e635" : m.type === "expired" ? "#facc15" : m.type === "close" ? "#c084fc" : "#fb923c"
           return (
             <g key={i}>
               <circle cx={m.cx} cy={m.cy} r={5} fill={color} fillOpacity={0.9} />
@@ -1662,7 +1663,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                 <input type="number" step="any" className={inp} placeholder="e.g. 2400" value={priceMax} onChange={e => setPriceMax(e.target.value)} />
               </div>
               <div className="pt-6">
-                <button type="button" onClick={() => { setPricePath([]); setTEvents([]); setSimResult(null) }}
+                <button type="button" onClick={() => { setPricePath([]); setSimResult(null) }}
                   className="px-3 py-2.5 rounded-xl border border-white/8 text-xs text-white/30 hover:text-white/60 hover:border-white/15 transition-all">
                   Clear
                 </button>
@@ -1680,10 +1681,21 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                   <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#fb923c] opacity-50"></span> Deleted</span>
                 </div>
                 <div className="flex-1" />
+                {tEvents.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    {tEvents.map((_, i) => (
+                      <button key={i} type="button"
+                        onClick={() => setTEvents(prev => prev.filter((__, j) => j !== i))}
+                        className="text-[9px] text-orange-400/60 hover:text-orange-400 border border-orange-400/20 hover:border-orange-400/40 rounded px-1.5 py-0.5 transition-all">
+                        del {i + 1} ✕
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button type="button"
                   onClick={() => setAddEventMode(v => !v)}
                   className={`px-3 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${addEventMode ? "border-orange-400/30 bg-orange-400/[0.08] text-orange-300" : "border-white/8 text-white/35 hover:border-white/15 hover:text-white/60"}`}>
-                  {addEventMode ? "Click chart to place deletion event" : "+ Add deletion event"}
+                  {addEventMode ? "Click chart to place" : "+ Add deletion event"}
                 </button>
               </div>
             </div>
