@@ -1021,7 +1021,8 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     const { x, y } = getSvgCoords(e)
     if (addEventMode) {
       const pt = xyToPricePt(x, y, pMin, pMax)
-      setTEvents(prev => [...prev, { t: pt.t, type: "signal_deleted" }])
+      setTEvents([{ t: pt.t, type: "signal_deleted" }])
+      setAddEventMode(false)
       return
     }
     setDrawing(true)
@@ -1682,15 +1683,11 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                 </div>
                 <div className="flex-1" />
                 {tEvents.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    {tEvents.map((_, i) => (
-                      <button key={i} type="button"
-                        onClick={() => setTEvents(prev => prev.filter((__, j) => j !== i))}
-                        className="text-[9px] text-orange-400/60 hover:text-orange-400 border border-orange-400/20 hover:border-orange-400/40 rounded px-1.5 py-0.5 transition-all">
-                        del {i + 1} ✕
-                      </button>
-                    ))}
-                  </div>
+                  <button type="button"
+                    onClick={() => setTEvents([])}
+                    className="text-[9px] text-orange-400/60 hover:text-orange-400 border border-orange-400/20 hover:border-orange-400/40 rounded px-1.5 py-0.5 transition-all">
+                    deletion event ✕
+                  </button>
                 )}
                 <button type="button"
                   onClick={() => setAddEventMode(v => !v)}
