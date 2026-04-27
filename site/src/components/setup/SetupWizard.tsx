@@ -1041,7 +1041,18 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     })
   }
 
-  function handleSvgMouseUp() { setDrawing(false) }
+  function handleSvgMouseUp() {
+    setDrawing(false)
+    if (pricePath.length < 2) return
+    const prices = pricePath.map(p => p.price)
+    const dMin = Math.min(...prices)
+    const dMax = Math.max(...prices)
+    const range = dMax - dMin || 1
+    const margin = range * 0.08
+    const decs = range < 0.005 ? 5 : range < 0.05 ? 4 : range < 0.5 ? 3 : range < 5 ? 2 : range < 50 ? 1 : 0
+    setPriceMin((dMin - margin).toFixed(decs))
+    setPriceMax((dMax + margin).toFixed(decs))
+  }
 
   async function handleRunSim() {
     if (!activeMsg.trim() || pricePath.length < 2) return
