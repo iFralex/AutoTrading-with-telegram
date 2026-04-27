@@ -941,15 +941,16 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
     }
   }, [data.loginKey, data.groupId])
 
-  // Pre-fill price range from extraction result
+  // Pre-fill price range from all extracted signals
   useEffect(() => {
     if (extracted.length > 0 && !priceMin && !priceMax) {
-      const sig = extracted[0]
-      const levels = [
-        sig.entry_price instanceof Array ? sig.entry_price[0] : sig.entry_price,
-        sig.entry_price instanceof Array ? sig.entry_price[1] : null,
-        sig.stop_loss, sig.take_profit,
-      ].filter((v): v is number => typeof v === "number")
+      const levels: number[] = []
+      for (const sig of extracted) {
+        if (Array.isArray(sig.entry_price)) levels.push(sig.entry_price[0], sig.entry_price[1])
+        else if (sig.entry_price != null) levels.push(sig.entry_price)
+        if (sig.stop_loss != null) levels.push(sig.stop_loss)
+        if (sig.take_profit != null) levels.push(sig.take_profit)
+      }
       if (levels.length >= 2) {
         const range  = Math.max(...levels) - Math.min(...levels)
         const margin = range * 0.1
@@ -1153,8 +1154,10 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       ? pricePath.map((pt, i) => `${i === 0 ? "M" : "L"} ${tToX(pt.t).toFixed(1)} ${priceToY(pt.price, pMin, pMax).toFixed(1)}`).join(" ")
       : null
 
-    // Grid lines
+    // Grid lines — dynamic decimal count based on step magnitude
     const gridPrices = hasRange ? Array.from({ length: 5 }, (_, i) => pMin + (pMax - pMin) * i / 4) : []
+    const step = hasRange ? (pMax - pMin) / 4 : 1
+    const labelDecs = step < 0.0005 ? 6 : step < 0.005 ? 5 : step < 0.05 ? 4 : step < 0.5 ? 3 : step < 5 ? 2 : step < 50 ? 1 : 0
 
     // Sim event markers on path
     const simMarkers: { cx: number; cy: number; type: string; pnl?: number }[] = []
@@ -1184,31 +1187,30 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
           return (
             <g key={i}>
               <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="white" strokeOpacity={0.04} strokeDasharray="2,3" />
-              <text x={CHART_PAD.left - 4} y={y + 3.5} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{p.toFixed(5)}</text>
+              <text x={CHART_PAD.left - 4} y={y + 3.5} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{p.toFixed(labelDecs)}</text>
             </g>
           )
         })}
 
-        {/* Signal level lines */}
-        {extracted.length > 0 && hasRange && extracted[0].stop_loss !== null && (
-          <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
-            y1={priceToY(extracted[0].stop_loss!, pMin, pMax)} y2={priceToY(extracted[0].stop_loss!, pMin, pMax)}
-            stroke="#f87171" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />
-        )}
-        {extracted.length > 0 && hasRange && extracted[0].take_profit !== null && (
-          <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
-            y1={priceToY(extracted[0].take_profit!, pMin, pMax)} y2={priceToY(extracted[0].take_profit!, pMin, pMax)}
-            stroke="#34d399" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />
-        )}
-        {extracted.length > 0 && hasRange && extracted[0].entry_price !== null && (
-          (() => {
-            const ep = extracted[0].entry_price
-            const epVal = Array.isArray(ep) ? (ep[0] + ep[1]) / 2 : ep!
-            return <line x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right}
-              y1={priceToY(epVal, pMin, pMax)} y2={priceToY(epVal, pMin, pMax)}
-              stroke="#a3e635" strokeOpacity={0.4} strokeDasharray="4,3" strokeWidth={1} />
-          })()
-        )}
+        {/* Signal level lines — all extracted signals */}
+        {hasRange && extracted.flatMap((sig, si) => {
+          const lines: React.ReactNode[] = []
+          if (sig.stop_loss != null) {
+            const y = priceToY(sig.stop_loss, pMin, pMax)
+            lines.push(<line key={`sl-${si}`} x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="#f87171" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />)
+          }
+          if (sig.take_profit != null) {
+            const y = priceToY(sig.take_profit, pMin, pMax)
+            lines.push(<line key={`tp-${si}`} x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="#34d399" strokeOpacity={0.5} strokeDasharray="4,3" strokeWidth={1} />)
+          }
+          if (sig.entry_price != null) {
+            const ep = sig.entry_price
+            const epVal = Array.isArray(ep) ? (ep[0] + ep[1]) / 2 : ep
+            const y = priceToY(epVal, pMin, pMax)
+            lines.push(<line key={`ep-${si}`} x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={y} y2={y} stroke="#a3e635" strokeOpacity={0.4} strokeDasharray="4,3" strokeWidth={1} />)
+          }
+          return lines
+        })}
 
         {/* Drawn path */}
         {pathD && (
