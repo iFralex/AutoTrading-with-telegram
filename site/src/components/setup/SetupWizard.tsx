@@ -1044,7 +1044,14 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   function handleSvgMouseUp() {
     setDrawing(false)
     if (pricePath.length < 2) return
-    const prices = pricePath.map(p => p.price)
+    // Normalize t to [0, 1] so the path always fills the full chart width
+    const tMin = Math.min(...pricePath.map(p => p.t))
+    const tMax = Math.max(...pricePath.map(p => p.t))
+    const tRange = tMax - tMin || 1
+    const normalized = pricePath.map(p => ({ t: (p.t - tMin) / tRange, price: p.price }))
+    setPricePath(normalized)
+    // Normalize pMin/pMax to exact data range so event markers align perfectly
+    const prices = normalized.map(p => p.price)
     const dMin = Math.min(...prices)
     const dMax = Math.max(...prices)
     const range = dMax - dMin || 1
