@@ -1010,6 +1010,9 @@ async def _sim_full(
                     pnl = _calc_pnl(order_type, order_open_price, live_sl, lot, symbol, symbol_specs)
                     total_pnl += pnl
                     state.remove_position(position_ticket)
+                    state.balance    += pnl
+                    state.equity      = state.balance
+                    state.free_margin = state.balance
                     sig_events.append({"t": t_norm, "type": "sl", "price": live_sl,
                                        "pnl": round(pnl, 2),
                                        "description": f"Stop Loss @ {live_sl:.5f}  ({pnl:+.2f})"})
@@ -1024,6 +1027,9 @@ async def _sim_full(
                     pnl = _calc_pnl(order_type, order_open_price, live_tp, lot, symbol, symbol_specs)
                     total_pnl += pnl
                     state.remove_position(position_ticket)
+                    state.balance    += pnl
+                    state.equity      = state.balance
+                    state.free_margin = state.balance
                     sig_events.append({"t": t_norm, "type": "tp", "price": live_tp,
                                        "pnl": round(pnl, 2),
                                        "description": f"Take Profit @ {live_tp:.5f}  ({pnl:+.2f})"})
@@ -1054,6 +1060,9 @@ async def _sim_full(
             if position_ticket and state.get_position(position_ticket) is None:
                 pnl = _calc_pnl(order_type, order_open_price, price, lot, symbol, symbol_specs)
                 total_pnl += pnl
+                state.balance     += pnl
+                state.equity       = state.balance
+                state.free_margin  = state.balance
                 sig_events.append({"t": t_norm, "type": "close", "price": price,
                                    "pnl": round(pnl, 2),
                                    "description": f"Position closed by AI @ {price:.5f}  ({pnl:+.2f})"})
