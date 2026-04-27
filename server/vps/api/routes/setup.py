@@ -1130,6 +1130,11 @@ async def simulate_full_endpoint(
                 "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
                 f"Source message:\n{body.message}\n\n"
                 f"Signals to evaluate:\n{sigs_text}\n\n"
+                "IMPORTANT: entry_price is the PENDING ORDER trigger price, not the current "
+                "market price. The bot will place a limit/stop order and wait for price to "
+                "reach entry_price before opening the trade. Do NOT reject a signal solely "
+                "because the current market price differs from entry_price or is on the wrong "
+                "side of SL — that is expected for pending orders.\n\n"
                 "For each signal call approve_signal, reject_signal or modify_signal.\n"
                 "If you call no tool for a signal, it will be approved by default.\n"
                 "Use read tools if your strategy requires it.\n\n"
@@ -1215,8 +1220,7 @@ async def simulate_full_endpoint(
                     if d.get("modified_sl"):   sig_copy["stop_loss"]   = d["modified_sl"]
                     if d.get("modified_tp"):   sig_copy["take_profit"] = d["modified_tp"]
                 approved_sigs.append(sig_copy)
-            if approved_sigs:
-                signals_for_sim = approved_sigs
+            signals_for_sim = approved_sigs  # may be empty if all rejected
 
         except Exception as exc:
             logger.warning("simulate_full_endpoint: pretrade AI failed: %s", exc)
@@ -1314,6 +1318,11 @@ async def simulate_pretrade_endpoint(
             "EVENT: New trading signals received. You must evaluate ALL of them.\n\n"
             f"Source message:\n{body.message}\n\n"
             f"Signals to evaluate:\n{sigs_text}\n\n"
+            "IMPORTANT: entry_price is the PENDING ORDER trigger price, not the current "
+            "market price. The bot places a limit/stop order and waits for price to reach "
+            "entry_price before opening the trade. Do NOT reject a signal solely because "
+            "the current market price differs from entry_price or is on the wrong side of "
+            "SL — that is expected for pending orders.\n\n"
             "For each signal call approve_signal, reject_signal or modify_signal.\n"
             "If you call no tool for a signal, it will be approved by default.\n"
             "Use read tools (get_account_info, get_daily_pnl, etc.) if your strategy requires it.\n\n"

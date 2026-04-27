@@ -1980,11 +1980,16 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                   disabled={pretradeLoading}
                   className="w-full flex items-center justify-center gap-2 border border-violet-400/25 bg-violet-400/[0.06] hover:bg-violet-400/[0.1] text-violet-300 font-semibold text-xs rounded-xl py-2.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                   {pretradeLoading && <Spin />}
-                  {pretradeLoading ? "Running AI pre_trade…" : "Run AI pre_trade strategy"}
+                  {pretradeLoading ? "Running AI pre_trade…" : "Run AI pre_trade strategy (standalone)"}
                 </button>
+                {simResult && (
+                  <p className="text-[9px] text-violet-300/35 text-center -mt-1">
+                    Pre-trade already included in the full simulation above
+                  </p>
+                )}
 
-                {/* Pretrade results */}
-                {pretradeResult && (
+                {/* Pretrade results — shown only for standalone runs (not when full sim already ran) */}
+                {pretradeResult && !simResult && (
                   <div className="space-y-3">
                     {/* Decisions */}
                     <div className="space-y-2">
