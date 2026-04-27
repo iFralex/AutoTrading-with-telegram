@@ -1664,7 +1664,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                 <input type="number" step="any" className={inp} placeholder="e.g. 2400" value={priceMax} onChange={e => setPriceMax(e.target.value)} />
               </div>
               <div className="pt-6">
-                <button type="button" onClick={() => { setPricePath([]); setSimResult(null) }}
+                <button type="button" onClick={() => { setPricePath([]); setTEvents([]); setSimResult(null) }}
                   className="px-3 py-2.5 rounded-xl border border-white/8 text-xs text-white/30 hover:text-white/60 hover:border-white/15 transition-all">
                   Clear
                 </button>
