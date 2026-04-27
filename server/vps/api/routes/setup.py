@@ -377,7 +377,7 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
         order_open_price: float | None = None
 
         for i, pt in enumerate(price_path):
-            t_norm = i / max(n - 1, 1)
+            t_norm = float(pt.get("t", i / max(n - 1, 1)))
             price = float(pt.get("price", 0))
 
             if state in ("closed", "deleted"):
@@ -903,7 +903,7 @@ async def _sim_full(
         sig_events: list[dict]         = []
 
         for i, pt in enumerate(price_path):
-            t_norm = i / max(n - 1, 1)
+            t_norm = float(pt.get("t", i / max(n - 1, 1)))
             price  = float(pt.get("price", 0))
 
             if trade_state in ("closed", "deleted"):
