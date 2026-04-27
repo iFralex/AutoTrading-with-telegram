@@ -403,8 +403,11 @@ def _sim_price_events(signals, price_path, timeline_events, default_lot, deletio
                                     "description": f"Market {order_type} opened @ {price:.5f}"})
 
             elif state == "pending" and actual_entry is not None:
-                hit = (order_type == "BUY" and price <= actual_entry) or \
-                      (order_type == "SELL" and price >= actual_entry)
+                prev_price = float(price_path[i - 1].get("price", 0)) if i > 0 else None
+                hit = (
+                    prev_price is not None
+                    and (prev_price - actual_entry) * (price - actual_entry) <= 0
+                )
                 if hit:
                     order_open_price = actual_entry
                     state = "open"
