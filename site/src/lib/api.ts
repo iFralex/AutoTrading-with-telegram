@@ -595,8 +595,10 @@ export const api = {
     event_data?: Record<string, unknown>
     mock_state?: {
       balance?: number; equity?: number; free_margin?: number; leverage?: number
-      currency?: string; open_positions?: unknown[]; daily_pnl?: number
-      weekly_pnl?: number; monthly_pnl?: number
+      currency?: string; server?: string
+      daily_pnl?: number; weekly_pnl?: number; monthly_pnl?: number
+      open_positions?: unknown[]; pending_orders?: unknown[]
+      prices?: Record<string, unknown>
     }
   }) {
     return call<{

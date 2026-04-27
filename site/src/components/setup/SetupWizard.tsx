@@ -836,6 +836,9 @@ type PretradeResult = {
   event_type: string; decisions: PretradeDecision[]
   tool_calls: PretradeToolCall[]; final_response: string
 }
+type MockPos   = { ticket: string; symbol: string; order_type: string; lots: string; profit: string }
+type MockOrd   = { ticket: string; symbol: string; order_type: string; lots: string; price: string }
+type MockPrice = { symbol: string; bid: string; ask: string; spread: string }
 
 const CHART_W = 560
 const CHART_H = 200
@@ -913,20 +916,24 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   const [simResult, setSimResult]   = useState<SimResult | null>(null)
 
   // AI strategy mock panel
-  const [mockBalance,    setMockBalance]    = useState(() => data.mt5Balance || "10000")
-  const [mockEquity,     setMockEquity]     = useState(() => data.mt5Balance || "10000")
-  const [mockFreeMargin, setMockFreeMargin] = useState(() => data.mt5Balance || "10000")
-  const [mockLeverage,   setMockLeverage]   = useState("100")
-  const [mockCurrency,   setMockCurrency]   = useState(() => data.mt5Currency || "USD")
-  const [mockPositions,  setMockPositions]  = useState("0")
-  const [mockDailyPnl,   setMockDailyPnl]   = useState("0")
-  const [mockWeeklyPnl,  setMockWeeklyPnl]  = useState("0")
-  const [mockMonthlyPnl, setMockMonthlyPnl] = useState("0")
-  const [pretradeLoading, setPretradeLoading] = useState(false)
-  const [pretradeResult,  setPretradeResult]  = useState<PretradeResult | null>(null)
+  const [mockBalance,       setMockBalance]       = useState(() => data.mt5Balance || "10000")
+  const [mockEquity,        setMockEquity]        = useState(() => data.mt5Balance || "10000")
+  const [mockFreeMargin,    setMockFreeMargin]    = useState(() => data.mt5Balance || "10000")
+  const [mockLeverage,      setMockLeverage]      = useState("100")
+  const [mockCurrency,      setMockCurrency]      = useState(() => data.mt5Currency || "USD")
+  const [mockServer,        setMockServer]        = useState("SimBroker-Demo")
+  const [mockDailyPnl,      setMockDailyPnl]      = useState("0")
+  const [mockWeeklyPnl,     setMockWeeklyPnl]     = useState("0")
+  const [mockMonthlyPnl,    setMockMonthlyPnl]    = useState("0")
+  const [mockOpenPositions, setMockOpenPositions] = useState<MockPos[]>([])
+  const [mockPendingOrders, setMockPendingOrders] = useState<MockOrd[]>([])
+  const [mockSymbolPrices,  setMockSymbolPrices]  = useState<MockPrice[]>([])
+  const [openMockSec,       setOpenMockSec]        = useState<string | null>(null)
+  const [pretradeLoading,   setPretradeLoading]   = useState(false)
+  const [pretradeResult,    setPretradeResult]    = useState<PretradeResult | null>(null)
   const [expandedToolCalls, setExpandedToolCalls] = useState(false)
-  const [eventSimLoading, setEventSimLoading] = useState<Record<string, boolean>>({})
-  const [eventSimResults, setEventSimResults] = useState<Record<string, PretradeResult>>({})
+  const [eventSimLoading,   setEventSimLoading]   = useState<Record<string, boolean>>({})
+  const [eventSimResults,   setEventSimResults]   = useState<Record<string, PretradeResult>>({})
 
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -959,6 +966,18 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
       }
     }
   }, [extracted, priceMin, priceMax])
+
+  // Pre-populate symbol prices from extracted signals (only new symbols)
+  useEffect(() => {
+    if (extracted.length === 0) return
+    const syms = [...new Set(extracted.map(s => s.symbol).filter(Boolean))]
+    setMockSymbolPrices(prev => {
+      const existing = new Set(prev.map(p => p.symbol))
+      const toAdd = syms.filter(s => !existing.has(s))
+      if (toAdd.length === 0) return prev
+      return [...prev, ...toAdd.map(s => ({ symbol: s, bid: "", ask: "", spread: "" }))]
+    })
+  }, [extracted])
 
   const activeMsg = selectedMsg || pasteMsg
 
@@ -1052,18 +1071,44 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
   }
 
   function buildMockState() {
+    const prices: Record<string, unknown> = {}
+    for (const sp of mockSymbolPrices) {
+      if (!sp.symbol) continue
+      const bid = parseFloat(sp.bid) || undefined
+      const ask = parseFloat(sp.ask) || undefined
+      if (bid || ask) {
+        prices[sp.symbol] = {
+          bid: bid ?? ask, ask: ask ?? bid,
+          spread_pips: parseFloat(sp.spread) || 0,
+          last: ((bid ?? 0) + (ask ?? 0)) / (bid && ask ? 2 : 1),
+        }
+      }
+    }
     return {
-      balance: parseFloat(mockBalance) || 10000,
-      equity: parseFloat(mockEquity) || 10000,
-      free_margin: parseFloat(mockFreeMargin) || 10000,
-      leverage: parseInt(mockLeverage) || 100,
-      currency: mockCurrency || "USD",
-      open_positions: Array.from({ length: parseInt(mockPositions) || 0 }, (_, i) => ({
-        ticket: 100 + i, symbol: "XAUUSD", order_type: "BUY", lots: 0.1, profit: 0,
+      balance:       parseFloat(mockBalance)    || 10000,
+      equity:        parseFloat(mockEquity)     || 10000,
+      free_margin:   parseFloat(mockFreeMargin) || 10000,
+      leverage:      parseInt(mockLeverage)     || 100,
+      currency:      mockCurrency  || "USD",
+      server:        mockServer    || "SimBroker-Demo",
+      daily_pnl:     parseFloat(mockDailyPnl)    || 0,
+      weekly_pnl:    parseFloat(mockWeeklyPnl)   || 0,
+      monthly_pnl:   parseFloat(mockMonthlyPnl)  || 0,
+      open_positions: mockOpenPositions.map((p, i) => ({
+        ticket:     parseInt(p.ticket)  || 100 + i,
+        symbol:     p.symbol,
+        order_type: p.order_type || "BUY",
+        lots:       parseFloat(p.lots)   || 0.1,
+        profit:     parseFloat(p.profit) || 0,
       })),
-      daily_pnl: parseFloat(mockDailyPnl) || 0,
-      weekly_pnl: parseFloat(mockWeeklyPnl) || 0,
-      monthly_pnl: parseFloat(mockMonthlyPnl) || 0,
+      pending_orders: mockPendingOrders.map((o, i) => ({
+        ticket:     parseInt(o.ticket) || 200 + i,
+        symbol:     o.symbol,
+        order_type: o.order_type || "BUY_LIMIT",
+        lots:       parseFloat(o.lots)  || 0.01,
+        price:      parseFloat(o.price) || 0,
+      })),
+      prices,
     }
   }
 
@@ -1698,44 +1743,143 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
                   <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">AI Strategy Simulation</span>
                 </div>
 
-                {/* Mock account state */}
-                <div>
-                  <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">Mock MT5 account state</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { label: "Balance", value: mockBalance, set: setMockBalance },
-                      { label: "Equity", value: mockEquity, set: setMockEquity },
-                      { label: "Free margin", value: mockFreeMargin, set: setMockFreeMargin },
-                      { label: "Leverage", value: mockLeverage, set: setMockLeverage },
-                      { label: "Currency", value: mockCurrency, set: setMockCurrency, text: true },
-                      { label: "Open positions", value: mockPositions, set: setMockPositions, integer: true },
-                    ].map(f => (
-                      <div key={f.label}>
-                        <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
-                        <input
-                          type={f.text ? "text" : f.integer ? "number" : "number"}
-                          step={f.text || f.integer ? undefined : "any"}
-                          value={f.value}
-                          onChange={e => f.set(e.target.value)}
-                          className="w-full bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-violet-400/30 transition-all"
-                        />
+                {/* Mock MT5 context — collapsible sections */}
+                {(() => {
+                  const mockInp = "w-full bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-violet-400/30 transition-all"
+                  const secBtn = (key: string, label: string, badge?: string) => (
+                    <button type="button" onClick={() => setOpenMockSec(v => v === key ? null : key)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.05] border border-white/6 transition-all">
+                      <span className="text-[10px] font-semibold text-white/40 uppercase tracking-wider">{label}</span>
+                      <div className="flex items-center gap-2">
+                        {badge && <span className="text-[9px] text-white/25">{badge}</span>}
+                        <svg className={`w-3 h-3 text-white/20 transition-transform ${openMockSec === key ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                       </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
-                    {[
-                      { label: "Daily P&L", value: mockDailyPnl, set: setMockDailyPnl },
-                      { label: "Weekly P&L", value: mockWeeklyPnl, set: setMockWeeklyPnl },
-                      { label: "Monthly P&L", value: mockMonthlyPnl, set: setMockMonthlyPnl },
-                    ].map(f => (
-                      <div key={f.label}>
-                        <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
-                        <input type="number" step="any" value={f.value} onChange={e => f.set(e.target.value)}
-                          className="w-full bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-violet-400/30 transition-all" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                    </button>
+                  )
+                  return (
+                    <div className="space-y-1.5">
+                      {/* Account */}
+                      {secBtn("account", "Account", `${mockCurrency} ${parseFloat(mockBalance).toLocaleString()}`)}
+                      {openMockSec === "account" && (
+                        <div className="px-1 pb-1 space-y-2">
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              { label: "Balance", value: mockBalance, set: setMockBalance },
+                              { label: "Equity", value: mockEquity, set: setMockEquity },
+                              { label: "Free margin", value: mockFreeMargin, set: setMockFreeMargin },
+                              { label: "Leverage", value: mockLeverage, set: setMockLeverage },
+                              { label: "Currency", value: mockCurrency, set: setMockCurrency, text: true },
+                              { label: "Server", value: mockServer, set: setMockServer, text: true },
+                            ] as const).map(f => (
+                              <div key={f.label}>
+                                <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
+                                <input type={"text" in f && f.text ? "text" : "number"} step="any" value={f.value}
+                                  onChange={e => f.set(e.target.value)} className={mockInp} />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              { label: "Daily P&L", value: mockDailyPnl, set: setMockDailyPnl },
+                              { label: "Weekly P&L", value: mockWeeklyPnl, set: setMockWeeklyPnl },
+                              { label: "Monthly P&L", value: mockMonthlyPnl, set: setMockMonthlyPnl },
+                            ] as const).map(f => (
+                              <div key={f.label}>
+                                <label className="text-[9px] text-white/25 uppercase tracking-wider mb-0.5 block">{f.label}</label>
+                                <input type="number" step="any" value={f.value} onChange={e => f.set(e.target.value)} className={mockInp} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Open positions */}
+                      {secBtn("positions", "Open positions", mockOpenPositions.length > 0 ? `${mockOpenPositions.length} open` : "none")}
+                      {openMockSec === "positions" && (
+                        <div className="px-1 pb-1 space-y-1.5">
+                          {mockOpenPositions.map((pos, pi) => (
+                            <div key={pi} className="flex gap-1.5 items-center">
+                              <input placeholder="Symbol" value={pos.symbol} onChange={e => setMockOpenPositions(p => p.map((x, i) => i === pi ? { ...x, symbol: e.target.value.toUpperCase() } : x))}
+                                className={`${mockInp} w-24`} />
+                              <div className="flex rounded-lg border border-white/8 overflow-hidden shrink-0">
+                                {(["BUY","SELL"] as const).map(t => (
+                                  <button key={t} type="button" onClick={() => setMockOpenPositions(p => p.map((x, i) => i === pi ? { ...x, order_type: t } : x))}
+                                    className={`px-2 py-1.5 text-[10px] font-bold transition-all ${pos.order_type === t ? t === "BUY" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400" : "text-white/25 hover:text-white/50"}`}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                              <input placeholder="Lots" type="number" step="0.01" value={pos.lots} onChange={e => setMockOpenPositions(p => p.map((x, i) => i === pi ? { ...x, lots: e.target.value } : x))}
+                                className={`${mockInp} w-16`} />
+                              <input placeholder="Profit" type="number" step="any" value={pos.profit} onChange={e => setMockOpenPositions(p => p.map((x, i) => i === pi ? { ...x, profit: e.target.value } : x))}
+                                className={`${mockInp} w-20`} />
+                              <input placeholder="Ticket" type="number" value={pos.ticket} onChange={e => setMockOpenPositions(p => p.map((x, i) => i === pi ? { ...x, ticket: e.target.value } : x))}
+                                className={`${mockInp} w-16`} />
+                              <button type="button" onClick={() => setMockOpenPositions(p => p.filter((_, i) => i !== pi))}
+                                className="text-white/20 hover:text-red-400 transition-colors shrink-0 px-1">✕</button>
+                            </div>
+                          ))}
+                          <button type="button"
+                            onClick={() => setMockOpenPositions(p => [...p, { ticket: String(100 + p.length), symbol: extracted[0]?.symbol || "XAUUSD", order_type: "BUY", lots: "0.1", profit: "0" }])}
+                            className="text-[10px] text-violet-400/70 hover:text-violet-400 transition-colors">+ Add position</button>
+                        </div>
+                      )}
+
+                      {/* Pending orders */}
+                      {secBtn("pending", "Pending orders", mockPendingOrders.length > 0 ? `${mockPendingOrders.length} pending` : "none")}
+                      {openMockSec === "pending" && (
+                        <div className="px-1 pb-1 space-y-1.5">
+                          {mockPendingOrders.map((ord, oi) => (
+                            <div key={oi} className="flex gap-1.5 items-center">
+                              <input placeholder="Symbol" value={ord.symbol} onChange={e => setMockPendingOrders(p => p.map((x, i) => i === oi ? { ...x, symbol: e.target.value.toUpperCase() } : x))}
+                                className={`${mockInp} w-24`} />
+                              <select value={ord.order_type} onChange={e => setMockPendingOrders(p => p.map((x, i) => i === oi ? { ...x, order_type: e.target.value } : x))}
+                                className="bg-white/[0.04] border border-white/8 rounded-lg px-2 py-1.5 text-xs text-white/70 font-mono focus:outline-none focus:border-violet-400/30 transition-all">
+                                {["BUY_LIMIT","SELL_LIMIT","BUY_STOP","SELL_STOP"].map(t => <option key={t} value={t}>{t}</option>)}
+                              </select>
+                              <input placeholder="Lots" type="number" step="0.01" value={ord.lots} onChange={e => setMockPendingOrders(p => p.map((x, i) => i === oi ? { ...x, lots: e.target.value } : x))}
+                                className={`${mockInp} w-16`} />
+                              <input placeholder="Price" type="number" step="any" value={ord.price} onChange={e => setMockPendingOrders(p => p.map((x, i) => i === oi ? { ...x, price: e.target.value } : x))}
+                                className={`${mockInp} w-24`} />
+                              <input placeholder="Ticket" type="number" value={ord.ticket} onChange={e => setMockPendingOrders(p => p.map((x, i) => i === oi ? { ...x, ticket: e.target.value } : x))}
+                                className={`${mockInp} w-16`} />
+                              <button type="button" onClick={() => setMockPendingOrders(p => p.filter((_, i) => i !== oi))}
+                                className="text-white/20 hover:text-red-400 transition-colors shrink-0 px-1">✕</button>
+                            </div>
+                          ))}
+                          <button type="button"
+                            onClick={() => setMockPendingOrders(p => [...p, { ticket: String(200 + p.length), symbol: extracted[0]?.symbol || "XAUUSD", order_type: "BUY_LIMIT", lots: "0.01", price: "" }])}
+                            className="text-[10px] text-violet-400/70 hover:text-violet-400 transition-colors">+ Add order</button>
+                        </div>
+                      )}
+
+                      {/* Symbol prices */}
+                      {secBtn("prices", "Symbol prices", mockSymbolPrices.length > 0 ? mockSymbolPrices.map(p => p.symbol).join(", ") : "defaults")}
+                      {openMockSec === "prices" && (
+                        <div className="px-1 pb-1 space-y-1.5">
+                          <p className="text-[9px] text-white/20 italic">Leave blank to use built-in defaults. Last = (bid+ask)/2.</p>
+                          {mockSymbolPrices.map((sp, spi) => (
+                            <div key={spi} className="flex gap-1.5 items-center">
+                              <input placeholder="Symbol" value={sp.symbol} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, symbol: e.target.value.toUpperCase() } : x))}
+                                className={`${mockInp} w-24`} />
+                              <input placeholder="Bid" type="number" step="any" value={sp.bid} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, bid: e.target.value } : x))}
+                                className={`${mockInp} w-24`} />
+                              <input placeholder="Ask" type="number" step="any" value={sp.ask} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, ask: e.target.value } : x))}
+                                className={`${mockInp} w-24`} />
+                              <input placeholder="Spread" type="number" step="any" value={sp.spread} onChange={e => setMockSymbolPrices(p => p.map((x, i) => i === spi ? { ...x, spread: e.target.value } : x))}
+                                className={`${mockInp} w-20`} />
+                              <button type="button" onClick={() => setMockSymbolPrices(p => p.filter((_, i) => i !== spi))}
+                                className="text-white/20 hover:text-red-400 transition-colors shrink-0 px-1">✕</button>
+                            </div>
+                          ))}
+                          <button type="button"
+                            onClick={() => setMockSymbolPrices(p => [...p, { symbol: "", bid: "", ask: "", spread: "" }])}
+                            className="text-[10px] text-violet-400/70 hover:text-violet-400 transition-colors">+ Add symbol</button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Run pretrade button */}
                 <button type="button" onClick={handleRunPretrade}
