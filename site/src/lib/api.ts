@@ -591,6 +591,7 @@ export const api = {
     message?: string
     management_strategy?: string
     deletion_strategy?: string
+    sizing_strategy?: string
     event_type?: string
     event_data?: Record<string, unknown>
     mock_state?: {

@@ -1121,6 +1121,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         message: activeMsg,
         management_strategy: data.managementStrategy || undefined,
         deletion_strategy: data.deletionStrategy || undefined,
+        sizing_strategy: data.sizingStrategy || undefined,
         event_type: "pretrade",
         mock_state: buildMockState(),
       })
@@ -1137,6 +1138,7 @@ function RulesStep({ data, update, onNext, onBack }: StepProps) {
         message: activeMsg,
         management_strategy: data.managementStrategy || undefined,
         deletion_strategy: data.deletionStrategy || undefined,
+        sizing_strategy: data.sizingStrategy || undefined,
         event_type: evType,
         event_data: evData,
         mock_state: buildMockState(),

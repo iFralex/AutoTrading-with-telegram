@@ -477,6 +477,7 @@ class SimulatePretradeBody(BaseModel):
     message: str = ""           # original signal message (for pretrade prompt)
     management_strategy: str | None = None
     deletion_strategy: str | None = None
+    sizing_strategy: str | None = None
     event_type: str = "pretrade"   # "pretrade" | "message_deleted" | "price_level_reached"
     event_data: dict | None = None # for non-pretrade events
     mock_state: dict = {}
@@ -501,13 +502,15 @@ async def simulate_pretrade_endpoint(
     if body.event_type == "message_deleted":
         strategy = (body.deletion_strategy or "").strip()
 
-    if not strategy:
+    sizing = (body.sizing_strategy or "").strip()
+    if not strategy and not sizing:
         return {"decisions": [], "tool_calls": [], "final_response": "No strategy configured.", "event_type": body.event_type}
 
     try:
         result = await _run_mock_agent(
             client=sp._client,
             management_strategy=strategy,
+            sizing_strategy=sizing,
             signals=body.signals,
             message=body.message,
             event_type=body.event_type,
@@ -524,6 +527,7 @@ async def simulate_pretrade_endpoint(
 async def _run_mock_agent(
     client,
     management_strategy: str,
+    sizing_strategy: str,
     signals: list[dict],
     message: str,
     event_type: str,
@@ -673,6 +677,11 @@ async def _run_mock_agent(
     # ── Run Gemini agent loop with mock tools ─────────────────────────────────
     tools        = _make_tools(event_type)
     system_prompt = _build_system_prompt(management_strategy)
+    if sizing_strategy:
+        system_prompt = (
+            f"SIZING STRATEGY (use to determine lot sizes — call calculate_lot_for_risk"
+            f" or calculate_lot_for_risk_percent as required):\n{sizing_strategy}\n\n"
+        ) + system_prompt
     config = _types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=tools,  # type: ignore[arg-type]
