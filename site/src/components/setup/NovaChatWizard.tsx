@@ -37,8 +37,10 @@ const DEFAULT_ADVANCED: AdvancedSettings = {
   ecoCalendarEnabled: false, ecoCalendarWindow: 30,
 }
 
+interface ToolCall { name: string; args: Record<string, unknown> }
 interface PtEvent {
   t: number; type: string; price: number; pnl?: number; description: string
+  ai_result?: { tool_calls: ToolCall[]; final_response?: string }
 }
 interface SimSig {
   signal_index: number; symbol: string; order_type: string
@@ -850,6 +852,16 @@ function InlineChart({
 
 // ── Sim result card ───────────────────────────────────────────────────────────
 
+function fmtToolCall(tc: ToolCall): string {
+  const args = Object.entries(tc.args)
+    .map(([k, v]) => {
+      if (typeof v === "number") return `${k}=${Number.isInteger(v) ? v : Number(v).toFixed(5)}`
+      return `${k}=${v}`
+    })
+    .join(", ")
+  return `${tc.name}(${args})`
+}
+
 function SimResultCard({ result }: { result: SimData }) {
   const pnl = result.total_pnl
   const pnlColor = pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : "text-white/45"
@@ -860,12 +872,15 @@ function SimResultCard({ result }: { result: SimData }) {
         <span className={`font-bold text-sm ${pnlColor}`}>{pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} USD</span>
       </div>
       {result.per_signal.map((sig, i) => (
-        <div key={i} className="space-y-1.5">
+        <div key={i} className="border-t border-white/6 pt-2.5 space-y-1.5 first:border-t-0 first:pt-0">
           <div className="flex items-center gap-2">
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sig.order_type === "BUY" ? "bg-emerald-500/14 text-emerald-400" : "bg-red-500/14 text-red-400"}`}>
               {sig.order_type}
             </span>
             <span className="text-xs text-white/55">{sig.symbol}</span>
+            <span className="text-[10px] text-white/28 font-mono ml-1">
+              E:{sig.entry?.toFixed(2) ?? "–"} SL:{sig.sl?.toFixed(2) ?? "–"} TP:{sig.tp?.toFixed(2) ?? "–"}
+            </span>
             <span className={`ml-auto text-xs font-semibold ${
               sig.state === "tp" ? "text-blue-400" : sig.state === "sl" ? "text-red-400" :
               sig.state === "expired" ? "text-yellow-400" : sig.state === "open" ? "text-emerald-400/60" : "text-white/38"
@@ -873,14 +888,29 @@ function SimResultCard({ result }: { result: SimData }) {
           </div>
           {sig.events.map((ev, j) => {
             const col = EVT_COLORS[ev.type] ?? "#94a3b8"
+            const tcs = ev.ai_result?.tool_calls ?? []
             return (
-              <div key={j} className="flex items-center gap-2 text-[11px] text-white/45">
-                <span style={{ color: col }} className="font-semibold uppercase w-16 shrink-0">{ev.type}</span>
-                <span className="font-mono">{ev.price.toFixed(5)}</span>
-                {ev.pnl !== undefined && (
-                  <span className={`ml-auto font-semibold ${ev.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {ev.pnl >= 0 ? "+" : ""}{ev.pnl.toFixed(2)}
-                  </span>
+              <div key={j} className="pl-1 space-y-0.5">
+                <div className="flex items-center gap-2 text-[11px] text-white/45">
+                  <span style={{ color: col }} className="font-semibold uppercase w-20 shrink-0">{ev.type.replace("_", " ")}</span>
+                  <span className="font-mono">{ev.price.toFixed(5)}</span>
+                  {ev.pnl !== undefined && (
+                    <span className={`ml-auto font-semibold ${ev.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {ev.pnl >= 0 ? "+" : ""}{ev.pnl.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                {ev.description && (
+                  <p className="text-[10px] text-white/25 pl-20 leading-tight">{ev.description}</p>
+                )}
+                {tcs.length > 0 && (
+                  <div className="pl-20 space-y-0.5">
+                    {tcs.map((tc, k) => (
+                      <p key={k} className="text-[10px] font-mono text-violet-400/70">
+                        → {fmtToolCall(tc)}
+                      </p>
+                    ))}
+                  </div>
                 )}
               </div>
             )

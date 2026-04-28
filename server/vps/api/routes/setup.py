@@ -1944,21 +1944,52 @@ learning your workflow, not a form asking for inputs."""
     if step == "sim_analysis":
         sim_result = ctx.get("sim_result", {})
         strategies = ctx.get("strategies", {})
+
+        import json as _json
+
+        # Build a human-readable event log so the AI can cite specific actions
+        def _narrative(sr: dict) -> str:
+            lines: list[str] = []
+            for sig in sr.get("per_signal", []):
+                lines.append(
+                    f"Signal #{sig['signal_index'] + 1}  {sig['order_type']} {sig['symbol']}"
+                    f"  entry={sig['entry']}  sl={sig['sl']}  tp={sig['tp']}"
+                )
+                for ev in sig.get("events", []):
+                    pnl_str = f"  P&L={ev['pnl']:+.2f}" if ev.get("pnl") is not None else ""
+                    lines.append(f"  [{ev['type'].upper()}]  price={ev['price']:.5f}{pnl_str}")
+                    if ev.get("description"):
+                        lines.append(f"    {ev['description']}")
+                    ai = ev.get("ai_result") or {}
+                    for tc in ai.get("tool_calls", []):
+                        args_str = ", ".join(f"{k}={v}" for k, v in tc.get("args", {}).items())
+                        lines.append(f"    → AI called: {tc['name']}({args_str})")
+                    if ai.get("final_response"):
+                        lines.append(f"    AI reasoning: {ai['final_response'][:300]}")
+                lines.append(f"  Final state: {sig['state']}")
+            lines.append(f"\nTotal P&L: {sr.get('total_pnl', 0):+.2f}")
+            return "\n".join(lines)
+
         system = (
             "You are Nova, a friendly AI trading assistant. "
-            "The user just ran a SIMULATION using a manually drawn price path — this is NOT real market data. "
-            "The price path was drawn by the user to test their strategies. "
-            "Analyse the result in 2-4 sentences: mention the outcome (total P&L, what happened to each signal) "
-            "and how the configured strategies performed on this drawn scenario. "
-            "NEVER give advice about the real asset's volatility, market conditions, or actual price levels — "
-            "this is a user-controlled test, not a real trade. Focus only on strategy behaviour. "
-            "Be encouraging but honest. NEVER start with a greeting. "
+            "The user just ran a SIMULATION on a manually drawn price path — NOT real market data. "
+            "You are given a detailed event log including every AI tool call the management agent made. "
+            "Write a concise per-signal narrative (3-6 sentences total) that covers:\n"
+            "  1. When each signal was entered and at what price.\n"
+            "  2. Which AI actions were taken at each price-level event (e.g. 'close_position', "
+            "'open_market_order' for a partial close, 'set_breakeven', 'modify_position') — "
+            "name the functions and explain what they mean in plain language.\n"
+            "  3. How the remaining position (if partially closed) was ultimately resolved.\n"
+            "  4. The final P&L.\n"
+            "Be specific — cite prices and function names. "
+            "Do NOT give advice about real market conditions or volatility. "
+            "Do NOT start with a greeting. "
             "Respond in the same language the user writes in."
         )
-        import json as _json
         prompt = (
-            f"Simulation result:\n{_json.dumps(sim_result, indent=2)}\n\n"
-            f"Strategies configured:\n{_json.dumps(strategies, indent=2)}"
+            f"Management strategy: {strategies.get('management') or 'none'}\n"
+            f"Deletion strategy: {strategies.get('deletion') or 'none'}\n\n"
+            f"Simulation event log:\n{_narrative(sim_result)}"
         )
         try:
             from vps.services.strategy_executor import _PRO_MODEL
