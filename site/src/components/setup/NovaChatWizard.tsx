@@ -821,7 +821,7 @@ function InlineChart({
 
       {/* Controls */}
       <div className="flex items-center gap-2 flex-wrap">
-        {hasPath && (
+        {hasPath && !simLoading && (
           <>
             <button
               onClick={() => setDeletionMode(v => !v)}
@@ -840,7 +840,7 @@ function InlineChart({
             )}
           </>
         )}
-        <GhostBtn onClick={clear} className="text-xs py-1.5 px-3">Clear</GhostBtn>
+        {!simLoading && <GhostBtn onClick={clear} className="text-xs py-1.5 px-3">Clear</GhostBtn>}
         {hasPath && (
           <PrimaryBtn onClick={onRunSim} loading={simLoading} disabled={simLoading} className="ml-auto text-sm py-2 px-4">
             {simLoading ? "Simulating…" : "Run simulation →"}
