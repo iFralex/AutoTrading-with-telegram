@@ -1047,6 +1047,19 @@ export default function NovaChatWizard() {
           // Telegram ✓ + group ✓ + MT5 ✓
           if (hasStrategies) {
             // Strategies already configured → show summary and let user refine or proceed
+            // Seed aiHistory so the AI knows what's already set when the user sends a follow-up
+            const historyContext = [
+              { role: "model" as const, text: [
+                "I have already configured the following trading strategies in a previous session:",
+                restoredStrats.sizing     ? `- Sizing:     "${restoredStrats.sizing}"`     : "- Sizing: not configured",
+                restoredStrats.management ? `- Management: "${restoredStrats.management}"` : "- Management: not configured",
+                restoredStrats.deletion   ? `- Deletion:   "${restoredStrats.deletion}"`   : "- Deletion: not configured (null)",
+                "",
+                "The user can ask to modify any of these. When outputting the <strategies> block always include all three fields.",
+              ].join("\n") }
+            ]
+            setAiHistory(historyContext)
+
             await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓, strategies ✓.`)
             await new Promise(r => setTimeout(r, 300))
             setMessages(prev => [...prev, {
