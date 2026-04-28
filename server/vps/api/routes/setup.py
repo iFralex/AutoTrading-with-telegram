@@ -1809,10 +1809,18 @@ async def nova_chat(body: NovaChatBody, request: Request):
 
     # ── tg_help ──────────────────────────────────────────────────────────────
     if step == "tg_help":
+        phone = ctx.get("phone", "")
+        phone_note = f" The user has already provided their phone number ({phone}) in a previous step, so do NOT ask for it again or mention re-entering it." if phone else ""
         system = (
-            "You are Nova, a friendly AI assistant helping a trader set up a Telegram signal bot. "
-            "Answer the user's question about Telegram setup (api_id, api_hash, phone, OTP, groups) "
-            "concisely in at most 3 sentences. Be warm and practical. Respond in the same language the user writes in."
+            "You are Nova, a concise AI assistant embedded in a web setup wizard for a Telegram trading bot. "
+            "The user is currently looking at a web form with two fields: 'API ID' (a number) and 'API Hash' "
+            "(a 32-character string). They need to retrieve these from my.telegram.org → API development tools."
+            f"{phone_note} "
+            "Answer the user's question in at most 3 sentences. "
+            "NEVER start your reply with a greeting such as 'Ciao!', 'Hello!', 'Hi!' or any other salutation — "
+            "go straight to the answer. "
+            "Do NOT mention scripts, the command line, or copying credentials anywhere other than the form fields shown on screen. "
+            "Respond in the same language the user writes in."
         )
         try:
             from vps.services.strategy_executor import _PRO_MODEL
@@ -1828,9 +1836,14 @@ async def nova_chat(body: NovaChatBody, request: Request):
     # ── mt5_help ─────────────────────────────────────────────────────────────
     if step == "mt5_help":
         system = (
-            "You are Nova, a friendly AI assistant helping a trader connect their MetaTrader 5 account. "
-            "Answer the user's question about MT5 login, password, or server name concisely in at most 3 sentences. "
-            "Be warm and practical. Respond in the same language the user writes in."
+            "You are Nova, a concise AI assistant embedded in a web setup wizard for a trading bot. "
+            "The user is filling a form with three fields: 'Login' (their MT5 account number), "
+            "'Password' (their MT5 password), and 'Server' (the broker's server name, e.g. ICMarkets-Live). "
+            "Answer the user's question in at most 3 sentences. "
+            "NEVER start your reply with a greeting such as 'Ciao!', 'Hello!', 'Hi!' or any other salutation — "
+            "go straight to the answer. "
+            "Do NOT mention scripts, the command line, or any steps outside this form. "
+            "Respond in the same language the user writes in."
         )
         try:
             from vps.services.strategy_executor import _PRO_MODEL
@@ -1863,6 +1876,7 @@ it MUST appear at the end of your message, after your conversational text:
 
 Each value is a free-text description (1-3 sentences) that will be given verbatim to an AI agent as its trading rule.
 Write "null" (the string) if the user doesn't want a rule for that strategy.
+NEVER start a reply with a greeting like "Ciao!", "Hello!" or "Hi!" — go straight to the point.
 Respond in the same language the user writes in. Be warm, concise, and practical."""
 
         try:

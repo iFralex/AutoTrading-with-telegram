@@ -713,6 +713,19 @@ function PlanForm({ onSelect }: { onSelect: (plan: "core" | "pro" | "elite") => 
   )
 }
 
+// ── Completed badge (shown when a form is submitted) ──────────────────────────
+
+function CompletedBadge() {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-white/30 py-0.5">
+      <svg className="w-3.5 h-3.5 text-emerald-400/50 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+      Completed
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function NovaChatWizard() {
@@ -724,6 +737,11 @@ export default function NovaChatWizard() {
   const [formLoading, setFormLoading] = useState(false)
   const [chatLoading, setChatLoading] = useState(false)
   const [chatInput, setChatInput] = useState("")
+  const [submittedForms, setSubmittedForms] = useState<Set<string>>(new Set())
+
+  const markSubmitted = useCallback((id: string) => {
+    setSubmittedForms(prev => new Set([...prev, id]))
+  }, [])
 
   const [sdata, setSdata] = useState<SData>({
     phone: "", apiId: "", apiHash: "", loginKey: "", userId: "",
@@ -1059,7 +1077,7 @@ export default function NovaChatWizard() {
     setChatLoading(true)
     showTyping()
     try {
-      const res = await api.novaChat({ step: "tg_help", message: msg })
+      const res = await api.novaChat({ step: "tg_help", message: msg, context: { phone: sdata.phone } })
       await novaText(res.reply, 200)
     } catch {
       await novaText("Not sure — check my.telegram.org for API credentials help.", 200)
@@ -1122,6 +1140,7 @@ export default function NovaChatWizard() {
 
   function renderMsg(msg: ChatMsg) {
     const key = msg.id
+    const done = submittedForms.has(key)
 
     if (msg.type === "typing") return <NovaBubble key={key}><TypingDots /></NovaBubble>
 
@@ -1131,28 +1150,71 @@ export default function NovaChatWizard() {
       return <NovaBubble key={key}><span>{parseMarkdown(msg.text)}</span></NovaBubble>
     }
 
-    const formLoadingActive = formLoading
-
     if (msg.type === "phone_form")
-      return <NovaBubble key={key}><PhoneForm onSubmit={handlePhone} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <PhoneForm onSubmit={p => { markSubmitted(key); handlePhone(p) }} loading={formLoading} />}
+        </NovaBubble>
+      )
 
     if (msg.type === "creds_form")
-      return <NovaBubble key={key}><CredsForm onSubmit={handleCreds} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <CredsForm onSubmit={(i, h) => { markSubmitted(key); handleCreds(i, h) }} loading={formLoading} />}
+        </NovaBubble>
+      )
 
     if (msg.type === "otp_form")
-      return <NovaBubble key={key}><OtpForm onSubmit={handleOtp} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <OtpForm onSubmit={c => { markSubmitted(key); handleOtp(c) }} loading={formLoading} />}
+        </NovaBubble>
+      )
 
     if (msg.type === "twofa_form")
-      return <NovaBubble key={key}><TwoFaForm onSubmit={handleTwoFa} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <TwoFaForm onSubmit={pw => { markSubmitted(key); handleTwoFa(pw) }} loading={formLoading} />}
+        </NovaBubble>
+      )
 
     if (msg.type === "group_form")
-      return <NovaBubble key={key}><GroupForm groups={groups} loadingGroups={groupsLoading} onSelect={handleGroupSelect} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done
+            ? <CompletedBadge />
+            : <GroupForm groups={groups} loadingGroups={groupsLoading} onSelect={(id, name) => { markSubmitted(key); handleGroupSelect(id, name) }} />
+          }
+        </NovaBubble>
+      )
 
     if (msg.type === "mt5_form")
-      return <NovaBubble key={key}><MT5Form onSubmit={handleMt5} onSkip={handleMt5Skip} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done
+            ? <CompletedBadge />
+            : <MT5Form
+                onSubmit={(l, pw, s) => { markSubmitted(key); handleMt5(l, pw, s) }}
+                onSkip={() => { markSubmitted(key); handleMt5Skip() }}
+                loading={formLoading}
+              />
+          }
+        </NovaBubble>
+      )
 
     if (msg.type === "sample_msg_form")
-      return <NovaBubble key={key}><SampleMsgForm onSubmit={handleSampleMsg} onSkip={handleSkipSim} loading={formLoadingActive} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done
+            ? <CompletedBadge />
+            : <SampleMsgForm
+                onSubmit={m => { markSubmitted(key); handleSampleMsg(m) }}
+                onSkip={() => { markSubmitted(key); handleSkipSim() }}
+                loading={formLoading}
+              />
+          }
+        </NovaBubble>
+      )
 
     if (msg.type === "chart_draw") {
       const chartMsg = msg as { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number }
@@ -1179,7 +1241,11 @@ export default function NovaChatWizard() {
     }
 
     if (msg.type === "plan_form")
-      return <NovaBubble key={key}><PlanForm onSelect={handlePlanSelect} /></NovaBubble>
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <PlanForm onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
+        </NovaBubble>
+      )
 
     return null
   }
