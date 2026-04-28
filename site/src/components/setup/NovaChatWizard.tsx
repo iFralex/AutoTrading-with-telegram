@@ -853,11 +853,8 @@ export default function NovaChatWizard() {
           // Telegram ✓ + group ✓ + MT5 ✓ → AI rules
           await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓.`)
           await novaText(
-            `Now let's configure your trading rules. I'll set up three things:\n\n` +
-            `**1. Position sizing** — e.g. *"Risk 1% of balance per trade"*, *"Fixed 0.02 lots"*\n` +
-            `**2. Trade management** — e.g. *"Move SL to breakeven at 50% toward TP"*, *"Trail SL by 20 pips"*\n` +
-            `**3. Signal deletion** — e.g. *"Close if in loss, keep if profitable"*, *"Always close immediately"*\n\n` +
-            `**How do you want the bot to size your positions?**`,
+            `Now let's configure how the bot actually trades for you. Just to set expectations: this isn't a simple order-executor — it's an AI agent that sizes positions, manages open trades (trailing stops, partial closes, breakeven moves), and handles signal deletions, all following **your** personal rules.\n\n` +
+            `Tell me: how do you currently manage trades manually — from how you size them, to what you do while they're open?`,
             800
           )
           setPhase("ai_rules")
@@ -984,22 +981,19 @@ export default function NovaChatWizard() {
       await api.saveSession({ phone: sdata.phone, mt5_login: Number(login), mt5_password: pw, mt5_server: server })
       await novaText(`Connected ✅ — **${res.account.name}**, balance: ${res.account.balance.toFixed(2)} ${res.account.currency}`)
       await novaText(
-        `Now the interesting part! 🤖 I need to teach the bot **how you trade**. I'll configure three things:\n\n` +
-        `**1. Position sizing** — how big each trade is. Examples:\n` +
-        `• *"Always use 0.01 lots"*\n` +
-        `• *"Risk 1% of my balance per trade"*\n` +
-        `• *"Size based on SL distance to risk max $50 per trade"*\n\n` +
-        `**2. Trade management** — what the bot does while a position is open. Examples:\n` +
-        `• *"Move SL to breakeven once price is 50% toward TP"*\n` +
-        `• *"Close 50% at TP1, trail the rest with a 20-pip SL"*\n` +
-        `• *"Close everything if daily loss exceeds 3%"*\n\n` +
-        `**3. Signal deletion** — what happens if the analyst deletes a signal message. Examples:\n` +
-        `• *"Close immediately, regardless of P&L"*\n` +
-        `• *"Close only if I'm in loss; keep the trade if profitable"*\n` +
-        `• *"Ignore deletions — let SL/TP handle it"*\n\n` +
-        `These rules are passed verbatim to an AI agent that acts on every signal in real time — the more specific you are, the smarter the bot behaves.\n\n` +
-        `Let's start: **how do you want the bot to size your positions?**`,
+        `Before we continue — I want to make sure you know what you're actually configuring here. 🧠\n\n` +
+        `This isn't a bot that just opens and closes orders when a signal arrives. It's an **AI agent** that reasons about every trade in real time:\n\n` +
+        `• Sizes positions based on your risk rules and the SL distance\n` +
+        `• Moves your stop-loss to breakeven or trails it while you're in a trade\n` +
+        `• Partially closes at the first target, lets the rest run\n` +
+        `• Reacts to signal deletions based on your P&L at that moment\n\n` +
+        `All of this happens automatically — following **your** rules.`,
         900
+      )
+      await novaText(
+        `To configure it well, I need to understand how you currently manage trades **manually** — before the bot does it for you.\n\n` +
+        `Tell me: when you receive a signal, how do you decide how many lots to open? And once you're in a position — do you actively manage it, or let it ride to SL/TP?`,
+        700
       )
       setPhase("ai_rules")
     } catch (ex) {
