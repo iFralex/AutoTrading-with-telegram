@@ -285,9 +285,9 @@ function GroupForm({ groups, loadingGroups, onSelect }: {
   )
 }
 
-function MT5Form({ onSubmit, onSkip, loading }: {
+function MT5Form({ onSubmit, loading }: {
   onSubmit: (login: string, pw: string, server: string) => void
-  onSkip: () => void; loading: boolean
+  loading: boolean
 }) {
   const [login, setLogin] = useState("")
   const [pw, setPw] = useState("")
@@ -308,12 +308,14 @@ function MT5Form({ onSubmit, onSkip, loading }: {
         <label className={lbl}>Server</label>
         <input className={inp} placeholder="BrokerName-Live" value={server} onChange={e => setServer(e.target.value)} />
       </div>
-      <div className="flex gap-2">
-        <PrimaryBtn onClick={() => onSubmit(login.trim(), pw, server.trim())} disabled={!login.trim() || !pw || !server.trim()} loading={loading} className="flex-1">
-          Connect MT5
-        </PrimaryBtn>
-        <GhostBtn onClick={onSkip}>Skip</GhostBtn>
-      </div>
+      <PrimaryBtn
+        onClick={() => onSubmit(login.trim(), pw, server.trim())}
+        disabled={!login.trim() || !pw || !server.trim()}
+        loading={loading}
+        className="w-full"
+      >
+        {loading ? "Verifying…" : "Verify & connect MT5"}
+      </PrimaryBtn>
     </div>
   )
 }
@@ -819,11 +821,61 @@ export default function NovaChatWizard() {
     try {
       const res = await api.getSession(phone)
       upd({ phone })
-      if (res.exists && res.setup_complete) {
-        await novaText("✅ You're already set up! Taking you to the dashboard…")
-        router.push(`/dashboard?phone=${encodeURIComponent(phone)}`)
+
+      if (res.exists) {
+        if (res.setup_complete) {
+          await novaText("✅ You're already set up! Taking you to the dashboard…")
+          router.push(`/dashboard?phone=${encodeURIComponent(phone)}`)
+          return
+        }
+
+        // Partial session — restore state and jump to the right step
+        const s = res
+        upd({
+          apiId:    String(s.api_id ?? ""),
+          apiHash:  s.api_hash ?? "",
+          loginKey: s.login_key ?? "",
+          userId:   s.user_id ?? "",
+          groupId:  s.group_id ?? "",
+          groupName: s.group_name ?? "",
+          mt5Login:  String(s.mt5_login ?? ""),
+          mt5Server: s.mt5_server ?? "",
+        })
+        if (s.sizing_strategy || s.management_strategy || s.deletion_strategy) {
+          setStrategies({
+            sizing:     s.sizing_strategy     ?? "",
+            management: s.management_strategy ?? "",
+            deletion:   s.deletion_strategy   ?? "",
+          })
+        }
+
+        if (s.user_id && s.group_id && s.mt5_login) {
+          // Telegram ✓ + group ✓ + MT5 ✓ → AI rules
+          await novaText(
+            `Welcome back! 👋 I found your previous session — **${s.group_name}** ✓, MT5 ✓.\n\nLet's configure your trading rules. **How do you want the bot to size your positions?**`
+          )
+          setPhase("ai_rules")
+        } else if (s.user_id && s.group_id) {
+          // Telegram ✓ + group ✓ → MT5
+          await novaText(`Welcome back! 👋 **${s.group_name}** is already selected ✓. Now let's connect your MetaTrader 5 account:`)
+          await novaForm("mt5_form", {}, 200)
+          setPhase("mt5")
+        } else if (s.user_id) {
+          // Telegram ✓ → group selection
+          await novaText("Welcome back! 👋 You're already authenticated. Choose the channel you want to monitor:")
+          await novaForm("group_form", {}, 200)
+          setPhase("group")
+          loadGroups(s.login_key ?? "")
+        } else {
+          // Have phone (and maybe api_id) but not authenticated → creds
+          await novaText("I found a previous session for this number. Let's pick up from the Telegram credentials:")
+          await novaForm("creds_form", {}, 200)
+          setPhase("creds")
+        }
         return
       }
+
+      // New session
       await api.saveSession({ phone })
       await novaText("Got it! To connect your Telegram account securely, I'll need your API credentials. You can find them at **my.telegram.org** → API development tools.")
       await novaForm("creds_form", {}, 250)
@@ -912,7 +964,7 @@ export default function NovaChatWizard() {
     userMsg(`Signal room: ${groupName}`)
     upd({ groupId, groupName })
     try { await api.saveSession({ phone: sdata.phone, group_id: groupId, group_name: groupName }) } catch { /* ok */ }
-    await novaText(`**${groupName}** selected! 👍 Now let's connect your MetaTrader 5 account. Fill in your credentials below, or click **Skip** to add MT5 later from the dashboard.`)
+    await novaText(`**${groupName}** selected! 👍 Now let's connect your MetaTrader 5 account:`)
     await novaForm("mt5_form", {}, 200)
     setPhase("mt5")
   }
@@ -932,12 +984,6 @@ export default function NovaChatWizard() {
     } finally {
       setFormLoading(false)
     }
-  }
-
-  async function handleMt5Skip() {
-    userMsg("Skip MT5 setup for now")
-    await novaText("No problem — you can add MT5 anytime from the dashboard.\n\nNow let's set up your trading rules. **How do you want the bot to size your positions?** (e.g. fixed 0.01 lots, 1% of balance, risk-based)")
-    setPhase("ai_rules")
   }
 
   async function handleAiRulesMsg(msg: string) {
@@ -1195,7 +1241,6 @@ export default function NovaChatWizard() {
             ? <CompletedBadge />
             : <MT5Form
                 onSubmit={(l, pw, s) => { markSubmitted(key); handleMt5(l, pw, s) }}
-                onSkip={() => { markSubmitted(key); handleMt5Skip() }}
                 loading={formLoading}
               />
           }
