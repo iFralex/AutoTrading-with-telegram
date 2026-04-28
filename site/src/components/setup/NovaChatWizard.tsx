@@ -754,14 +754,17 @@ function InlineChart({
           {sigRefLines.map((l, i) => {
             const y = parseFloat(pToY(l.price))
             if (y < 0 || y > CH) return null  // out of range
+            const priceStr = l.price.toFixed(priceDecs)
+            const labelText = `${l.label} ${priceStr}`
+            const pillW = labelText.length * 5.5 + 6
             return (
               <g key={i}>
                 <line x1="0" y1={y} x2={cw} y2={y}
                   stroke={l.color} strokeOpacity="0.50" strokeWidth="1"
                   strokeDasharray={l.dash ? "6 4" : "none"} />
-                <rect x={cw - 30} y={y - 8} width="28" height="14" fill={l.color} fillOpacity="0.15" rx="2" />
-                <text x={cw - 16} y={y + 1} fill={l.color} fillOpacity="0.90"
-                  fontSize="9" fontFamily="monospace" textAnchor="middle" dominantBaseline="middle">{l.label}</text>
+                <rect x={cw - pillW - 2} y={y - 8} width={pillW} height="14" fill={l.color} fillOpacity="0.15" rx="2" />
+                <text x={cw - pillW / 2 - 2} y={y} fill={l.color} fillOpacity="0.90"
+                  fontSize="9" fontFamily="monospace" textAnchor="middle" dominantBaseline="middle">{labelText}</text>
               </g>
             )
           })}
