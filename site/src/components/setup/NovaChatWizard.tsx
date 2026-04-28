@@ -851,8 +851,14 @@ export default function NovaChatWizard() {
 
         if (s.user_id && s.group_id && s.mt5_login) {
           // Telegram ✓ + group ✓ + MT5 ✓ → AI rules
+          await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓.`)
           await novaText(
-            `Welcome back! 👋 I found your previous session — **${s.group_name}** ✓, MT5 ✓.\n\nLet's configure your trading rules. **How do you want the bot to size your positions?**`
+            `Now let's configure your trading rules. I'll set up three things:\n\n` +
+            `**1. Position sizing** — e.g. *"Risk 1% of balance per trade"*, *"Fixed 0.02 lots"*\n` +
+            `**2. Trade management** — e.g. *"Move SL to breakeven at 50% toward TP"*, *"Trail SL by 20 pips"*\n` +
+            `**3. Signal deletion** — e.g. *"Close if in loss, keep if profitable"*, *"Always close immediately"*\n\n` +
+            `**How do you want the bot to size your positions?**`,
+            800
           )
           setPhase("ai_rules")
         } else if (s.user_id && s.group_id) {
@@ -976,7 +982,25 @@ export default function NovaChatWizard() {
       const res = await api.verifyMt5(Number(login), pw, server, sdata.phone)
       upd({ mt5Login: login, mt5Password: pw, mt5Server: server, mt5AccountName: res.account.name, mt5Balance: String(res.account.balance), mt5Currency: res.account.currency })
       await api.saveSession({ phone: sdata.phone, mt5_login: Number(login), mt5_password: pw, mt5_server: server })
-      await novaText(`Connected ✅ — **${res.account.name}**, balance: ${res.account.balance.toFixed(2)} ${res.account.currency}\n\nNow let's set up your trading rules. Tell me — **how do you want the bot to size your positions?** (e.g. fixed 0.01 lots, 1% of balance, risk-based)`)
+      await novaText(`Connected ✅ — **${res.account.name}**, balance: ${res.account.balance.toFixed(2)} ${res.account.currency}`)
+      await novaText(
+        `Now the interesting part! 🤖 I need to teach the bot **how you trade**. I'll configure three things:\n\n` +
+        `**1. Position sizing** — how big each trade is. Examples:\n` +
+        `• *"Always use 0.01 lots"*\n` +
+        `• *"Risk 1% of my balance per trade"*\n` +
+        `• *"Size based on SL distance to risk max $50 per trade"*\n\n` +
+        `**2. Trade management** — what the bot does while a position is open. Examples:\n` +
+        `• *"Move SL to breakeven once price is 50% toward TP"*\n` +
+        `• *"Close 50% at TP1, trail the rest with a 20-pip SL"*\n` +
+        `• *"Close everything if daily loss exceeds 3%"*\n\n` +
+        `**3. Signal deletion** — what happens if the analyst deletes a signal message. Examples:\n` +
+        `• *"Close immediately, regardless of P&L"*\n` +
+        `• *"Close only if I'm in loss; keep the trade if profitable"*\n` +
+        `• *"Ignore deletions — let SL/TP handle it"*\n\n` +
+        `These rules are passed verbatim to an AI agent that acts on every signal in real time — the more specific you are, the smarter the bot behaves.\n\n` +
+        `Let's start: **how do you want the bot to size your positions?**`,
+        900
+      )
       setPhase("ai_rules")
     } catch (ex) {
       await novaText(`Couldn't connect to MT5: ${ex instanceof ApiError ? ex.message : "Check your login, password, and server name."}`)
