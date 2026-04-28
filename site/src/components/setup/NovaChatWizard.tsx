@@ -499,6 +499,57 @@ function AdvancedForm({ initialValues, onSubmit, onSkip }: {
   )
 }
 
+// ── Frozen chart (static snapshot after simulation) ───────────────────────────
+
+function FrozenChart({ pricePath, simResult, pMin, pMax }: {
+  pricePath: { t: number; price: number }[]
+  simResult: SimData | null
+  pMin: number; pMax: number
+}) {
+  const tToX = (t: number) => (t * VW).toFixed(1)
+  const pToY = (p: number) => pMax === pMin ? String(VH / 2)
+    : ((1 - (p - pMin) / (pMax - pMin)) * VH).toFixed(1)
+
+  const pathD = pricePath.length >= 2
+    ? pricePath.map((p, i) => `${i === 0 ? "M" : "L"} ${tToX(p.t)} ${pToY(p.price)}`).join(" ")
+    : ""
+  const closedD = pathD
+    ? pathD + ` L ${tToX(pricePath[pricePath.length - 1].t)} ${VH} L 0 ${VH} Z`
+    : ""
+  const simEvents = simResult?.per_signal?.flatMap(s => s.events) ?? []
+  const priceRange = pMax - pMin
+  const priceDecs = priceRange < 0.005 ? 5 : priceRange < 0.05 ? 4 : priceRange < 0.5 ? 3 : priceRange < 5 ? 2 : 1
+
+  return (
+    <div className="space-y-2 w-full opacity-55" style={{ maxWidth: 500 }}>
+      <div className="relative rounded-xl overflow-hidden border border-white/8 bg-black/30" style={{ height: 140 }}>
+        <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+          <defs>
+            <linearGradient id="frozen-pgrd" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {closedD && <path d={closedD} fill="url(#frozen-pgrd)" />}
+          {pathD && <path d={pathD} fill="none" stroke="#34d399" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
+          {[0, 0.5, 1].map(f => (
+            <text key={f} x="8" y={(f * VH).toFixed(0)} dominantBaseline="middle"
+              fill="white" fillOpacity="0.18" fontSize="28" fontFamily="monospace">
+              {(pMin + (1 - f) * (pMax - pMin)).toFixed(priceDecs)}
+            </text>
+          ))}
+          {simEvents.map((ev, i) => {
+            const col = EVT_COLORS[ev.type] ?? "#94a3b8"
+            return <circle key={i} cx={tToX(ev.t)} cy={pToY(ev.price)} r="14"
+              fill={col} fillOpacity="0.70" stroke="#000" strokeWidth="2" />
+          })}
+        </svg>
+      </div>
+      {simResult && <SimResultCard result={simResult} />}
+    </div>
+  )
+}
+
 // ── Inline Chart ──────────────────────────────────────────────────────────────
 
 const EVT_COLORS: Record<string, string> = {
@@ -941,6 +992,13 @@ export default function NovaChatWizard() {
   const [simLoading, setSimLoading] = useState(false)
   const [chartPMin, setChartPMin] = useState(0)
   const [chartPMax, setChartPMax] = useState(1)
+  // Frozen charts: chart_draw messages that have been completed and should display as static snapshots
+  const [frozenCharts, setFrozenCharts] = useState<Set<string>>(new Set())
+  const chartSnapshotsRef = useRef<Map<string, { pricePath: { t: number; price: number }[]; simResult: SimData | null }>>(new Map())
+  // Track active chart message ID for snapshot storage
+  const activeChartIdRef = useRef<string | null>(null)
+  // Track last action_buttons message ID so we can disable it when showing new ones
+  const lastActionBtnIdRef = useRef<string | null>(null)
 
   // ── Message helpers ───────────────────────────────────────────────────────
 
@@ -1339,7 +1397,13 @@ export default function NovaChatWizard() {
       await novaText(
         `${countLabel} ✅\n${sigLines.join("\n")}\n\nDraw a price path on the chart to simulate market movement. The chart shows entry/SL/TP as reference lines.`
       )
-      await novaForm("chart_draw", { pMin: pMn, pMax: pMx, signals: chartSigs }, 200)
+      await new Promise(r => setTimeout(r, 200))
+      const chartId = uid()
+      activeChartIdRef.current = chartId
+      setMessages(prev => [...noTyping(prev), {
+        id: chartId, from: "nova", type: "chart_draw",
+        pMin: pMn, pMax: pMx, signals: chartSigs,
+      } as ChatMsg])
       setPhase("chart")
     } catch (ex) {
       await novaText(`Couldn't process the message: ${ex instanceof ApiError ? ex.message : "Please retry."}`)
@@ -1374,6 +1438,13 @@ export default function NovaChatWizard() {
       }
       setSimResult(res.simulation)
       setPhase("sim_done")
+      // Store snapshot for the active chart so it can be frozen later
+      if (activeChartIdRef.current) {
+        chartSnapshotsRef.current.set(activeChartIdRef.current, {
+          pricePath: [...pricePath],
+          simResult: res.simulation,
+        })
+      }
       setTimeout(async () => {
         showTyping()
         try {
@@ -1387,18 +1458,7 @@ export default function NovaChatWizard() {
           })
           await novaText(analysis.reply, 300)
         } catch { /* silent */ }
-        await new Promise(r => setTimeout(r, 500))
-        await novaText(
-          "What would you like to do next? You can **redraw the chart** to try a different scenario, **refine your strategies**, or **proceed** when you're satisfied.",
-          400
-        )
-        setMessages(prev => [...noTyping(prev), {
-          id: uid(), from: "nova", type: "action_buttons",
-          buttons: [
-            { label: "↩ Redraw chart", action: "new_simulation" },
-            { label: "Proceed to launch →", action: "proceed_from_sim", primary: true },
-          ],
-        } as ChatMsg])
+        await showNextStepButtons()
       }, 400)
     } catch (ex) {
       await novaText(`Simulation failed: ${ex instanceof ApiError ? ex.message : "Please try again."}`)
@@ -1437,6 +1497,8 @@ export default function NovaChatWizard() {
         setMessages(prev => [...noTyping(prev), {
           id: uid(), from: "nova", type: "strategies_summary", strategies: newStrats,
         } as ChatMsg])
+        // Disable previous action buttons and show the next-step prompt again
+        await showNextStepButtons()
       } else {
         await novaText(reply, 300)
       }
@@ -1448,12 +1510,46 @@ export default function NovaChatWizard() {
     }
   }
 
-  function handleNewSimulation() {
+  async function showNextStepButtons() {
+    await new Promise(r => setTimeout(r, 500))
+    await novaText(
+      "What would you like to do next? You can **redraw the chart** to try a different scenario, **refine your strategies**, or **proceed** when you're satisfied.",
+      400
+    )
+    // Disable previous action buttons
+    if (lastActionBtnIdRef.current) markSubmitted(lastActionBtnIdRef.current)
+    const btnId = uid()
+    lastActionBtnIdRef.current = btnId
+    setMessages(prev => [...noTyping(prev), {
+      id: btnId, from: "nova", type: "action_buttons",
+      buttons: [
+        { label: "↩ Redraw chart", action: "new_simulation" },
+        { label: "Proceed to launch →", action: "proceed_from_sim", primary: true },
+      ],
+    } as ChatMsg])
+  }
+
+  async function handleNewSimulation() {
+    // Freeze the current chart message (snapshot already stored in handleRunSim)
+    if (activeChartIdRef.current) {
+      setFrozenCharts(prev => new Set([...prev, activeChartIdRef.current!]))
+    }
+    // Reset shared chart state for the new canvas
     setPricePath([]); setTEvents([]); setSimResult(null)
+    // Add a fresh chart_draw message at the bottom
+    await novaText("Let's try another scenario. Draw a new price path on the chart below:", 300)
+    const chartId = uid()
+    activeChartIdRef.current = chartId
+    setMessages(prev => [...noTyping(prev), {
+      id: chartId, from: "nova", type: "chart_draw",
+      pMin: chartPMin, pMax: chartPMax, signals: chartSignals,
+    } as ChatMsg])
     setPhase("chart")
   }
 
   async function handleProceedFromSim() {
+    // Disable the action buttons that triggered this
+    if (lastActionBtnIdRef.current) markSubmitted(lastActionBtnIdRef.current)
     await novaText(
       "Almost there! 🎯 Before launching, you can optionally configure some **advanced filters** — trading hours, economic calendar protection, minimum signal confidence, and more. Or skip straight to choosing your plan.",
       500
@@ -1646,6 +1742,19 @@ export default function NovaChatWizard() {
 
     if (msg.type === "chart_draw") {
       const chartMsg = msg as { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number; signals: ChartSignal[] }
+      if (frozenCharts.has(key)) {
+        const snap = chartSnapshotsRef.current.get(key)
+        return (
+          <NovaBubble key={key}>
+            <FrozenChart
+              pricePath={snap?.pricePath ?? []}
+              simResult={snap?.simResult ?? null}
+              pMin={chartMsg.pMin}
+              pMax={chartMsg.pMax}
+            />
+          </NovaBubble>
+        )
+      }
       return (
         <NovaBubble key={key}>
           <InlineChart
