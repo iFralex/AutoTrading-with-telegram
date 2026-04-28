@@ -20,6 +20,23 @@ interface SData {
 
 interface Strategies { sizing: string; management: string; deletion: string }
 
+interface AdvancedSettings {
+  extractionInstructions: string
+  minConfidence: number
+  entryIfFavorable: boolean
+  tradingHoursEnabled: boolean
+  tradingHoursStart: number
+  tradingHoursEnd: number
+  ecoCalendarEnabled: boolean
+  ecoCalendarWindow: number
+}
+
+const DEFAULT_ADVANCED: AdvancedSettings = {
+  extractionInstructions: "", minConfidence: 0, entryIfFavorable: false,
+  tradingHoursEnabled: false, tradingHoursStart: 8, tradingHoursEnd: 22,
+  ecoCalendarEnabled: false, ecoCalendarWindow: 30,
+}
+
 interface PtEvent {
   t: number; type: string; price: number; pnl?: number; description: string
 }
@@ -36,6 +53,8 @@ interface ExtractedSig {
   stop_loss: number | null; take_profit: number | null
 }
 
+interface ChartSignal { entry: number | null; sl: number | null; tp: number | null; order_type: string }
+
 type ChatMsg =
   | { id: string; from: "nova"; type: "text"; text: string }
   | { id: string; from: "user"; type: "text"; text: string }
@@ -47,10 +66,12 @@ type ChatMsg =
   | { id: string; from: "nova"; type: "group_form" }
   | { id: string; from: "nova"; type: "mt5_form" }
   | { id: string; from: "nova"; type: "sample_msg_form" }
-  | { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number }
+  | { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number; signals: ChartSignal[] }
   | { id: string; from: "nova"; type: "sim_result"; result: SimData }
   | { id: string; from: "nova"; type: "plan_form" }
-  | { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies }
+  | { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies; advanced?: AdvancedSettings }
+  | { id: string; from: "nova"; type: "advanced_form" }
+  | { id: string; from: "nova"; type: "action_buttons"; buttons: { label: string; action: string; primary?: boolean }[] }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -340,25 +361,140 @@ function SampleMsgForm({ onSubmit, onSkip, loading }: { onSubmit: (m: string) =>
   )
 }
 
-function StrategiesSummary({ strategies }: { strategies: Strategies }) {
-  const items = [
+function StrategiesSummary({ strategies, advanced }: { strategies: Strategies; advanced?: AdvancedSettings }) {
+  const stratItems = [
     { label: "Position sizing", value: strategies.sizing, icon: "⚖️" },
     { label: "Trade management", value: strategies.management, icon: "🛡️" },
     { label: "Signal deletion", value: strategies.deletion, icon: "🗑️" },
   ].filter(it => it.value && it.value !== "null")
-  if (items.length === 0) return null
+
+  const advItems: { label: string; value: string; icon: string }[] = []
+  if (advanced) {
+    if (advanced.extractionInstructions) advItems.push({ label: "Signal parsing hint", value: advanced.extractionInstructions, icon: "🔍" })
+    if (advanced.minConfidence > 0) advItems.push({ label: "Min. confidence", value: `${advanced.minConfidence}%`, icon: "🎯" })
+    if (advanced.entryIfFavorable) advItems.push({ label: "Entry filter", value: "Only enter if price moves favorably first", icon: "📐" })
+    if (advanced.tradingHoursEnabled) advItems.push({ label: "Trading hours", value: `${advanced.tradingHoursStart}:00 – ${advanced.tradingHoursEnd}:00 (server time)`, icon: "🕐" })
+    if (advanced.ecoCalendarEnabled) advItems.push({ label: "Economic calendar", value: `Pause ±${advanced.ecoCalendarWindow} min around major events`, icon: "📅" })
+  }
+
+  if (stratItems.length === 0 && advItems.length === 0) return null
   return (
     <div className="space-y-2 min-w-60 max-w-sm">
-      <p className="text-[11px] text-white/38 font-semibold uppercase tracking-wider">Configured strategies</p>
-      {items.map(it => (
-        <div key={it.label} className="flex gap-2.5 bg-emerald-500/[0.06] border border-emerald-500/14 rounded-xl px-3 py-2.5">
-          <span>{it.icon}</span>
-          <div>
-            <p className="text-[11px] text-emerald-400/65 font-semibold">{it.label}</p>
-            <p className="text-sm text-white/78 leading-snug">{it.value}</p>
-          </div>
+      {stratItems.length > 0 && (
+        <>
+          <p className="text-[11px] text-white/38 font-semibold uppercase tracking-wider">Trading strategies</p>
+          {stratItems.map(it => (
+            <div key={it.label} className="flex gap-2.5 bg-emerald-500/[0.06] border border-emerald-500/14 rounded-xl px-3 py-2.5">
+              <span>{it.icon}</span>
+              <div>
+                <p className="text-[11px] text-emerald-400/65 font-semibold">{it.label}</p>
+                <p className="text-sm text-white/78 leading-snug">{it.value}</p>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {advItems.length > 0 && (
+        <>
+          <p className="text-[11px] text-white/38 font-semibold uppercase tracking-wider mt-3">Advanced settings</p>
+          {advItems.map(it => (
+            <div key={it.label} className="flex gap-2.5 bg-violet-500/[0.06] border border-violet-500/14 rounded-xl px-3 py-2.5">
+              <span>{it.icon}</span>
+              <div>
+                <p className="text-[11px] text-violet-400/65 font-semibold">{it.label}</p>
+                <p className="text-sm text-white/78 leading-snug">{it.value}</p>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+function AdvancedForm({ initialValues, onSubmit, onSkip }: {
+  initialValues: AdvancedSettings
+  onSubmit: (v: AdvancedSettings) => void
+  onSkip: () => void
+}) {
+  const [vals, setVals] = useState(initialValues)
+  const set = (k: keyof AdvancedSettings, v: unknown) => setVals(prev => ({ ...prev, [k]: v }))
+  return (
+    <div className="space-y-4 min-w-72 max-w-sm">
+      {/* Extraction hint */}
+      <div>
+        <label className={lbl}>Signal parsing hint <span className="text-white/20 normal-case font-normal">(optional)</span></label>
+        <textarea
+          className={inp + " resize-none h-16 text-xs"}
+          placeholder={"e.g. 'zone' means range entry. SL/TP are in pips, not price."}
+          value={vals.extractionInstructions}
+          onChange={e => set("extractionInstructions", e.target.value)}
+        />
+      </div>
+      {/* Min confidence */}
+      <div>
+        <label className={lbl}>Minimum signal confidence — <span className="text-emerald-400/70">{vals.minConfidence}%</span></label>
+        <input type="range" min="0" max="95" step="5" value={vals.minConfidence}
+          onChange={e => set("minConfidence", Number(e.target.value))}
+          className="w-full accent-emerald-400 mt-1" />
+        <p className="text-[10px] text-white/25 mt-0.5">Skip signals the AI is less than {vals.minConfidence}% confident about. Set 0 to execute all.</p>
+      </div>
+      {/* Entry favorable */}
+      <label className="flex items-center gap-3 cursor-pointer">
+        <div className={`w-9 h-5 rounded-full transition-colors relative ${vals.entryIfFavorable ? "bg-emerald-500" : "bg-white/10"}`}
+          onClick={() => set("entryIfFavorable", !vals.entryIfFavorable)}>
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${vals.entryIfFavorable ? "left-4" : "left-0.5"}`} />
         </div>
-      ))}
+        <div>
+          <p className="text-sm text-white/75">Favorable entry only</p>
+          <p className="text-[10px] text-white/28">For BUY, only enter after price dips to entry. For SELL, after a spike.</p>
+        </div>
+      </label>
+      {/* Trading hours */}
+      <div>
+        <label className="flex items-center gap-3 cursor-pointer mb-2">
+          <div className={`w-9 h-5 rounded-full transition-colors relative ${vals.tradingHoursEnabled ? "bg-emerald-500" : "bg-white/10"}`}
+            onClick={() => set("tradingHoursEnabled", !vals.tradingHoursEnabled)}>
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${vals.tradingHoursEnabled ? "left-4" : "left-0.5"}`} />
+          </div>
+          <span className="text-sm text-white/75">Trading hours filter</span>
+        </label>
+        {vals.tradingHoursEnabled && (
+          <div className="flex items-center gap-2 pl-12">
+            <input type="number" min="0" max="23" value={vals.tradingHoursStart}
+              onChange={e => set("tradingHoursStart", Number(e.target.value))}
+              className="w-16 bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-sm text-white/80 font-mono text-center focus:outline-none" />
+            <span className="text-white/30 text-sm">to</span>
+            <input type="number" min="0" max="23" value={vals.tradingHoursEnd}
+              onChange={e => set("tradingHoursEnd", Number(e.target.value))}
+              className="w-16 bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-sm text-white/80 font-mono text-center focus:outline-none" />
+            <span className="text-[10px] text-white/25">server time (h)</span>
+          </div>
+        )}
+      </div>
+      {/* Economic calendar */}
+      <div>
+        <label className="flex items-center gap-3 cursor-pointer mb-2">
+          <div className={`w-9 h-5 rounded-full transition-colors relative ${vals.ecoCalendarEnabled ? "bg-emerald-500" : "bg-white/10"}`}
+            onClick={() => set("ecoCalendarEnabled", !vals.ecoCalendarEnabled)}>
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${vals.ecoCalendarEnabled ? "left-4" : "left-0.5"}`} />
+          </div>
+          <span className="text-sm text-white/75">Economic calendar filter</span>
+        </label>
+        {vals.ecoCalendarEnabled && (
+          <div className="flex items-center gap-2 pl-12">
+            <span className="text-[10px] text-white/30">Pause</span>
+            <input type="number" min="5" max="120" step="5" value={vals.ecoCalendarWindow}
+              onChange={e => set("ecoCalendarWindow", Number(e.target.value))}
+              className="w-16 bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-sm text-white/80 font-mono text-center focus:outline-none" />
+            <span className="text-[10px] text-white/30">min before/after high-impact events</span>
+          </div>
+        )}
+      </div>
+      <div className="flex gap-2 pt-1">
+        <PrimaryBtn onClick={() => onSubmit(vals)} className="flex-1">Save & continue →</PrimaryBtn>
+        <GhostBtn onClick={onSkip}>Skip</GhostBtn>
+      </div>
     </div>
   )
 }
@@ -369,11 +505,12 @@ const EVT_COLORS: Record<string, string> = {
   entry: "#34d399", sl: "#f87171", tp: "#60a5fa",
   close: "#c084fc", expired: "#facc15", signal_deleted: "#fb923c",
 }
-const CHART_H = 230
+const CHART_H = 240
+const VW = 1000; const VH = 1000
 
 function InlineChart({
   pricePath, setPricePath, tEvents, setTEvents, simResult, onRunSim, simLoading,
-  initPMin, initPMax,
+  initPMin, initPMax, signals = [],
 }: {
   pricePath: { t: number; price: number }[]
   setPricePath: (v: { t: number; price: number }[]) => void
@@ -383,6 +520,7 @@ function InlineChart({
   onRunSim: () => void
   simLoading: boolean
   initPMin: number; initPMax: number
+  signals?: ChartSignal[]
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [drawing, setDrawing] = useState(false)
@@ -394,6 +532,10 @@ function InlineChart({
   const pMin = parseFloat(pMinStr) || 0
   const pMax = parseFloat(pMaxStr) || 1
   const validRange = pMin < pMax
+
+  // ViewBox coordinate helpers — SVG path d requires numbers, not percentages
+  const tToX = (t: number) => (t * VW).toFixed(1)
+  const pToY = (p: number) => pMax === pMin ? String(VH / 2) : ((1 - (p - pMin) / (pMax - pMin)) * VH).toFixed(1)
 
   function svgFrac(e: React.MouseEvent<SVGSVGElement>): { x: number; y: number } {
     const r = svgRef.current!.getBoundingClientRect()
@@ -411,7 +553,7 @@ function InlineChart({
       setDeletionMode(false)
       return
     }
-    if (pricePath.length > 0) return   // already drawn; must clear first
+    if (pricePath.length > 0) return
     setDrawing(true)
     setRawPath([{ t: x, price: fracToPrice(y) }])
     setTEvents([])
@@ -424,7 +566,7 @@ function InlineChart({
     setRawPath(prev => {
       if (prev.length === 0) return [{ t: x, price }]
       const last = prev[prev.length - 1]
-      if (x < last.t + 0.002) return prev   // enforce left-to-right
+      if (x < last.t + 0.002) return prev
       return [...prev, { t: x, price }]
     })
   }
@@ -439,7 +581,6 @@ function InlineChart({
     const normalized = rawPath.map(p => ({ t: (p.t - tMin) / tRange, price: p.price }))
     setPricePath(normalized)
     setRawPath([])
-    // Recalculate pMin/pMax from drawn data with margin
     const prices = normalized.map(p => p.price)
     const dMin = Math.min(...prices); const dMax = Math.max(...prices)
     const range = dMax - dMin || 1
@@ -455,27 +596,37 @@ function InlineChart({
     setPMinStr(String(initPMin)); setPMaxStr(String(initPMax))
   }
 
-  const tToX = (t: number) => `${(t * 100).toFixed(2)}%`
-  const pToY = (p: number) => pMax === pMin ? "50%" : `${((1 - (p - pMin) / (pMax - pMin)) * 100).toFixed(2)}%`
-
   const displayPath = pricePath.length >= 2 ? pricePath : rawPath
   const pathD = displayPath.length >= 2
     ? displayPath.map((p, i) => `${i === 0 ? "M" : "L"} ${tToX(p.t)} ${pToY(p.price)}`).join(" ")
     : ""
   const closedD = pathD
-    ? pathD + ` L ${tToX(displayPath[displayPath.length - 1].t)} 100% L 0 100% Z`
+    ? pathD + ` L ${tToX(displayPath[displayPath.length - 1].t)} ${VH} L 0 ${VH} Z`
     : ""
 
   const simEvents = simResult?.per_signal?.flatMap(s => s.events) ?? []
   const hasPath = pricePath.length >= 2
 
-  // Y-axis labels (3 levels)
-  const yLabels = [0, 0.5, 1].map(f => ({
-    y: f,
-    price: pMin + (1 - f) * (pMax - pMin),
-  }))
   const priceRange = pMax - pMin
   const priceDecs = priceRange < 0.005 ? 5 : priceRange < 0.05 ? 4 : priceRange < 0.5 ? 3 : priceRange < 5 ? 2 : 1
+  const yLabels = [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, price: pMin + (1 - f) * (pMax - pMin) }))
+
+  // Signal reference lines (entry/SL/TP)
+  const sigRefLines: { price: number; color: string; label: string; dash: boolean }[] = []
+  if (!hasPath && validRange) {
+    const seen = new Set<number>()
+    signals.forEach(sig => {
+      const add = (p: number | null, color: string, label: string, dash: boolean) => {
+        if (p === null || seen.has(p)) return
+        seen.add(p)
+        sigRefLines.push({ price: p, color, label, dash })
+      }
+      const e = Array.isArray(sig.entry) ? sig.entry[0] : sig.entry as number | null
+      add(e, "#34d399", "E", false)
+      add(sig.sl, "#f87171", "SL", true)
+      add(sig.tp, "#60a5fa", "TP", true)
+    })
+  }
 
   return (
     <div className="space-y-3 w-full" style={{ maxWidth: 500 }}>
@@ -504,73 +655,97 @@ function InlineChart({
       {/* Chart SVG */}
       <div
         className={`relative rounded-xl overflow-hidden border select-none ${
-          validRange && !hasPath ? "cursor-crosshair border-emerald-400/20" : "border-white/10"
+          validRange && !hasPath && !deletionMode ? "cursor-crosshair border-emerald-400/20" :
+          deletionMode ? "cursor-cell border-orange-500/30" : "border-white/10"
         } bg-black/40`}
         style={{ height: CHART_H }}
       >
         <svg
           ref={svgRef}
+          viewBox={`0 0 ${VW} ${VH}`}
+          preserveAspectRatio="none"
           className="absolute inset-0 w-full h-full"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
+          <defs>
+            <linearGradient id="chart-pgrd" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#34d399" stopOpacity="0.20" />
+              <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
           {/* Grid lines */}
           {[0.25, 0.5, 0.75].map(v => (
             <g key={v}>
-              <line x1="0" y1={`${v * 100}%`} x2="100%" y2={`${v * 100}%`} stroke="white" strokeOpacity="0.04" />
-              <line x1={`${v * 100}%`} y1="0" x2={`${v * 100}%`} y2="100%" stroke="white" strokeOpacity="0.04" />
+              <line x1="0" y1={v * VH} x2={VW} y2={v * VH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
+              <line x1={v * VW} y1="0" x2={v * VW} y2={VH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
             </g>
           ))}
 
-          {/* Y-axis labels */}
-          {hasPath && yLabels.map(({ y, price }) => (
-            <text key={y} x="4" y={`${y * 100}%`} dy="4" fill="white" fillOpacity="0.28" fontSize="9" fontFamily="monospace">
+          {/* Signal reference lines (entry/SL/TP) — shown before drawing */}
+          {sigRefLines.map((l, i) => {
+            const y = pToY(l.price)
+            return (
+              <g key={i}>
+                <line x1="0" y1={y} x2={VW} y2={y}
+                  stroke={l.color} strokeOpacity="0.45" strokeWidth="1.5"
+                  strokeDasharray={l.dash ? "12 8" : "none"} />
+                <rect x={VW - 64} y={parseFloat(y) - 18} width="60" height="20" fill={l.color} fillOpacity="0.12" rx="3" />
+                <text x={VW - 34} y={parseFloat(y) - 3} fill={l.color} fillOpacity="0.85"
+                  fontSize="22" fontFamily="monospace" textAnchor="middle">{l.label}</text>
+              </g>
+            )
+          })}
+
+          {/* Y-axis price labels — always visible */}
+          {yLabels.map(({ f, price }) => (
+            <text key={f} x="8" y={(f * VH).toFixed(0)} dy="0" dominantBaseline="middle"
+              fill="white" fillOpacity="0.25" fontSize="28" fontFamily="monospace">
               {price.toFixed(priceDecs)}
             </text>
           ))}
 
           {/* Area fill */}
-          {closedD && (
-            <>
-              <defs>
-                <linearGradient id="pgrd" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#34d399" stopOpacity="0.22" />
-                  <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={closedD} fill="url(#pgrd)" />
-            </>
-          )}
+          {closedD && <path d={closedD} fill="url(#chart-pgrd)" />}
 
           {/* Path line */}
           {pathD && (
-            <path d={pathD} fill="none" stroke="#34d399" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            <path d={pathD} fill="none" stroke="#34d399" strokeWidth="3"
+              strokeLinejoin="round" strokeLinecap="round" />
           )}
 
           {/* Sim event markers */}
-          {hasPath && simEvents.map((ev, i) => {
+          {simEvents.map((ev, i) => {
             const col = EVT_COLORS[ev.type] ?? "#94a3b8"
             return (
               <g key={i}>
-                <circle cx={tToX(ev.t)} cy={pToY(ev.price)} r="5" fill={col} fillOpacity="0.92" stroke="#000" strokeWidth="1.5" />
+                <circle cx={tToX(ev.t)} cy={pToY(ev.price)} r="14"
+                  fill={col} fillOpacity="0.92" stroke="#000" strokeWidth="3" />
               </g>
             )
           })}
 
           {/* Deletion event marker */}
-          {hasPath && tEvents.map((ev, i) => (
+          {tEvents.map((ev, i) => (
             <g key={i}>
-              <line x1={tToX(ev.t)} y1="0" x2={tToX(ev.t)} y2="100%" stroke={EVT_COLORS.signal_deleted} strokeWidth="1.5" strokeDasharray="4 3" strokeOpacity="0.75" />
-              <text x={tToX(ev.t)} y="12" fill={EVT_COLORS.signal_deleted} fontSize="9" textAnchor="middle" fontFamily="monospace">DEL</text>
+              <line x1={tToX(ev.t)} y1="0" x2={tToX(ev.t)} y2={VH}
+                stroke={EVT_COLORS.signal_deleted} strokeWidth="2.5"
+                strokeDasharray="10 6" strokeOpacity="0.80" />
+              <text x={tToX(ev.t)} y="40" fill={EVT_COLORS.signal_deleted} fontSize="28"
+                textAnchor="middle" fontFamily="monospace">DEL</text>
             </g>
           ))}
 
           {/* Empty hint */}
           {!pathD && !drawing && (
-            <text x="50%" y="50%" dy="5" textAnchor="middle" fill="white" fillOpacity="0.18" fontSize="13" fontFamily="sans-serif">
-              {validRange ? "Click and drag to draw a price path" : "Set the price range above first"}
+            <text x={VW / 2} y={VH / 2} dy="10" textAnchor="middle"
+              fill="white" fillOpacity="0.18" fontSize="42" fontFamily="sans-serif">
+              {validRange
+                ? (deletionMode ? "Click to place deletion event" : "Click and drag to draw a price path")
+                : "Set the price range above first"}
             </text>
           )}
         </svg>
@@ -588,7 +763,7 @@ function InlineChart({
                   : "border-white/10 text-white/38 hover:border-white/20 hover:text-white/60"
               }`}
             >
-              {deletionMode ? "Click on chart to mark deletion" : "+ Mark deletion event"}
+              {deletionMode ? "Click on chart to place…" : "+ Mark deletion event"}
             </button>
             {tEvents.length > 0 && (
               <button onClick={() => setTEvents([])} className="text-xs px-2 py-1.5 rounded-lg border border-white/10 text-white/28 hover:text-white/50 transition-all">
@@ -753,10 +928,13 @@ export default function NovaChatWizard() {
   const upd = (p: Partial<SData>) => setSdata(prev => ({ ...prev, ...p }))
 
   const [strategies, setStrategies] = useState<Strategies>({ sizing: "", management: "", deletion: "" })
+  const [strategiesReady, setStrategiesReady] = useState(false)
+  const [advanced, setAdvanced] = useState<AdvancedSettings>(DEFAULT_ADVANCED)
   const [aiHistory, setAiHistory] = useState<{ role: "user" | "model"; text: string }[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [sampleMsg, setSampleMsg] = useState("")
+  const [chartSignals, setChartSignals] = useState<ChartSignal[]>([])
   const [pricePath, setPricePath] = useState<{ t: number; price: number }[]>([])
   const [tEvents, setTEvents] = useState<{ t: number; type: string }[]>([])
   const [simResult, setSimResult] = useState<SimData | null>(null)
@@ -1028,10 +1206,13 @@ export default function NovaChatWizard() {
         setMessages(prev => [...noTyping(prev), {
           id: uid(), from: "nova", type: "strategies_summary", strategies: newStrats,
         } as ChatMsg])
-        await new Promise(r => setTimeout(r, 700))
-        await novaText("Want to test these strategies? Paste a sample signal message from your channel and I'll simulate how your bot would react:")
-        await novaForm("sample_msg_form", {}, 200)
-        setPhase("sample_msg")
+        await new Promise(r => setTimeout(r, 500))
+        await novaText(
+          "These are your trading rules ✅\n\nWant to **refine anything**? Just tell me and I'll adjust them. Or when you're ready, tap **\"Test →\"** to simulate with a real signal from your channel.",
+          500
+        )
+        setStrategiesReady(true)
+        // Phase stays "ai_rules" so the chat input remains active
       } else {
         await novaText(reply, 300)
       }
@@ -1043,11 +1224,17 @@ export default function NovaChatWizard() {
     }
   }
 
+  async function handleProceedToSim() {
+    setStrategiesReady(false)
+    await novaText("Want to test these strategies? Paste a sample signal message from your channel and I'll simulate how your bot would react:")
+    await novaForm("sample_msg_form", {}, 200)
+    setPhase("sample_msg")
+  }
+
   async function handleSampleMsg(msg: string) {
     setFormLoading(true)
     userMsg(msg.length > 60 ? msg.slice(0, 60) + "…" : msg)
     try {
-      // Extract signal to get price context for the chart
       const extracted = await api.simulateSignal({ message: msg })
       setSampleMsg(msg)
       if (!extracted.is_signal || extracted.extracted.length === 0) {
@@ -1055,28 +1242,41 @@ export default function NovaChatWizard() {
         await novaForm("sample_msg_form", {}, 200)
         return
       }
-      const sig = extracted.extracted[0]
-      const entry = Array.isArray(sig.entry_price) ? sig.entry_price[0] : sig.entry_price
-      const sl = sig.stop_loss; const tp = sig.take_profit
-      const prices = [entry, sl, tp].filter((v): v is number => v !== null && v !== undefined)
+
+      // Use all extracted signals to compute chart price range
+      const allPrices: number[] = []
+      const chartSigs: ChartSignal[] = extracted.extracted.map((s: ExtractedSig) => {
+        const e = Array.isArray(s.entry_price) ? s.entry_price[0] : s.entry_price
+        if (e !== null && e !== undefined) allPrices.push(e)
+        if (s.stop_loss !== null) allPrices.push(s.stop_loss)
+        if (s.take_profit !== null) allPrices.push(s.take_profit)
+        return { entry: e ?? null, sl: s.stop_loss, tp: s.take_profit, order_type: s.order_type }
+      })
+
       let pMn = 0; let pMx = 1
-      if (prices.length > 0) {
-        const minP = Math.min(...prices); const maxP = Math.max(...prices)
+      if (allPrices.length > 0) {
+        const minP = Math.min(...allPrices); const maxP = Math.max(...allPrices)
         const range = maxP - minP || Math.abs(minP) * 0.02 || 0.01
-        pMn = minP - range * 0.4
-        pMx = maxP + range * 0.4
+        pMn = minP - range * 0.3
+        pMx = maxP + range * 0.3
       }
       setChartPMin(pMn); setChartPMax(pMx)
+      setChartSignals(chartSigs)
       setPricePath([]); setTEvents([]); setSimResult(null)
 
       const decs = (pMx - pMn) < 0.005 ? 5 : (pMx - pMn) < 0.05 ? 4 : (pMx - pMn) < 0.5 ? 3 : 2
-      const entryStr = entry !== null && entry !== undefined ? entry.toFixed(decs) : "?"
-      const slStr = sl !== null ? sl.toFixed(decs) : "none"
-      const tpStr = tp !== null ? tp.toFixed(decs) : "none"
+      const sigLines = extracted.extracted.map((s: ExtractedSig) => {
+        const e = Array.isArray(s.entry_price) ? s.entry_price[0] : s.entry_price
+        const eStr = e !== null && e !== undefined ? e.toFixed(decs) : "?"
+        const slStr = s.stop_loss !== null ? s.stop_loss.toFixed(decs) : "—"
+        const tpStr = s.take_profit !== null ? s.take_profit.toFixed(decs) : "—"
+        return `**${s.order_type} ${s.symbol}** — Entry: ${eStr}, SL: ${slStr}, TP: ${tpStr}`
+      })
+      const countLabel = sigLines.length > 1 ? `${sigLines.length} signals detected` : "Signal detected"
       await novaText(
-        `Signal detected ✅  **${sig.order_type} ${sig.symbol}** — Entry: ${entryStr}, SL: ${slStr}, TP: ${tpStr}\n\nNow draw a price path on the chart to simulate market movement. The chart is pre-scaled to the signal's price range.`
+        `${countLabel} ✅\n${sigLines.join("\n")}\n\nDraw a price path on the chart to simulate market movement. The chart shows entry/SL/TP as reference lines.`
       )
-      await novaForm("chart_draw", { pMin: pMn, pMax: pMx }, 200)
+      await novaForm("chart_draw", { pMin: pMn, pMax: pMx, signals: chartSigs }, 200)
       setPhase("chart")
     } catch (ex) {
       await novaText(`Couldn't process the message: ${ex instanceof ApiError ? ex.message : "Please retry."}`)
@@ -1111,7 +1311,6 @@ export default function NovaChatWizard() {
       }
       setSimResult(res.simulation)
       setPhase("sim_done")
-      // AI analysis
       setTimeout(async () => {
         showTyping()
         try {
@@ -1120,20 +1319,96 @@ export default function NovaChatWizard() {
             context: {
               sim_result: res.simulation,
               strategies: { sizing: strategies.sizing, management: strategies.management, deletion: strategies.deletion },
+              note: "This is a user-drawn simulation — the price path was drawn manually, not real market data.",
             },
           })
           await novaText(analysis.reply, 300)
         } catch { /* silent */ }
-        await new Promise(r => setTimeout(r, 600))
-        await novaText("Ready to launch? Choose your plan:")
-        await novaForm("plan_form", {}, 200)
-        setPhase("plan")
+        await new Promise(r => setTimeout(r, 500))
+        await novaText(
+          "What would you like to do next? You can **redraw the chart** to try a different scenario, **refine your strategies**, or **proceed** when you're satisfied.",
+          400
+        )
+        setMessages(prev => [...noTyping(prev), {
+          id: uid(), from: "nova", type: "action_buttons",
+          buttons: [
+            { label: "↩ Redraw chart", action: "new_simulation" },
+            { label: "Proceed to launch →", action: "proceed_from_sim", primary: true },
+          ],
+        } as ChatMsg])
       }, 400)
     } catch (ex) {
       await novaText(`Simulation failed: ${ex instanceof ApiError ? ex.message : "Please try again."}`)
     } finally {
       setSimLoading(false)
     }
+  }
+
+  async function handleSimDoneMsg(msg: string) {
+    userMsg(msg)
+    const newHistory = [...aiHistory, { role: "user" as const, text: msg }]
+    setAiHistory(newHistory)
+    setChatLoading(true)
+    showTyping()
+    try {
+      const res = await api.novaChat({ step: "ai_rules", history: aiHistory, message: msg })
+      const reply = res.reply
+      setAiHistory(h => [...h, { role: "model", text: reply }])
+      const stratAction = res.actions.find(a => a.type === "set_strategies")
+      if (stratAction) {
+        const s = stratAction.strategies as { sizing_strategy?: string; management_strategy?: string; deletion_strategy?: string }
+        const newStrats: Strategies = {
+          sizing: s.sizing_strategy && s.sizing_strategy !== "null" ? s.sizing_strategy : "",
+          management: s.management_strategy && s.management_strategy !== "null" ? s.management_strategy : "",
+          deletion: s.deletion_strategy && s.deletion_strategy !== "null" ? s.deletion_strategy : "",
+        }
+        setStrategies(newStrats)
+        await novaText(reply.replace(/<strategies>[\s\S]*?<\/strategies>/g, "").trim(), 350)
+        await new Promise(r => setTimeout(r, 400))
+        setMessages(prev => [...noTyping(prev), {
+          id: uid(), from: "nova", type: "strategies_summary", strategies: newStrats,
+        } as ChatMsg])
+      } else {
+        await novaText(reply, 300)
+      }
+    } catch {
+      await novaText("Sorry, I had trouble with that — could you rephrase?", 300)
+    } finally {
+      setChatLoading(false)
+      setChatInput("")
+    }
+  }
+
+  function handleNewSimulation() {
+    setPricePath([]); setTEvents([]); setSimResult(null)
+    setPhase("chart")
+  }
+
+  async function handleProceedFromSim() {
+    await novaText(
+      "Almost there! 🎯 Before launching, you can optionally configure some **advanced filters** — trading hours, economic calendar protection, minimum signal confidence, and more. Or skip straight to choosing your plan.",
+      500
+    )
+    setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "advanced_form" } as ChatMsg])
+    setPhase("plan")
+  }
+
+  async function handleAdvancedSubmit(vals: AdvancedSettings) {
+    setAdvanced(vals)
+    await novaText("Advanced settings saved ✅")
+    await new Promise(r => setTimeout(r, 300))
+    setMessages(prev => [...noTyping(prev), {
+      id: uid(), from: "nova", type: "strategies_summary",
+      strategies, advanced: vals,
+    } as ChatMsg])
+    await novaText("Ready to launch? Choose your plan:")
+    await novaForm("plan_form", {}, 200)
+  }
+
+  function handleAction(action: string) {
+    if (action === "proceed_to_sim") handleProceedToSim()
+    else if (action === "new_simulation") handleNewSimulation()
+    else if (action === "proceed_from_sim") handleProceedFromSim()
   }
 
   async function handleTgHelp(msg: string) {
@@ -1179,6 +1454,14 @@ export default function NovaChatWizard() {
         sizing_strategy: strategies.sizing || undefined,
         management_strategy: strategies.management || undefined,
         deletion_strategy: strategies.deletion || undefined,
+        extraction_instructions: advanced.extractionInstructions || undefined,
+        min_confidence: advanced.minConfidence || undefined,
+        entry_if_favorable: advanced.entryIfFavorable || undefined,
+        trading_hours_enabled: advanced.tradingHoursEnabled || undefined,
+        trading_hours_start: advanced.tradingHoursEnabled ? advanced.tradingHoursStart : undefined,
+        trading_hours_end: advanced.tradingHoursEnabled ? advanced.tradingHoursEnd : undefined,
+        eco_calendar_enabled: advanced.ecoCalendarEnabled || undefined,
+        eco_calendar_window: advanced.ecoCalendarEnabled ? advanced.ecoCalendarWindow : undefined,
       })
       await novaText("🎉 **Your bot is live!** Redirecting you to the dashboard…")
       setPhase("done")
@@ -1196,6 +1479,7 @@ export default function NovaChatWizard() {
     const msg = chatInput.trim()
     if (!msg || chatLoading) return
     if (phase === "ai_rules") { handleAiRulesMsg(msg); return }
+    if (phase === "sim_done") { handleSimDoneMsg(msg); return }
     if (phase === "creds") { handleTgHelp(msg); return }
     if (phase === "mt5") { handleMt5Help(msg); return }
   }
@@ -1280,7 +1564,7 @@ export default function NovaChatWizard() {
       )
 
     if (msg.type === "chart_draw") {
-      const chartMsg = msg as { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number }
+      const chartMsg = msg as { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number; signals: ChartSignal[] }
       return (
         <NovaBubble key={key}>
           <InlineChart
@@ -1293,14 +1577,52 @@ export default function NovaChatWizard() {
             simLoading={simLoading}
             initPMin={chartMsg.pMin}
             initPMax={chartMsg.pMax}
+            signals={chartMsg.signals ?? []}
           />
         </NovaBubble>
       )
     }
 
     if (msg.type === "strategies_summary") {
-      const m = msg as { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies }
-      return <NovaBubble key={key}><StrategiesSummary strategies={m.strategies} /></NovaBubble>
+      const m = msg as { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies; advanced?: AdvancedSettings }
+      return <NovaBubble key={key}><StrategiesSummary strategies={m.strategies} advanced={m.advanced} /></NovaBubble>
+    }
+
+    if (msg.type === "advanced_form") {
+      return (
+        <NovaBubble key={key}>
+          {done
+            ? <CompletedBadge />
+            : <AdvancedForm
+                initialValues={advanced}
+                onSubmit={v => { markSubmitted(key); handleAdvancedSubmit(v) }}
+                onSkip={() => {
+                  markSubmitted(key)
+                  novaText("Got it! Choose your plan:").then(() => novaForm("plan_form", {}, 200))
+                }}
+              />
+          }
+        </NovaBubble>
+      )
+    }
+
+    if (msg.type === "action_buttons") {
+      const m = msg as { id: string; from: "nova"; type: "action_buttons"; buttons: { label: string; action: string; primary?: boolean }[] }
+      return (
+        <NovaBubble key={key}>
+          {done
+            ? <CompletedBadge />
+            : (
+              <div className="flex gap-2 flex-wrap">
+                {m.buttons.map(btn => btn.primary
+                  ? <PrimaryBtn key={btn.action} onClick={() => { markSubmitted(key); handleAction(btn.action) }}>{btn.label}</PrimaryBtn>
+                  : <GhostBtn key={btn.action} onClick={() => { markSubmitted(key); handleAction(btn.action) }}>{btn.label}</GhostBtn>
+                )}
+              </div>
+            )
+          }
+        </NovaBubble>
+      )
     }
 
     if (msg.type === "plan_form")
@@ -1315,9 +1637,10 @@ export default function NovaChatWizard() {
 
   // ── Bottom input ──────────────────────────────────────────────────────────
 
-  const showInput = ["creds", "mt5", "ai_rules"].includes(phase)
+  const showInput = ["creds", "mt5", "ai_rules", "sim_done"].includes(phase)
   const inputPlaceholder =
-    phase === "ai_rules" ? "Tell Nova about your trading preferences…" :
+    phase === "ai_rules" ? "Refine your strategies or ask anything…" :
+    phase === "sim_done" ? "Ask Nova to adjust your strategies…" :
     phase === "creds"    ? "Ask about Telegram API credentials…" :
     phase === "mt5"      ? "Ask about MT5 credentials…" : ""
 
@@ -1346,7 +1669,15 @@ export default function NovaChatWizard() {
 
         {/* Input bar */}
         {showInput && (
-          <div className="shrink-0 border-t border-white/[0.06] px-4 py-3">
+          <div className="shrink-0 border-t border-white/[0.06] px-4 py-3 space-y-2">
+            {/* Contextual action buttons above the input */}
+            {phase === "ai_rules" && strategiesReady && (
+              <div className="flex justify-end">
+                <PrimaryBtn onClick={handleProceedToSim} className="text-xs py-1.5 px-4">
+                  Test strategies →
+                </PrimaryBtn>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <input
                 className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-emerald-400/28 transition-all"

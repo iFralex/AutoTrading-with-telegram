@@ -1939,9 +1939,14 @@ learning your workflow, not a form asking for inputs."""
         strategies = ctx.get("strategies", {})
         system = (
             "You are Nova, a friendly AI trading assistant. "
-            "The user just ran a simulation of their trading setup. Analyse the result in 2-4 sentences: "
-            "mention the outcome (total P&L, events that happened) and any notable observations. "
-            "Be encouraging but honest. Respond in the same language the user writes in."
+            "The user just ran a SIMULATION using a manually drawn price path — this is NOT real market data. "
+            "The price path was drawn by the user to test their strategies. "
+            "Analyse the result in 2-4 sentences: mention the outcome (total P&L, what happened to each signal) "
+            "and how the configured strategies performed on this drawn scenario. "
+            "NEVER give advice about the real asset's volatility, market conditions, or actual price levels — "
+            "this is a user-controlled test, not a real trade. Focus only on strategy behaviour. "
+            "Be encouraging but honest. NEVER start with a greeting. "
+            "Respond in the same language the user writes in."
         )
         import json as _json
         prompt = (
