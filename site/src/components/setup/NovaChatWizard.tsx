@@ -1019,23 +1019,66 @@ export default function NovaChatWizard() {
           mt5Login:  String(s.mt5_login ?? ""),
           mt5Server: s.mt5_server ?? "",
         })
-        if (s.sizing_strategy || s.management_strategy || s.deletion_strategy) {
-          setStrategies({
-            sizing:     s.sizing_strategy     ?? "",
-            management: s.management_strategy ?? "",
-            deletion:   s.deletion_strategy   ?? "",
+        const hasStrategies = !!(s.sizing_strategy || s.management_strategy || s.deletion_strategy)
+        const restoredStrats: Strategies = {
+          sizing:     s.sizing_strategy     ?? "",
+          management: s.management_strategy ?? "",
+          deletion:   s.deletion_strategy   ?? "",
+        }
+        if (hasStrategies) setStrategies(restoredStrats)
+
+        // Restore advanced settings if any were saved
+        const hasAdvanced = s.extraction_instructions || s.min_confidence || s.entry_if_favorable
+          || s.trading_hours_enabled || s.eco_calendar_enabled
+        if (hasAdvanced) {
+          setAdvanced({
+            extractionInstructions: s.extraction_instructions ?? "",
+            minConfidence:          s.min_confidence          ?? 0,
+            entryIfFavorable:       s.entry_if_favorable      ?? false,
+            tradingHoursEnabled:    s.trading_hours_enabled   ?? false,
+            tradingHoursStart:      s.trading_hours_start     ?? 8,
+            tradingHoursEnd:        s.trading_hours_end       ?? 22,
+            ecoCalendarEnabled:     s.eco_calendar_enabled    ?? false,
+            ecoCalendarWindow:      s.eco_calendar_window     ?? 30,
           })
         }
 
         if (s.user_id && s.group_id && s.mt5_login) {
-          // Telegram ✓ + group ✓ + MT5 ✓ → AI rules
-          await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓.`)
-          await novaText(
-            `Now let's configure how the bot actually trades for you. Just to set expectations: this isn't a simple order-executor — it's an AI agent that sizes positions, manages open trades (trailing stops, partial closes, breakeven moves), and handles signal deletions, all following **your** personal rules.\n\n` +
-            `Tell me: how do you currently manage trades manually — from how you size them, to what you do while they're open?`,
-            800
-          )
-          setPhase("ai_rules")
+          // Telegram ✓ + group ✓ + MT5 ✓
+          if (hasStrategies) {
+            // Strategies already configured → show summary and let user refine or proceed
+            await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓, strategies ✓.`)
+            await new Promise(r => setTimeout(r, 300))
+            setMessages(prev => [...prev, {
+              id: uid(), from: "nova", type: "strategies_summary",
+              strategies: restoredStrats,
+              advanced: hasAdvanced ? {
+                extractionInstructions: s.extraction_instructions ?? "",
+                minConfidence:          s.min_confidence          ?? 0,
+                entryIfFavorable:       s.entry_if_favorable      ?? false,
+                tradingHoursEnabled:    s.trading_hours_enabled   ?? false,
+                tradingHoursStart:      s.trading_hours_start     ?? 8,
+                tradingHoursEnd:        s.trading_hours_end       ?? 22,
+                ecoCalendarEnabled:     s.eco_calendar_enabled    ?? false,
+                ecoCalendarWindow:      s.eco_calendar_window     ?? 30,
+              } : undefined,
+            } as ChatMsg])
+            await novaText(
+              "Your strategies are already configured. Want to **refine anything**? Just tell me — or tap **\"Test →\"** to simulate with a signal.",
+              500
+            )
+            setStrategiesReady(true)
+            setPhase("ai_rules")
+          } else {
+            // No strategies yet → ask about manual trading
+            await novaText(`Welcome back! 👋 Found your previous session — **${s.group_name}** ✓, MT5 ✓.`)
+            await novaText(
+              `Now let's configure how the bot actually trades for you. Just to set expectations: this isn't a simple order-executor — it's an AI agent that sizes positions, manages open trades (trailing stops, partial closes, breakeven moves), and handles signal deletions, all following **your** personal rules.\n\n` +
+              `Tell me: how do you currently manage trades manually — from how you size them, to what you do while they're open?`,
+              800
+            )
+            setPhase("ai_rules")
+          }
         } else if (s.user_id && s.group_id) {
           // Telegram ✓ + group ✓ → MT5
           await novaText(`Welcome back! 👋 **${s.group_name}** is already selected ✓. Now let's connect your MetaTrader 5 account:`)
@@ -1201,6 +1244,13 @@ export default function NovaChatWizard() {
           deletion: s.deletion_strategy && s.deletion_strategy !== "null" ? s.deletion_strategy : "",
         }
         setStrategies(newStrats)
+        // Persist immediately so a page reload restores this step
+        api.saveSession({
+          phone: sdata.phone,
+          sizing_strategy: newStrats.sizing || undefined,
+          management_strategy: newStrats.management || undefined,
+          deletion_strategy: newStrats.deletion || undefined,
+        }).catch(() => {/* non-critical */})
         await novaText(reply.replace(/<strategies>[\s\S]*?<\/strategies>/g, "").trim(), 350)
         await new Promise(r => setTimeout(r, 400))
         setMessages(prev => [...noTyping(prev), {
@@ -1363,6 +1413,12 @@ export default function NovaChatWizard() {
           deletion: s.deletion_strategy && s.deletion_strategy !== "null" ? s.deletion_strategy : "",
         }
         setStrategies(newStrats)
+        api.saveSession({
+          phone: sdata.phone,
+          sizing_strategy: newStrats.sizing || undefined,
+          management_strategy: newStrats.management || undefined,
+          deletion_strategy: newStrats.deletion || undefined,
+        }).catch(() => {/* non-critical */})
         await novaText(reply.replace(/<strategies>[\s\S]*?<\/strategies>/g, "").trim(), 350)
         await new Promise(r => setTimeout(r, 400))
         setMessages(prev => [...noTyping(prev), {
@@ -1395,6 +1451,18 @@ export default function NovaChatWizard() {
 
   async function handleAdvancedSubmit(vals: AdvancedSettings) {
     setAdvanced(vals)
+    // Persist immediately
+    api.saveSession({
+      phone: sdata.phone,
+      extraction_instructions: vals.extractionInstructions || undefined,
+      min_confidence: vals.minConfidence || undefined,
+      entry_if_favorable: vals.entryIfFavorable || undefined,
+      trading_hours_enabled: vals.tradingHoursEnabled || undefined,
+      trading_hours_start: vals.tradingHoursEnabled ? vals.tradingHoursStart : undefined,
+      trading_hours_end: vals.tradingHoursEnabled ? vals.tradingHoursEnd : undefined,
+      eco_calendar_enabled: vals.ecoCalendarEnabled || undefined,
+      eco_calendar_window: vals.ecoCalendarEnabled ? vals.ecoCalendarWindow : undefined,
+    }).catch(() => {/* non-critical */})
     await novaText("Advanced settings saved ✅")
     await new Promise(r => setTimeout(r, 300))
     setMessages(prev => [...noTyping(prev), {
