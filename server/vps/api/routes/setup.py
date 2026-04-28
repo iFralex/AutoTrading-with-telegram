@@ -976,9 +976,14 @@ async def _sim_full(
                                    "description": f"Market {order_type} opened @ {price:.5f}"})
 
             elif trade_state == "pending" and actual_entry is not None:
-                prev_price = float(price_path[i - 1].get("price", 0)) if i > 0 else None
-                hit = (prev_price is not None
-                       and (prev_price - actual_entry) * (price - actual_entry) <= 0)
+                # "First reach" detection: enter the first bar where price touches/crosses
+                # the entry level from any direction.  A pure crossover check fails when
+                # the user draws a path that starts on the same side as entry (e.g. slightly
+                # above entry for a BUY) and never reverses — the entry would never fire.
+                if order_type == "BUY":
+                    hit = price >= actual_entry
+                else:
+                    hit = price <= actual_entry
                 if hit:
                     order_open_price = actual_entry
                     position_ticket  = state.alloc_ticket()
@@ -986,23 +991,16 @@ async def _sim_full(
                                        order_open_price, sl, tp)
                     trade_state = "open"
                     sig_events.append({"t": t_norm, "type": "entry", "price": actual_entry,
-                                       "description": f"Limit {order_type} triggered @ {actual_entry:.5f}"})
+                                       "description": f"{order_type} triggered @ {actual_entry:.5f}"})
                 else:
-                    # Pre-entry invalidation: SL or TP reached before entry
+                    # Pre-entry invalidation: only SL hit before entry is meaningful here
+                    # (TP before entry is unreachable for valid signals with first-reach logic)
                     if sl is not None and (
                         (order_type == "BUY"  and price <= sl) or
                         (order_type == "SELL" and price >= sl)
                     ):
                         sig_events.append({"t": t_norm, "type": "expired", "price": sl,
                                            "description": f"Signal expired — SL {sl:.5f} hit before entry"})
-                        trade_state = "expired"
-                        break
-                    if tp is not None and (
-                        (order_type == "BUY"  and price >= tp) or
-                        (order_type == "SELL" and price <= tp)
-                    ):
-                        sig_events.append({"t": t_norm, "type": "expired", "price": tp,
-                                           "description": f"Signal expired — TP {tp:.5f} hit before entry"})
                         trade_state = "expired"
                         break
 
