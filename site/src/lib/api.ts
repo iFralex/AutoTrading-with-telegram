@@ -534,6 +534,20 @@ export const api = {
     )
   },
 
+  /** Nova AI chat endpoint — routes by step field. */
+  novaChat(payload: {
+    step: "tg_help" | "mt5_help" | "ai_rules" | "sim_analysis"
+    history?: { role: "user" | "model"; text: string }[]
+    message?: string
+    context?: Record<string, unknown>
+  }) {
+    return call<{ reply: string; actions: Array<{ type: string; [k: string]: unknown }> }>(
+      "POST",
+      "/api/setup/nova-chat",
+      payload
+    )
+  },
+
   /** Signal Simulator — ultimi messaggi dal gruppo selezionato (usa sessione pendente). */
   getRecentMessages(loginKey: string, groupId: string, limit = 15) {
     return call<{ messages: { id: number; text: string; date: string | null }[] }>(

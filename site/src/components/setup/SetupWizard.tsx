@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { api, ApiError, type SetupSession, type Group, type MT5Account, type VerifyCodeResponse } from "@/src/lib/api"
+import NovaChatWizard from "./NovaChatWizard"
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -2397,10 +2398,14 @@ function LaunchStep({ data, onBack }: StepProps) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// Main wizard
+// Main wizard — replaced by Nova chat interface
 // ════════════════════════════════════════════════════════════════════════════════
 
 export function SetupWizard() {
+  return <NovaChatWizard />
+}
+
+function _OldSetupWizard_unused() {
   const [step, setStep] = useState(0)
   const [data, setData] = useState<SetupData>(EMPTY)
 

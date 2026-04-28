@@ -27,8 +27,10 @@ export default function SetupPage() {
         </div>
       </nav>
 
-      <main className="relative z-10 min-h-screen flex flex-col items-center pt-28 pb-20 px-4 sm:px-6">
-        <SetupWizard />
+      <main className="relative z-10 flex flex-col items-center pt-20 px-4 sm:px-6" style={{ minHeight: "100dvh" }}>
+        <div className="w-full max-w-xl bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden backdrop-blur-sm" style={{ marginTop: "1rem", marginBottom: "1rem", height: "calc(100dvh - 5.5rem)" }}>
+          <SetupWizard />
+        </div>
       </main>
     </div>
   )

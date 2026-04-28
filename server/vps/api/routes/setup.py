@@ -1773,3 +1773,155 @@ async def complete_setup(
     except Exception as exc:
         logger.error("complete_setup (%s): %s", body.user_id, exc)
         raise HTTPException(500, detail=str(exc))
+
+
+# ── Nova Chat endpoint ────────────────────────────────────────────────────────
+
+class NovaChatBody(BaseModel):
+    step: str                            # "tg_help" | "mt5_help" | "ai_rules" | "sim_analysis"
+    history: list[dict] | None = None   # [{role: "user"|"model", text: str}, ...]
+    message: str | None = None          # user's latest message
+    context: dict | None = None         # extra context (sim results etc.)
+
+
+@router.post("/nova-chat")
+async def nova_chat(body: NovaChatBody, request: Request):
+    """
+    AI assistant endpoint for the Nova chat setup interface.
+
+    step=tg_help      → short Telegram setup Q&A (≤3 sentences)
+    step=mt5_help     → short MT5 setup Q&A (≤3 sentences)
+    step=ai_rules     → strategy elicitation conversation; outputs <strategies>{...}</strategies>
+    step=sim_analysis → brief post-simulation analysis
+    """
+    import re
+    from google.genai import types as _types
+    from vps.services.signal_processor import SignalProcessor
+
+    sp: SignalProcessor | None = request.app.state.signal_processor
+    if sp is None:
+        raise HTTPException(503, detail="AI not available (GEMINI_API_KEY missing)")
+
+    step = body.step
+    history = body.history or []
+    user_msg = (body.message or "").strip()
+    ctx = body.context or {}
+
+    # ── tg_help ──────────────────────────────────────────────────────────────
+    if step == "tg_help":
+        system = (
+            "You are Nova, a friendly AI assistant helping a trader set up a Telegram signal bot. "
+            "Answer the user's question about Telegram setup (api_id, api_hash, phone, OTP, groups) "
+            "concisely in at most 3 sentences. Be warm and practical. Respond in the same language the user writes in."
+        )
+        try:
+            from vps.services.strategy_executor import _PRO_MODEL
+            resp = await sp._client.aio.models.generate_content(
+                model=_PRO_MODEL,
+                contents=user_msg,
+                config=_types.GenerateContentConfig(system_instruction=system),
+            )
+            return {"reply": (resp.text or "").strip(), "actions": []}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    # ── mt5_help ─────────────────────────────────────────────────────────────
+    if step == "mt5_help":
+        system = (
+            "You are Nova, a friendly AI assistant helping a trader connect their MetaTrader 5 account. "
+            "Answer the user's question about MT5 login, password, or server name concisely in at most 3 sentences. "
+            "Be warm and practical. Respond in the same language the user writes in."
+        )
+        try:
+            from vps.services.strategy_executor import _PRO_MODEL
+            resp = await sp._client.aio.models.generate_content(
+                model=_PRO_MODEL,
+                contents=user_msg,
+                config=_types.GenerateContentConfig(system_instruction=system),
+            )
+            return {"reply": (resp.text or "").strip(), "actions": []}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    # ── ai_rules ─────────────────────────────────────────────────────────────
+    if step == "ai_rules":
+        system = """You are Nova, a friendly AI trading assistant. Your goal is to understand how the user wants \
+to manage their trades and produce a set of structured trading strategies.
+
+You are gathering information about THREE strategies:
+1. sizing_strategy — how to size lots (fixed lot, % of balance, risk per trade, etc.)
+2. management_strategy — how to manage open positions (move SL to breakeven, trail SL, partial close, etc.)
+3. deletion_strategy — what to do when a signal message is deleted (close immediately, close if in loss, ignore, etc.)
+
+Ask natural follow-up questions to understand the user's preferences. Once you have enough information \
+(you may ask up to 4 questions max), output the strategies as a structured block EXACTLY in this format — \
+it MUST appear at the end of your message, after your conversational text:
+
+<strategies>
+{"sizing_strategy": "...", "management_strategy": "...", "deletion_strategy": "..."}
+</strategies>
+
+Each value is a free-text description (1-3 sentences) that will be given verbatim to an AI agent as its trading rule.
+Write "null" (the string) if the user doesn't want a rule for that strategy.
+Respond in the same language the user writes in. Be warm, concise, and practical."""
+
+        try:
+            from vps.services.strategy_executor import _PRO_MODEL
+
+            # Build conversation history for multi-turn
+            contents: list = []
+            for turn in history:
+                role = "user" if turn.get("role") == "user" else "model"
+                contents.append(_types.Content(role=role, parts=[_types.Part(text=turn.get("text", ""))]))
+            if user_msg:
+                contents.append(_types.Content(role="user", parts=[_types.Part(text=user_msg)]))
+
+            resp = await sp._client.aio.models.generate_content(
+                model=_PRO_MODEL,
+                contents=contents,
+                config=_types.GenerateContentConfig(system_instruction=system),
+            )
+            reply_text = (resp.text or "").strip()
+
+            # Parse <strategies> block if present
+            actions: list[dict] = []
+            m = re.search(r"<strategies>(.*?)</strategies>", reply_text, re.DOTALL)
+            if m:
+                import json as _json
+                try:
+                    strats = _json.loads(m.group(1).strip())
+                    actions.append({"type": "set_strategies", "strategies": strats})
+                except Exception:
+                    pass
+
+            return {"reply": reply_text, "actions": actions}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    # ── sim_analysis ─────────────────────────────────────────────────────────
+    if step == "sim_analysis":
+        sim_result = ctx.get("sim_result", {})
+        strategies = ctx.get("strategies", {})
+        system = (
+            "You are Nova, a friendly AI trading assistant. "
+            "The user just ran a simulation of their trading setup. Analyse the result in 2-4 sentences: "
+            "mention the outcome (total P&L, events that happened) and any notable observations. "
+            "Be encouraging but honest. Respond in the same language the user writes in."
+        )
+        import json as _json
+        prompt = (
+            f"Simulation result:\n{_json.dumps(sim_result, indent=2)}\n\n"
+            f"Strategies configured:\n{_json.dumps(strategies, indent=2)}"
+        )
+        try:
+            from vps.services.strategy_executor import _PRO_MODEL
+            resp = await sp._client.aio.models.generate_content(
+                model=_PRO_MODEL,
+                contents=prompt,
+                config=_types.GenerateContentConfig(system_instruction=system),
+            )
+            return {"reply": (resp.text or "").strip(), "actions": []}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    raise HTTPException(400, detail=f"Unknown step: {step}")
