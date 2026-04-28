@@ -1898,6 +1898,9 @@ Once you have enough information for all three (max 5 questions total), output t
 
 Each value is 1–3 sentences given verbatim to an AI agent as its trading rule. Write "null" (the string) \
 if the user explicitly doesn't want a rule for that strategy.
+IMPORTANT: strategy values inside the <strategies> block MUST always be written in English, \
+regardless of the language the user is writing in. Your conversational replies can be in the user's language, \
+but the JSON values must be in English.
 If the conversation history already has confirmed strategies and the user is modifying just one field, \
 output ALL three fields (keep the unchanged ones as they were, update only what the user changed).
 NEVER start a reply with a greeting like "Ciao!", "Hello!" or "Hi!" — go straight to the point.
