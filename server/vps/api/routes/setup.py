@@ -681,6 +681,8 @@ class _SimState:
         self.pending_orders: list[dict] = list(mock_state.get("pending_orders",  []))
         self.prices: dict[str, dict]    = dict(mock_state.get("prices", {}))
         self._next_ticket               = 1000
+        # Partial closes recorded by apply_write; consumed and cleared in _sim_full
+        self.partial_closes: list[dict] = []
 
     def alloc_ticket(self) -> int:
         t = self._next_ticket
@@ -743,7 +745,23 @@ class _SimState:
                 "tp": kwargs.get("tp"),
             })
         elif tool == "close_position":
-            self.remove_position(int(kwargs.get("ticket", 0)))
+            ticket = int(kwargs.get("ticket", 0))
+            requested_lots = kwargs.get("lots")
+            pos = self.get_position(ticket)
+            if pos:
+                current_lots = float(pos.get("lots", 0))
+                if requested_lots is not None:
+                    remaining = round(current_lots - float(requested_lots), 5)
+                    if remaining > 0.001:
+                        # Genuine partial close — reduce lots, keep position alive
+                        self.partial_closes.append({
+                            "ticket": ticket, "lots_closed": float(requested_lots),
+                        })
+                        pos["lots"] = remaining
+                    else:
+                        self.remove_position(ticket)
+                else:
+                    self.remove_position(ticket)
         elif tool == "cancel_order":
             self.remove_pending_order(int(kwargs.get("ticket", 0)))
         elif tool == "modify_position":
@@ -906,6 +924,7 @@ async def _sim_full(
         sl          = sig_dict.get("stop_loss")
         tp          = sig_dict.get("take_profit")
         lot         = float(sig_dict.get("lot_size") or default_lot)
+        current_lot = lot   # tracks remaining lots after partial closes
         prices_list: list[float] = sig_dict.get("prices") or []
 
         if isinstance(entry_raw, list) and len(entry_raw) == 2:
@@ -1017,7 +1036,7 @@ async def _sim_full(
                 sl_hit = ((order_type == "BUY"  and price <= live_sl) or
                           (order_type == "SELL" and price >= live_sl))
                 if sl_hit:
-                    pnl = _calc_pnl(order_type, order_open_price, live_sl, lot, symbol, symbol_specs)
+                    pnl = _calc_pnl(order_type, order_open_price, live_sl, current_lot, symbol, symbol_specs)
                     total_pnl += pnl
                     state.remove_position(position_ticket)
                     state.balance    += pnl
@@ -1034,7 +1053,7 @@ async def _sim_full(
                 tp_hit = ((order_type == "BUY"  and price >= live_tp) or
                           (order_type == "SELL" and price <= live_tp))
                 if tp_hit:
-                    pnl = _calc_pnl(order_type, order_open_price, live_tp, lot, symbol, symbol_specs)
+                    pnl = _calc_pnl(order_type, order_open_price, live_tp, current_lot, symbol, symbol_specs)
                     total_pnl += pnl
                     state.remove_position(position_ticket)
                     state.balance    += pnl
@@ -1066,9 +1085,34 @@ async def _sim_full(
                             ev["ai_result"] = ai_result
                         sig_events.append(ev)
 
+                        # Resolve partial closes fired by the management AI
+                        for pc in state.partial_closes:
+                            if pc.get("ticket") == position_ticket:
+                                p_pnl = _calc_pnl(order_type, order_open_price, price,
+                                                  pc["lots_closed"], symbol, symbol_specs)
+                                total_pnl     += p_pnl
+                                state.balance  += p_pnl
+                                state.equity    = state.balance
+                                state.free_margin = state.balance
+                                sig_events.append({
+                                    "t": t_norm, "type": "partial_close", "price": price,
+                                    "pnl": round(p_pnl, 2),
+                                    "description": (
+                                        f"Partial close: {pc['lots_closed']} lots @ {price:.5f}"
+                                        f"  ({p_pnl:+.2f})"
+                                    ),
+                                })
+                        state.partial_closes.clear()
+
+                        # Update current_lot from whatever is left in the position
+                        if position_ticket:
+                            pos = state.get_position(position_ticket)
+                            if pos:
+                                current_lot = float(pos.get("lots", current_lot))
+
             # Position closed by AI — calculate P&L at current price
             if position_ticket and state.get_position(position_ticket) is None:
-                pnl = _calc_pnl(order_type, order_open_price, price, lot, symbol, symbol_specs)
+                pnl = _calc_pnl(order_type, order_open_price, price, current_lot, symbol, symbol_specs)
                 total_pnl += pnl
                 state.balance     += pnl
                 state.equity       = state.balance

@@ -558,6 +558,7 @@ function FrozenChart({ pricePath, simResult, pMin, pMax }: {
 const EVT_COLORS: Record<string, string> = {
   entry: "#34d399", sl: "#f87171", tp: "#60a5fa",
   close: "#c084fc", expired: "#facc15", signal_deleted: "#fb923c",
+  partial_close: "#a78bfa",
 }
 // Signal reference line colors: SL=red, Entry=white, TP=green
 const SIG_LINE_COLORS = { sl: "#f87171", entry: "#e2e8f0", tp: "#34d399" }
