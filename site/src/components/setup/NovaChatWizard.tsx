@@ -556,8 +556,9 @@ const EVT_COLORS: Record<string, string> = {
   entry: "#34d399", sl: "#f87171", tp: "#60a5fa",
   close: "#c084fc", expired: "#facc15", signal_deleted: "#fb923c",
 }
+// Signal reference line colors: SL=red, Entry=white, TP=green
+const SIG_LINE_COLORS = { sl: "#f87171", entry: "#e2e8f0", tp: "#34d399" }
 const CHART_H = 240
-const VW = 1000; const VH = 1000
 
 function InlineChart({
   pricePath, setPricePath, tEvents, setTEvents, simResult, onRunSim, simLoading,
@@ -579,14 +580,25 @@ function InlineChart({
   const [deletionMode, setDeletionMode] = useState(false)
   const [pMinStr, setPMinStr] = useState(String(initPMin))
   const [pMaxStr, setPMaxStr] = useState(String(initPMax))
+  // Track actual pixel width so viewBox matches container — prevents distortion of text/circles
+  const [cw, setCw] = useState(400)
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setCw(Math.round(e.contentRect.width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
+  const CH = CHART_H
   const pMin = parseFloat(pMinStr) || 0
   const pMax = parseFloat(pMaxStr) || 1
   const validRange = pMin < pMax
 
-  // ViewBox coordinate helpers — SVG path d requires numbers, not percentages
-  const tToX = (t: number) => (t * VW).toFixed(1)
-  const pToY = (p: number) => pMax === pMin ? String(VH / 2) : ((1 - (p - pMin) / (pMax - pMin)) * VH).toFixed(1)
+  // Coordinates in actual pixel space — viewBox matches container, no distortion
+  const tToX = (t: number) => (t * cw).toFixed(1)
+  const pToY = (p: number) => pMax === pMin ? String(CH / 2)
+    : ((1 - (p - pMin) / (pMax - pMin)) * CH).toFixed(1)
 
   function svgFrac(e: React.MouseEvent<SVGSVGElement>): { x: number; y: number } {
     const r = svgRef.current!.getBoundingClientRect()
@@ -652,7 +664,7 @@ function InlineChart({
     ? displayPath.map((p, i) => `${i === 0 ? "M" : "L"} ${tToX(p.t)} ${pToY(p.price)}`).join(" ")
     : ""
   const closedD = pathD
-    ? pathD + ` L ${tToX(displayPath[displayPath.length - 1].t)} ${VH} L 0 ${VH} Z`
+    ? pathD + ` L ${tToX(displayPath[displayPath.length - 1].t)} ${CH} L 0 ${CH} Z`
     : ""
 
   const simEvents = simResult?.per_signal?.flatMap(s => s.events) ?? []
@@ -662,20 +674,20 @@ function InlineChart({
   const priceDecs = priceRange < 0.005 ? 5 : priceRange < 0.05 ? 4 : priceRange < 0.5 ? 3 : priceRange < 5 ? 2 : 1
   const yLabels = [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, price: pMin + (1 - f) * (pMax - pMin) }))
 
-  // Signal reference lines (entry/SL/TP)
+  // Signal reference lines — always visible while validRange, not just before drawing
   const sigRefLines: { price: number; color: string; label: string; dash: boolean }[] = []
-  if (!hasPath && validRange) {
+  if (validRange) {
     const seen = new Set<number>()
     signals.forEach(sig => {
       const add = (p: number | null, color: string, label: string, dash: boolean) => {
-        if (p === null || seen.has(p)) return
+        if (p === null || p === undefined || seen.has(p)) return
         seen.add(p)
         sigRefLines.push({ price: p, color, label, dash })
       }
       const e = Array.isArray(sig.entry) ? sig.entry[0] : sig.entry as number | null
-      add(e, "#34d399", "E", false)
-      add(sig.sl, "#f87171", "SL", true)
-      add(sig.tp, "#60a5fa", "TP", true)
+      add(e,      SIG_LINE_COLORS.entry, "E",  false)
+      add(sig.sl, SIG_LINE_COLORS.sl,    "SL", true)
+      add(sig.tp, SIG_LINE_COLORS.tp,    "TP", true)
     })
   }
 
@@ -709,12 +721,11 @@ function InlineChart({
           validRange && !hasPath && !deletionMode ? "cursor-crosshair border-emerald-400/20" :
           deletionMode ? "cursor-cell border-orange-500/30" : "border-white/10"
         } bg-black/40`}
-        style={{ height: CHART_H }}
+        style={{ height: CH }}
       >
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${VW} ${VH}`}
-          preserveAspectRatio="none"
+          viewBox={`0 0 ${cw} ${CH}`}
           className="absolute inset-0 w-full h-full"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -731,30 +742,31 @@ function InlineChart({
           {/* Grid lines */}
           {[0.25, 0.5, 0.75].map(v => (
             <g key={v}>
-              <line x1="0" y1={v * VH} x2={VW} y2={v * VH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
-              <line x1={v * VW} y1="0" x2={v * VW} y2={VH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
+              <line x1="0" y1={v * CH} x2={cw} y2={v * CH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
+              <line x1={v * cw} y1="0" x2={v * cw} y2={CH} stroke="white" strokeOpacity="0.04" strokeWidth="1" />
             </g>
           ))}
 
-          {/* Signal reference lines (entry/SL/TP) — shown before drawing */}
+          {/* Signal reference lines (entry/SL/TP) — always visible */}
           {sigRefLines.map((l, i) => {
-            const y = pToY(l.price)
+            const y = parseFloat(pToY(l.price))
+            if (y < 0 || y > CH) return null  // out of range
             return (
               <g key={i}>
-                <line x1="0" y1={y} x2={VW} y2={y}
-                  stroke={l.color} strokeOpacity="0.45" strokeWidth="1.5"
-                  strokeDasharray={l.dash ? "12 8" : "none"} />
-                <rect x={VW - 64} y={parseFloat(y) - 18} width="60" height="20" fill={l.color} fillOpacity="0.12" rx="3" />
-                <text x={VW - 34} y={parseFloat(y) - 3} fill={l.color} fillOpacity="0.85"
-                  fontSize="22" fontFamily="monospace" textAnchor="middle">{l.label}</text>
+                <line x1="0" y1={y} x2={cw} y2={y}
+                  stroke={l.color} strokeOpacity="0.50" strokeWidth="1"
+                  strokeDasharray={l.dash ? "6 4" : "none"} />
+                <rect x={cw - 30} y={y - 8} width="28" height="14" fill={l.color} fillOpacity="0.15" rx="2" />
+                <text x={cw - 16} y={y + 1} fill={l.color} fillOpacity="0.90"
+                  fontSize="9" fontFamily="monospace" textAnchor="middle" dominantBaseline="middle">{l.label}</text>
               </g>
             )
           })}
 
           {/* Y-axis price labels — always visible */}
           {yLabels.map(({ f, price }) => (
-            <text key={f} x="8" y={(f * VH).toFixed(0)} dy="0" dominantBaseline="middle"
-              fill="white" fillOpacity="0.25" fontSize="28" fontFamily="monospace">
+            <text key={f} x="4" y={(f * CH).toFixed(0)} dominantBaseline="middle"
+              fill="white" fillOpacity="0.25" fontSize="9" fontFamily="monospace">
               {price.toFixed(priceDecs)}
             </text>
           ))}
@@ -764,7 +776,7 @@ function InlineChart({
 
           {/* Path line */}
           {pathD && (
-            <path d={pathD} fill="none" stroke="#34d399" strokeWidth="3"
+            <path d={pathD} fill="none" stroke="#34d399" strokeWidth="1.5"
               strokeLinejoin="round" strokeLinecap="round" />
           )}
 
@@ -772,28 +784,26 @@ function InlineChart({
           {simEvents.map((ev, i) => {
             const col = EVT_COLORS[ev.type] ?? "#94a3b8"
             return (
-              <g key={i}>
-                <circle cx={tToX(ev.t)} cy={pToY(ev.price)} r="14"
-                  fill={col} fillOpacity="0.92" stroke="#000" strokeWidth="3" />
-              </g>
+              <circle key={i} cx={tToX(ev.t)} cy={pToY(ev.price)} r="5"
+                fill={col} fillOpacity="0.92" stroke="#000" strokeWidth="1" />
             )
           })}
 
           {/* Deletion event marker */}
           {tEvents.map((ev, i) => (
             <g key={i}>
-              <line x1={tToX(ev.t)} y1="0" x2={tToX(ev.t)} y2={VH}
-                stroke={EVT_COLORS.signal_deleted} strokeWidth="2.5"
-                strokeDasharray="10 6" strokeOpacity="0.80" />
-              <text x={tToX(ev.t)} y="40" fill={EVT_COLORS.signal_deleted} fontSize="28"
-                textAnchor="middle" fontFamily="monospace">DEL</text>
+              <line x1={tToX(ev.t)} y1="0" x2={tToX(ev.t)} y2={CH}
+                stroke={EVT_COLORS.signal_deleted} strokeWidth="1.5"
+                strokeDasharray="5 3" strokeOpacity="0.80" />
+              <text x={tToX(ev.t)} y="10" fill={EVT_COLORS.signal_deleted} fontSize="8"
+                textAnchor="middle" fontFamily="monospace" dominantBaseline="middle">DEL</text>
             </g>
           ))}
 
           {/* Empty hint */}
           {!pathD && !drawing && (
-            <text x={VW / 2} y={VH / 2} dy="10" textAnchor="middle"
-              fill="white" fillOpacity="0.18" fontSize="42" fontFamily="sans-serif">
+            <text x={cw / 2} y={CH / 2} textAnchor="middle"
+              fill="white" fillOpacity="0.18" fontSize="12" fontFamily="sans-serif" dominantBaseline="middle">
               {validRange
                 ? (deletionMode ? "Click to place deletion event" : "Click and drag to draw a price path")
                 : "Set the price range above first"}
