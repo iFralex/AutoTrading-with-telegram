@@ -506,15 +506,16 @@ function FrozenChart({ pricePath, simResult, pMin, pMax }: {
   simResult: SimData | null
   pMin: number; pMax: number
 }) {
-  const tToX = (t: number) => (t * VW).toFixed(1)
-  const pToY = (p: number) => pMax === pMin ? String(VH / 2)
-    : ((1 - (p - pMin) / (pMax - pMin)) * VH).toFixed(1)
+  const FW = 1000; const FH = 140
+  const tToX = (t: number) => (t * FW).toFixed(1)
+  const pToY = (p: number) => pMax === pMin ? String(FH / 2)
+    : ((1 - (p - pMin) / (pMax - pMin)) * FH).toFixed(1)
 
   const pathD = pricePath.length >= 2
     ? pricePath.map((p, i) => `${i === 0 ? "M" : "L"} ${tToX(p.t)} ${pToY(p.price)}`).join(" ")
     : ""
   const closedD = pathD
-    ? pathD + ` L ${tToX(pricePath[pricePath.length - 1].t)} ${VH} L 0 ${VH} Z`
+    ? pathD + ` L ${tToX(pricePath[pricePath.length - 1].t)} ${FH} L 0 ${FH} Z`
     : ""
   const simEvents = simResult?.per_signal?.flatMap(s => s.events) ?? []
   const priceRange = pMax - pMin
@@ -522,8 +523,8 @@ function FrozenChart({ pricePath, simResult, pMin, pMax }: {
 
   return (
     <div className="space-y-2 w-full opacity-55" style={{ maxWidth: 500 }}>
-      <div className="relative rounded-xl overflow-hidden border border-white/8 bg-black/30" style={{ height: 140 }}>
-        <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+      <div className="relative rounded-xl overflow-hidden border border-white/8 bg-black/30" style={{ height: FH }}>
+        <svg viewBox={`0 0 ${FW} ${FH}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
           <defs>
             <linearGradient id="frozen-pgrd" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#34d399" stopOpacity="0.12" />
@@ -533,15 +534,15 @@ function FrozenChart({ pricePath, simResult, pMin, pMax }: {
           {closedD && <path d={closedD} fill="url(#frozen-pgrd)" />}
           {pathD && <path d={pathD} fill="none" stroke="#34d399" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
           {[0, 0.5, 1].map(f => (
-            <text key={f} x="8" y={(f * VH).toFixed(0)} dominantBaseline="middle"
-              fill="white" fillOpacity="0.18" fontSize="28" fontFamily="monospace">
+            <text key={f} x="8" y={(f * FH).toFixed(0)} dominantBaseline="middle"
+              fill="white" fillOpacity="0.18" fontSize="14" fontFamily="monospace">
               {(pMin + (1 - f) * (pMax - pMin)).toFixed(priceDecs)}
             </text>
           ))}
           {simEvents.map((ev, i) => {
             const col = EVT_COLORS[ev.type] ?? "#94a3b8"
-            return <circle key={i} cx={tToX(ev.t)} cy={pToY(ev.price)} r="14"
-              fill={col} fillOpacity="0.70" stroke="#000" strokeWidth="2" />
+            return <circle key={i} cx={tToX(ev.t)} cy={pToY(ev.price)} r="5"
+              fill={col} fillOpacity="0.70" stroke="#000" strokeWidth="1" />
           })}
         </svg>
       </div>
