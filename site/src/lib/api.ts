@@ -536,7 +536,7 @@ export const api = {
 
   /** Nova AI chat endpoint — routes by step field. */
   novaChat(payload: {
-    step: "tg_help" | "mt5_help" | "ai_rules" | "sim_analysis"
+    step: "tg_help" | "mt5_help" | "ai_rules" | "sim_analysis" | "plan_analysis"
     history?: { role: "user" | "model"; text: string }[]
     message?: string
     context?: Record<string, unknown>

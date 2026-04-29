@@ -58,6 +58,8 @@ interface ExtractedSig {
 
 interface ChartSignal { entry: number | null; sl: number | null; tp: number | null; order_type: string }
 
+type PlanNotes = { core?: string | null; pro?: string | null; elite?: string | null }
+
 type ChatMsg =
   | { id: string; from: "nova"; type: "text"; text: string }
   | { id: string; from: "user"; type: "text"; text: string }
@@ -71,7 +73,7 @@ type ChatMsg =
   | { id: string; from: "nova"; type: "sample_msg_form" }
   | { id: string; from: "nova"; type: "chart_draw"; pMin: number; pMax: number; signals: ChartSignal[] }
   | { id: string; from: "nova"; type: "sim_result"; result: SimData }
-  | { id: string; from: "nova"; type: "plan_form" }
+  | { id: string; from: "nova"; type: "plan_form"; notes?: PlanNotes }
   | { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies; advanced?: AdvancedSettings }
   | { id: string; from: "nova"; type: "advanced_form" }
   | { id: string; from: "nova"; type: "action_buttons"; buttons: { label: string; action: string; primary?: boolean }[] }
@@ -960,35 +962,47 @@ const PLANS = [
   },
 ]
 
-function PlanForm({ onSelect }: { onSelect: (plan: "core" | "pro" | "elite") => void }) {
+function PlanForm({ onSelect, notes }: {
+  onSelect: (plan: "core" | "pro" | "elite") => void
+  notes?: PlanNotes
+}) {
   const [sel, setSel] = useState<"core" | "pro" | "elite" | null>(null)
   return (
     <div className="space-y-2.5 min-w-72 max-w-sm">
-      {PLANS.map(p => (
-        <button
-          key={p.id}
-          onClick={() => setSel(p.id)}
-          className={`w-full text-left rounded-xl border p-4 transition-all ${p.accent} ${
-            sel === p.id ? "bg-white/[0.06] ring-1 ring-emerald-400/25" : "bg-white/[0.02] hover:bg-white/[0.04]"
-          }`}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white">{p.name}</span>
-              {"badge" in p && p.badge && (
-                <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-500/14 text-emerald-400 px-1.5 py-0.5 rounded">
-                  {p.badge}
-                </span>
-              )}
-            </div>
-            <span className="font-bold text-white">{p.price}</span>
+      {PLANS.map(p => {
+        const note = notes?.[p.id]
+        return (
+          <div key={p.id}>
+            <button
+              onClick={() => setSel(p.id)}
+              className={`w-full text-left rounded-xl border p-4 transition-all ${p.accent} ${
+                sel === p.id ? "bg-white/[0.06] ring-1 ring-emerald-400/25" : "bg-white/[0.02] hover:bg-white/[0.04]"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white">{p.name}</span>
+                  {"badge" in p && p.badge && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-500/14 text-emerald-400 px-1.5 py-0.5 rounded">
+                      {p.badge}
+                    </span>
+                  )}
+                </div>
+                <span className="font-bold text-white">{p.price}</span>
+              </div>
+              <p className="text-xs text-white/38 mb-1.5">{p.tagline}</p>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                {p.features.map(f => <span key={f} className="text-[11px] text-white/45">✓ {f}</span>)}
+              </div>
+            </button>
+            {note && (
+              <p className="text-[11px] text-amber-400/75 leading-snug mt-1.5 px-1">
+                ⚠ {note}
+              </p>
+            )}
           </div>
-          <p className="text-xs text-white/38 mb-1.5">{p.tagline}</p>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-            {p.features.map(f => <span key={f} className="text-[11px] text-white/45">✓ {f}</span>)}
-          </div>
-        </button>
-      ))}
+        )
+      })}
       <PrimaryBtn onClick={() => sel && onSelect(sel)} disabled={!sel} className="w-full">
         {sel ? `Start with ${PLANS.find(p => p.id === sel)!.name} →` : "Select a plan"}
       </PrimaryBtn>
@@ -1079,6 +1093,25 @@ export default function NovaChatWizard() {
   const novaForm = useCallback(async (type: ChatMsg["type"], extra: Record<string, unknown> = {}, delay = 350) => {
     await new Promise(r => setTimeout(r, delay))
     setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type, ...extra } as ChatMsg])
+  }, [])
+
+  const showPlanForm = useCallback(async (strats: Strategies, adv: AdvancedSettings) => {
+    let notes: PlanNotes | undefined
+    try {
+      const res = await api.novaChat({
+        step: "plan_analysis",
+        context: {
+          strategies: { sizing: strats.sizing, management: strats.management, deletion: strats.deletion },
+          advanced: {
+            minConfidence: adv.minConfidence, rangeEntryPct: adv.rangeEntryPct,
+            entryIfFavorable: adv.entryIfFavorable, tradingHoursEnabled: adv.tradingHoursEnabled,
+            ecoCalendarEnabled: adv.ecoCalendarEnabled, extractionInstructions: adv.extractionInstructions,
+          },
+        },
+      })
+      notes = (res as { plan_notes?: PlanNotes }).plan_notes ?? undefined
+    } catch { /* non-critical — show form without notes */ }
+    setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "plan_form", notes } as ChatMsg])
   }, [])
 
   const userMsg = useCallback((text: string) => {
@@ -1473,8 +1506,8 @@ export default function NovaChatWizard() {
   async function handleSkipSim() {
     userMsg("Skip simulation")
     await novaText("Got it! Let's pick your plan and get you live:")
-    await novaForm("plan_form", {}, 200)
     setPhase("plan")
+    await showPlanForm(strategies, advanced)
   }
 
   async function handleRunSim() {
@@ -1637,7 +1670,7 @@ export default function NovaChatWizard() {
       strategies, advanced: vals,
     } as ChatMsg])
     await novaText("Ready to launch? Choose your plan:")
-    await novaForm("plan_form", {}, 200)
+    await showPlanForm(strategies, vals)
   }
 
   function handleAction(action: string) {
@@ -1705,7 +1738,7 @@ export default function NovaChatWizard() {
     } catch (ex) {
       setPhase("plan")
       await novaText(`Setup failed: ${ex instanceof ApiError ? ex.message : "Please try again."}`)
-      await novaForm("plan_form", {}, 200)
+      await showPlanForm(strategies, advanced)
     }
   }
 
@@ -1847,7 +1880,7 @@ export default function NovaChatWizard() {
                 onSubmit={v => { markSubmitted(key); handleAdvancedSubmit(v) }}
                 onSkip={() => {
                   markSubmitted(key)
-                  novaText("Got it! Choose your plan:").then(() => novaForm("plan_form", {}, 200))
+                  novaText("Got it! Choose your plan:").then(() => showPlanForm(strategies, advanced))
                 }}
               />
           }
@@ -1877,7 +1910,7 @@ export default function NovaChatWizard() {
     if (msg.type === "plan_form")
       return (
         <NovaBubble key={key}>
-          {done ? <CompletedBadge /> : <PlanForm onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
+          {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
         </NovaBubble>
       )
 
