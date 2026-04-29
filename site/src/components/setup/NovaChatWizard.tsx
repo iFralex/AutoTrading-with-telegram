@@ -1235,6 +1235,42 @@ export default function NovaChatWizard() {
   // Track last action_buttons message ID so we can disable it when showing new ones
   const lastActionBtnIdRef = useRef<string | null>(null)
 
+  const [resetConfirm, setResetConfirm] = useState(false)
+
+  async function handleReset() {
+    const userId = sdata.userId
+    setResetConfirm(false)
+    if (userId) {
+      try { await api.deleteUser(userId) } catch { }
+    }
+    setMessages([])
+    setPhase("phone")
+    setFormLoading(false)
+    setChatLoading(false)
+    setChatInput("")
+    setSubmittedForms(new Set())
+    setSdata({ phone: "", apiId: "", apiHash: "", loginKey: "", userId: "", groupId: "", groupName: "", mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "", mt5Balance: "", mt5Currency: "" })
+    setStrategies({ sizing: "", management: "", deletion: "" })
+    setStrategiesReady(false)
+    setAdvanced(DEFAULT_ADVANCED)
+    setAiHistory([])
+    setGroups([])
+    setGroupsLoading(false)
+    setSampleMsg("")
+    setRecentMsgs([])
+    setChartSignals([])
+    setPricePath([])
+    setTEvents([])
+    setSimResult(null)
+    setSimLoading(false)
+    setChartPMin(0)
+    setChartPMax(1)
+    setFrozenCharts(new Set())
+    chartSnapshotsRef.current = new Map()
+    activeChartIdRef.current = null
+    lastActionBtnIdRef.current = null
+  }
+
   // ── Message helpers ───────────────────────────────────────────────────────
 
   const noTyping = (msgs: ChatMsg[]) => msgs.filter(m => m.type !== "typing")
@@ -2108,17 +2144,54 @@ export default function NovaChatWizard() {
     <>
       <style>{`@keyframes nova-bounce { 0%,100%{transform:translateY(0);opacity:.4} 50%{transform:translateY(-4px);opacity:1} }`}</style>
 
+      {resetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="bg-[#0e1117] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <p className="font-semibold text-white text-base">Restart setup?</p>
+            <p className="text-sm text-white/50 leading-relaxed">
+              All your configuration will be deleted and you'll start over from the beginning. This cannot be undone.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleReset}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold bg-red-500/14 border border-red-500/25 text-red-400 hover:bg-red-500/20 transition-colors"
+              >
+                Yes, restart
+              </button>
+              <button
+                onClick={() => setResetConfirm(false)}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold bg-white/[0.04] border border-white/10 text-white/60 hover:text-white hover:bg-white/[0.07] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col h-full" style={{ minHeight: 480 }}>
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] shrink-0">
           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-400 flex items-center justify-center text-black font-bold shadow-[0_0_14px_rgba(0,232,135,0.28)]">N</div>
-          <div>
+          <div className="flex-1">
             <p className="font-semibold text-white text-sm">Nova</p>
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <p className="text-[11px] text-emerald-400/65">Setup assistant · online</p>
             </div>
           </div>
+          {phase !== "phone" && (
+            <button
+              onClick={() => setResetConfirm(true)}
+              title="Restart setup"
+              className="flex items-center gap-1.5 text-[11px] text-white/25 hover:text-white/50 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.04]"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Restart
+            </button>
+          )}
         </div>
 
         {/* Messages */}
