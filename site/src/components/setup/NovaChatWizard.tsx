@@ -962,15 +962,82 @@ const PLANS = [
   },
 ]
 
-function PlanForm({ onSelect, notes }: {
+const PLAN_FULL_FEATURES: Record<"core" | "pro" | "elite", string[]> = {
+  core: [
+    "1 Telegram signal room",
+    "Automatic signal detection",
+    "Instant order execution",
+    "Automatic stop loss & take profit",
+    "Dashboard with basic stats",
+    "Full signal history",
+    "Recent trade history",
+    "Risk-free signal testing",
+    "Step-by-step guided setup",
+    "Encrypted & protected credentials",
+  ],
+  pro: [
+    "Up to 5 Telegram signal rooms",
+    "Advanced signal analysis",
+    "Separate settings per room",
+    "Range orders with optimized entry",
+    "Full stats & charts",
+    "Historical signal backtesting",
+    "Performance dashboard",
+    "Advanced metrics (profit factor, Sharpe ratio)",
+    "Copy settings across rooms",
+  ],
+  elite: [
+    "Unlimited signal rooms",
+    "Custom trading rules (approve / skip / modify)",
+    "Automatic open position management",
+    "Auto-close when signal is revoked",
+    "Copy trading across accounts",
+    "Priority support with dedicated onboarding",
+    "Custom strategy configuration session",
+  ],
+}
+
+function getRelevantMissing(
+  planId: "core" | "pro" | "elite",
+  strats: Strategies,
+  adv: AdvancedSettings,
+): string[] {
+  const hasSizing    = !!strats.sizing
+  const hasManagement = !!strats.management
+  const hasDeletion  = !!strats.deletion
+  const hasFilters   = adv.minConfidence > 0 || adv.entryIfFavorable || adv.tradingHoursEnabled || adv.ecoCalendarEnabled
+  const hasRange     = adv.rangeEntryPct !== 50
+
+  if (planId === "core") {
+    const m: string[] = []
+    if (hasFilters || hasRange) m.push("Advanced signal analysis")
+    if (hasSizing || hasManagement || hasDeletion) m.push("Custom trading rules")
+    return m
+  }
+  if (planId === "pro") {
+    const m: string[] = []
+    if (hasSizing || hasDeletion) m.push("Custom trading rules")
+    if (hasManagement) m.push("Automatic position management")
+    return m
+  }
+  return []
+}
+
+function PlanForm({ onSelect, notes, strategies, advanced }: {
   onSelect: (plan: "core" | "pro" | "elite") => void
   notes?: PlanNotes
+  strategies: Strategies
+  advanced: AdvancedSettings
 }) {
   const [sel, setSel] = useState<"core" | "pro" | "elite" | null>(null)
+  const [expanded, setExpanded] = useState<"core" | "pro" | "elite" | null>(null)
   return (
     <div className="space-y-2.5 min-w-72 max-w-sm">
       {PLANS.map(p => {
         const note = notes?.[p.id]
+        const isOpen = expanded === p.id
+        const fullFeatures = PLAN_FULL_FEATURES[p.id]
+        const missing = getRelevantMissing(p.id, strategies, advanced)
         return (
           <div key={p.id}>
             <button
@@ -995,6 +1062,45 @@ function PlanForm({ onSelect, notes }: {
                 {p.features.map(f => <span key={f} className="text-[11px] text-white/45">✓ {f}</span>)}
               </div>
             </button>
+            <button
+              onClick={() => setExpanded(isOpen ? null : p.id)}
+              className="flex items-center gap-1 text-[11px] text-white/30 hover:text-white/50 transition-colors mt-1 px-1"
+            >
+              <svg
+                className="w-2.5 h-2.5 shrink-0 transition-transform"
+                style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+                fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Dettagli piano
+            </button>
+            {isOpen && (
+              <div className="mx-1 mt-1 rounded-lg border border-white/6 bg-white/[0.025] px-3 py-2.5 space-y-2">
+                <div>
+                  <p className="text-[10px] font-semibold text-emerald-400/60 uppercase tracking-wider mb-1">Incluso</p>
+                  <ul className="space-y-0.5">
+                    {fullFeatures.map((f, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-[11px] text-white/50">
+                        <span className="text-emerald-400/70 shrink-0 mt-px">✓</span>{f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {missing.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-red-400/60 uppercase tracking-wider mb-1">Non incluso</p>
+                    <ul className="space-y-0.5">
+                      {missing.map((f, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-[11px] text-white/50">
+                          <span className="text-red-400/70 shrink-0 mt-px">✗</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
             {note && (
               <p className="text-[11px] text-amber-400/75 leading-snug mt-1.5 px-1">
                 ⚠ {note}
@@ -1910,7 +2016,7 @@ export default function NovaChatWizard() {
     if (msg.type === "plan_form")
       return (
         <NovaBubble key={key}>
-          {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
+          {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} strategies={strategies} advanced={advanced} onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
         </NovaBubble>
       )
 
