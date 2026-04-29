@@ -1073,12 +1073,12 @@ function PlanForm({ onSelect, notes, strategies, advanced }: {
               >
                 <polyline points="9 18 15 12 9 6" />
               </svg>
-              Dettagli piano
+              Plan details
             </button>
             {isOpen && (
               <div className="mx-1 mt-1 rounded-lg border border-white/6 bg-white/[0.025] px-3 py-2.5 space-y-2">
                 <div>
-                  <p className="text-[10px] font-semibold text-emerald-400/60 uppercase tracking-wider mb-1">Incluso</p>
+                  <p className="text-[10px] font-semibold text-emerald-400/60 uppercase tracking-wider mb-1">Included</p>
                   <ul className="space-y-0.5">
                     {fullFeatures.map((f, i) => (
                       <li key={i} className="flex items-start gap-1.5 text-[11px] text-white/50">
@@ -1089,7 +1089,7 @@ function PlanForm({ onSelect, notes, strategies, advanced }: {
                 </div>
                 {missing.length > 0 && (
                   <div>
-                    <p className="text-[10px] font-semibold text-red-400/60 uppercase tracking-wider mb-1">Non incluso</p>
+                    <p className="text-[10px] font-semibold text-red-400/60 uppercase tracking-wider mb-1">Not included</p>
                     <ul className="space-y-0.5">
                       {missing.map((f, i) => (
                         <li key={i} className="flex items-start gap-1.5 text-[11px] text-white/50">
