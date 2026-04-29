@@ -58,7 +58,8 @@ interface ExtractedSig {
 
 interface ChartSignal { entry: number | null; sl: number | null; tp: number | null; order_type: string }
 
-type PlanNotes = { core?: string | null; pro?: string | null; elite?: string | null }
+type PlanNote = { included: string[]; missing: string[] }
+type PlanNotes = { core?: PlanNote | null; pro?: PlanNote | null; elite?: PlanNote | null }
 
 type ChatMsg =
   | { id: string; from: "nova"; type: "text"; text: string }
@@ -967,10 +968,12 @@ function PlanForm({ onSelect, notes }: {
   notes?: PlanNotes
 }) {
   const [sel, setSel] = useState<"core" | "pro" | "elite" | null>(null)
+  const [expanded, setExpanded] = useState<"core" | "pro" | "elite" | null>(null)
   return (
     <div className="space-y-2.5 min-w-72 max-w-sm">
       {PLANS.map(p => {
         const note = notes?.[p.id]
+        const isOpen = expanded === p.id
         return (
           <div key={p.id}>
             <button
@@ -991,13 +994,30 @@ function PlanForm({ onSelect, notes }: {
                 <span className="font-bold text-white">{p.price}</span>
               </div>
               <p className="text-xs text-white/38 mb-1.5">{p.tagline}</p>
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                {p.features.map(f => <span key={f} className="text-[11px] text-white/45">✓ {f}</span>)}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={e => { e.stopPropagation(); setExpanded(isOpen ? null : p.id) }}
+                  className="flex items-center gap-1 text-[11px] text-white/30 hover:text-white/50 transition-colors"
+                >
+                  <svg
+                    className="w-2.5 h-2.5 transition-transform shrink-0"
+                    style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+                    fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                  Funzionalità
+                </button>
               </div>
+              {isOpen && (
+                <div className="mt-2 pt-2 border-t border-white/8 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {p.features.map(f => <span key={f} className="text-[11px] text-white/45">✓ {f}</span>)}
+                </div>
+              )}
             </button>
-            {note && (
+            {note && note.missing.length > 0 && (
               <p className="text-[11px] text-amber-400/75 leading-snug mt-1.5 px-1">
-                ⚠ {note}
+                ⚠ {note.missing.join(" · ")}
               </p>
             )}
           </div>
