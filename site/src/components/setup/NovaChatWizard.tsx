@@ -23,6 +23,7 @@ interface Strategies { sizing: string; management: string; deletion: string }
 interface AdvancedSettings {
   extractionInstructions: string
   minConfidence: number
+  rangeEntryPct: number
   entryIfFavorable: boolean
   tradingHoursEnabled: boolean
   tradingHoursStart: number
@@ -32,7 +33,7 @@ interface AdvancedSettings {
 }
 
 const DEFAULT_ADVANCED: AdvancedSettings = {
-  extractionInstructions: "", minConfidence: 0, entryIfFavorable: false,
+  extractionInstructions: "", minConfidence: 0, rangeEntryPct: 50, entryIfFavorable: false,
   tradingHoursEnabled: false, tradingHoursStart: 8, tradingHoursEnd: 22,
   ecoCalendarEnabled: false, ecoCalendarWindow: 30,
 }
@@ -374,6 +375,7 @@ function StrategiesSummary({ strategies, advanced }: { strategies: Strategies; a
   if (advanced) {
     if (advanced.extractionInstructions) advItems.push({ label: "Signal parsing hint", value: advanced.extractionInstructions, icon: "🔍" })
     if (advanced.minConfidence > 0) advItems.push({ label: "Min. confidence", value: `${advanced.minConfidence}%`, icon: "🎯" })
+    if (advanced.rangeEntryPct !== 50) advItems.push({ label: "Range entry", value: `${advanced.rangeEntryPct}% into range`, icon: "📏" })
     if (advanced.entryIfFavorable) advItems.push({ label: "Entry filter", value: "Only enter if price moves favorably first", icon: "📐" })
     if (advanced.tradingHoursEnabled) advItems.push({ label: "Trading hours", value: `${advanced.tradingHoursStart}:00 – ${advanced.tradingHoursEnd}:00 (server time)`, icon: "🕐" })
     if (advanced.ecoCalendarEnabled) advItems.push({ label: "Economic calendar", value: `Pause ±${advanced.ecoCalendarWindow} min around major events`, icon: "📅" })
@@ -440,6 +442,14 @@ function AdvancedForm({ initialValues, onSubmit, onSkip }: {
           onChange={e => set("minConfidence", Number(e.target.value))}
           className="w-full accent-emerald-400 mt-1" />
         <p className="text-[10px] text-white/25 mt-0.5">Skip signals the AI is less than {vals.minConfidence}% confident about. Set 0 to execute all.</p>
+      </div>
+      {/* Range entry pct */}
+      <div>
+        <label className={lbl}>Range entry — <span className="text-emerald-400/70">{vals.rangeEntryPct}% into range</span></label>
+        <input type="range" min="0" max="100" step="10" value={vals.rangeEntryPct}
+          onChange={e => set("rangeEntryPct", Number(e.target.value))}
+          className="w-full accent-emerald-400 mt-1" />
+        <p className="text-[10px] text-white/25 mt-0.5">When the signal has a price range (e.g. 72500–72600), enter at this % into the range. 0% = lower bound, 50% = midpoint, 100% = upper bound.</p>
       </div>
       {/* Entry favorable */}
       <label className="flex items-center gap-3 cursor-pointer">
@@ -1132,11 +1142,12 @@ export default function NovaChatWizard() {
 
         // Restore advanced settings if any were saved
         const hasAdvanced = s.extraction_instructions || s.min_confidence || s.entry_if_favorable
-          || s.trading_hours_enabled || s.eco_calendar_enabled
+          || s.trading_hours_enabled || s.eco_calendar_enabled || s.range_entry_pct != null
         if (hasAdvanced) {
           setAdvanced({
             extractionInstructions: s.extraction_instructions ?? "",
             minConfidence:          s.min_confidence          ?? 0,
+            rangeEntryPct:          s.range_entry_pct         ?? 50,
             entryIfFavorable:       s.entry_if_favorable      ?? false,
             tradingHoursEnabled:    s.trading_hours_enabled   ?? false,
             tradingHoursStart:      s.trading_hours_start     ?? 8,
@@ -1171,6 +1182,7 @@ export default function NovaChatWizard() {
               advanced: hasAdvanced ? {
                 extractionInstructions: s.extraction_instructions ?? "",
                 minConfidence:          s.min_confidence          ?? 0,
+                rangeEntryPct:          s.range_entry_pct         ?? 50,
                 entryIfFavorable:       s.entry_if_favorable      ?? false,
                 tradingHoursEnabled:    s.trading_hours_enabled   ?? false,
                 tradingHoursStart:      s.trading_hours_start     ?? 8,
@@ -1610,6 +1622,7 @@ export default function NovaChatWizard() {
       phone: sdata.phone,
       extraction_instructions: vals.extractionInstructions || undefined,
       min_confidence: vals.minConfidence || undefined,
+      range_entry_pct: vals.rangeEntryPct,
       entry_if_favorable: vals.entryIfFavorable || undefined,
       trading_hours_enabled: vals.tradingHoursEnabled || undefined,
       trading_hours_start: vals.tradingHoursEnabled ? vals.tradingHoursStart : undefined,
@@ -1678,6 +1691,7 @@ export default function NovaChatWizard() {
         deletion_strategy: strategies.deletion || undefined,
         extraction_instructions: advanced.extractionInstructions || undefined,
         min_confidence: advanced.minConfidence || undefined,
+        range_entry_pct: advanced.rangeEntryPct,
         entry_if_favorable: advanced.entryIfFavorable || undefined,
         trading_hours_enabled: advanced.tradingHoursEnabled || undefined,
         trading_hours_start: advanced.tradingHoursEnabled ? advanced.tradingHoursStart : undefined,
