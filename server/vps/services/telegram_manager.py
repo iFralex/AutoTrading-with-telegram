@@ -564,13 +564,18 @@ class TelegramManager:
         login_key: str,
     ) -> None:
         entry = self._pending.pop(login_key, None)
-        if entry is None:
-            raise ValueError(f"Login pendente '{login_key}' non trovato")
-
-        tmp_client: TelegramClient = entry["client"]
-        await tmp_client.disconnect()
 
         tmp_path = self._sessions_dir / f"_tmp_{login_key}.session"
+
+        if entry is None and not tmp_path.exists():
+            raise ValueError(f"Login pendente '{login_key}' non trovato")
+
+        if entry is not None:
+            tmp_client: TelegramClient = entry["client"]
+            try:
+                await tmp_client.disconnect()
+            except Exception:
+                pass
         final_path = self._sessions_dir / f"{user_id}.session"
         if tmp_path.exists():
             tmp_path.rename(final_path)
