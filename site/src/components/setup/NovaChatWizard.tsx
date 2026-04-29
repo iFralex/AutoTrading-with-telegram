@@ -307,6 +307,9 @@ function GroupForm({ groups, loadingGroups, onSelect }: {
           </button>
         ))}
       </div>
+      <p className="text-[11px] text-white/28 leading-snug pt-0.5">
+        You can add more signal rooms later from the dashboard — the number of rooms depends on your plan.
+      </p>
     </div>
   )
 }
