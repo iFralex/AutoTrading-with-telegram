@@ -2050,7 +2050,7 @@ learning your workflow, not a form asking for inputs."""
         advanced   = ctx.get("advanced", {})
 
         feature_matrix = """
-Plan feature matrix:
+Plan feature matrix (monthly subscription):
 - Core (€79/mo): 1 Telegram channel, automatic SL/TP execution, basic stats.
   DOES NOT include: AI sizing strategy, AI management strategy (trailing/partial-close/breakeven),
   AI deletion strategy, advanced filters (trading hours, economic calendar, confidence threshold,
@@ -2062,33 +2062,31 @@ Plan feature matrix:
   strategies, all advanced filters, priority support. Nothing missing.
 """
         system = (
-            "You are Nova. For each plan (core, pro, elite), produce two short lists based on "
-            "what the user has configured:\n"
-            "  - \"included\": configured features this plan DOES support (short label each, max 6 words)\n"
-            "  - \"missing\":  configured features this plan DOES NOT support (short label each, max 6 words)\n"
-            "Always include at least the base execution feature in 'included' for every plan.\n"
-            "Be specific — reference the actual strategy or filter the user set, not generic feature names.\n"
-            "If nothing is missing for a plan, 'missing' is an empty array.\n"
-            "Respond ONLY with valid JSON (no markdown fences):\n"
-            "{\"core\":{\"included\":[...],\"missing\":[...]},\"pro\":{...},\"elite\":{...}}\n"
-            "Write labels in the same language the user's strategies are written in."
+            "You are Nova. Given the user's configured bot settings, write a brief warning note "
+            "for Core and Pro plans only — explaining in 1–2 sentences exactly what they would lose "
+            "and how the bot would behave instead on that plan. "
+            "Be specific: reference the actual strategy text or filter the user set. "
+            "If the plan already supports everything the user configured, return null for that plan. "
+            "Elite always returns null. "
+            "Respond ONLY with valid JSON: {\"core\": \"...\"|null, \"pro\": \"...\"|null, \"elite\": null}. "
+            "No markdown, no explanation outside the JSON. "
+            "Write notes in the same language the user's strategies are written in."
         )
         configured = {
-            "sizing_strategy":         strategies.get("sizing")     or None,
-            "management_strategy":     strategies.get("management") or None,
-            "deletion_strategy":       strategies.get("deletion")   or None,
-            "min_confidence":          advanced.get("minConfidence") or None,
-            "range_entry_pct":         advanced.get("rangeEntryPct"),
-            "entry_if_favorable":      advanced.get("entryIfFavorable") or None,
-            "trading_hours":           advanced.get("tradingHoursEnabled") or None,
-            "eco_calendar":            advanced.get("ecoCalendarEnabled") or None,
+            "sizing_strategy":   strategies.get("sizing")     or None,
+            "management_strategy": strategies.get("management") or None,
+            "deletion_strategy":  strategies.get("deletion")   or None,
+            "min_confidence":    advanced.get("minConfidence") or None,
+            "range_entry_pct":   advanced.get("rangeEntryPct"),
+            "entry_if_favorable": advanced.get("entryIfFavorable") or None,
+            "trading_hours":     advanced.get("tradingHoursEnabled") or None,
+            "eco_calendar":      advanced.get("ecoCalendarEnabled") or None,
             "extraction_instructions": advanced.get("extractionInstructions") or None,
         }
         prompt = (
             f"{feature_matrix}\n"
             f"User configured:\n{_json.dumps(configured, indent=2, ensure_ascii=False)}"
         )
-        empty = {"included": ["Automatic SL/TP execution"], "missing": []}
         try:
             from vps.services.strategy_executor import _PRO_MODEL
             resp = await sp._client.aio.models.generate_content(
@@ -2097,15 +2095,15 @@ Plan feature matrix:
                 config=_types.GenerateContentConfig(system_instruction=system),
             )
             raw = (resp.text or "").strip()
+            # Strip markdown fences if present
             if raw.startswith("```"):
-                raw = raw.split("```", 2)[1]
+                raw = raw.split("```")[1]
                 if raw.startswith("json"):
                     raw = raw[4:]
-                raw = raw.rsplit("```", 1)[0]
             try:
-                notes = _json.loads(raw.strip())
+                notes = _json.loads(raw)
             except Exception:
-                notes = {"core": empty, "pro": empty, "elite": empty}
+                notes = {"core": None, "pro": None, "elite": None}
             return {"reply": "", "actions": [], "plan_notes": notes}
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
