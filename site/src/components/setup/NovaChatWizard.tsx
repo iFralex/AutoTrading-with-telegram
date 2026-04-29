@@ -346,18 +346,74 @@ function MT5Form({ onSubmit, loading }: {
   )
 }
 
-function SampleMsgForm({ onSubmit, onSkip, loading }: { onSubmit: (m: string) => void; onSkip: () => void; loading: boolean }) {
+type RecentMsg = { id: number; text: string; date: string | null }
+
+function SampleMsgForm({ onSubmit, onSkip, loading, recentMsgs }: {
+  onSubmit: (m: string) => void
+  onSkip: () => void
+  loading: boolean
+  recentMsgs: RecentMsg[]
+}) {
+  const [tab, setTab] = useState<"paste" | "pick">(recentMsgs.length > 0 ? "pick" : "paste")
   const [val, setVal] = useState("")
+  const [picked, setPicked] = useState<number | null>(null)
+
+  function submit() {
+    if (tab === "paste") onSubmit(val.trim())
+    else if (picked !== null) {
+      const msg = recentMsgs.find(m => m.id === picked)
+      if (msg) onSubmit(msg.text)
+    }
+  }
+
+  const canSubmit = tab === "paste" ? !!val.trim() : picked !== null
+
   return (
     <div className="space-y-3 min-w-72 max-w-sm">
-      <textarea
-        className={inp + " resize-none h-28"}
-        placeholder={"e.g.\nBUY EURUSD\nEntry: 1.0850\nSL: 1.0820\nTP: 1.0910"}
-        value={val}
-        onChange={e => setVal(e.target.value)}
-      />
+      {recentMsgs.length > 0 && (
+        <div className="flex rounded-lg overflow-hidden border border-white/8 text-[11px] font-semibold">
+          {(["pick", "paste"] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-1.5 transition-colors ${tab === t ? "bg-white/8 text-white" : "text-white/35 hover:text-white/55"}`}
+            >
+              {t === "pick" ? "Select from channel" : "Paste manually"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "paste" ? (
+        <textarea
+          className={inp + " resize-none h-28"}
+          placeholder={"e.g.\nBUY EURUSD\nEntry: 1.0850\nSL: 1.0820\nTP: 1.0910"}
+          value={val}
+          onChange={e => setVal(e.target.value)}
+        />
+      ) : (
+        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+          {recentMsgs.map(m => (
+            <button
+              key={m.id}
+              onClick={() => setPicked(m.id)}
+              className={`w-full text-left rounded-lg border px-3 py-2 transition-all ${
+                picked === m.id
+                  ? "border-emerald-400/35 bg-emerald-500/8 ring-1 ring-emerald-400/20"
+                  : "border-white/6 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/12"
+              }`}
+            >
+              <p className="text-[11px] text-white/70 leading-snug line-clamp-3 whitespace-pre-wrap">{m.text}</p>
+              {m.date && (
+                <p className="text-[10px] text-white/25 mt-1">{new Date(m.date).toLocaleString()}</p>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2">
-        <PrimaryBtn onClick={() => onSubmit(val.trim())} disabled={!val.trim()} loading={loading} className="flex-1">
+        <PrimaryBtn onClick={submit} disabled={!canSubmit} loading={loading} className="flex-1">
           Use this message →
         </PrimaryBtn>
         <GhostBtn onClick={onSkip}>Skip simulation</GhostBtn>
@@ -1160,6 +1216,7 @@ export default function NovaChatWizard() {
   const [groups, setGroups] = useState<Group[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [sampleMsg, setSampleMsg] = useState("")
+  const [recentMsgs, setRecentMsgs] = useState<RecentMsg[]>([])
   const [chartSignals, setChartSignals] = useState<ChartSignal[]>([])
   const [pricePath, setPricePath] = useState<{ t: number; price: number }[]>([])
   const [tEvents, setTEvents] = useState<{ t: number; type: string }[]>([])
@@ -1543,7 +1600,18 @@ export default function NovaChatWizard() {
 
   async function handleProceedToSim() {
     setStrategiesReady(false)
-    await novaText("Want to test these strategies? Paste a sample signal message from your channel and I'll simulate how your bot would react:")
+    let msgs: RecentMsg[] = []
+    if (sdata.loginKey && sdata.groupId) {
+      try {
+        const res = await api.getRecentMessages(sdata.loginKey, sdata.groupId, 20)
+        msgs = (res.messages ?? []).filter(m => m.text && m.text.trim().length > 0)
+      } catch { }
+    }
+    setRecentMsgs(msgs)
+    const hint = msgs.length > 0
+      ? "Want to test these strategies? Select a recent message from your channel or paste one manually — I'll simulate how your bot would react:"
+      : "Want to test these strategies? Paste a sample signal message from your channel and I'll simulate how your bot would react:"
+    await novaText(hint)
     await novaForm("sample_msg_form", {}, 200)
     setPhase("sample_msg")
   }
@@ -1933,6 +2001,7 @@ export default function NovaChatWizard() {
                 onSubmit={m => { markSubmitted(key); handleSampleMsg(m) }}
                 onSkip={() => { markSubmitted(key); handleSkipSim() }}
                 loading={formLoading}
+                recentMsgs={recentMsgs}
               />
           }
         </NovaBubble>
