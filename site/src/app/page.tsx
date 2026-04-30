@@ -161,12 +161,12 @@ function Hero() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
-          <PrimaryBtn href="#pricing" className="text-base px-8 py-4 w-full sm:w-auto">Start in 3 Minutes →</PrimaryBtn>
+          <PrimaryBtn href="#pricing" className="text-base px-8 py-4 w-full sm:w-auto">Chat with Nova →</PrimaryBtn>
           <OutlineBtn href="#how-it-works" className="text-base px-8 py-4 w-full sm:w-auto">How It Works</OutlineBtn>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-14 text-center">
-          {[["24/7", "Always On"], ["<1s", "Signal → Order"], ["0", "Emotions"], ["3 min", "Guided Setup"]].map(([val, label], i) => (
+          {[["24/7", "Always On"], ["<1s", "Signal → Order"], ["0", "Emotions"], ["5 min", "Nova Setup"]].map(([val, label], i) => (
             <div key={i} className="flex items-center gap-8 sm:gap-14">
               {i > 0 && <div className="w-px h-8 bg-white/10 hidden sm:block" />}
               <div>
@@ -244,9 +244,24 @@ function Ticker() {
 // ─── How It Works ──────────────────────────────────────────────────────────
 function HowItWorks() {
   const steps = [
-    { num: "1", from: "from-emerald-400", to: "to-cyan-400", title: "Connect your signal rooms", body: "In minutes, connect your Telegram account and choose which signal groups to monitor. Then add your trading account. No coding, no technical expertise required.", tags: [["Telegram","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Trading account","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Step-by-step guide","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"]] },
-    { num: "2", from: "from-cyan-400", to: "to-violet-500", title: "AI reads every message", body: "Our AI engine analyzes every message in real time. It recognizes trading signals — even informally written ones — and automatically extracts direction, entry, stop loss and take profit.", tags: [["Signal detection","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Auto-parsing","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Noise filter","text-violet-400 bg-violet-400/10 border-violet-400/20"]] },
-    { num: "3", from: "from-violet-500", to: "to-red-500", title: "The trade opens automatically", body: "In under a second, your order is live with stop loss and take profit already set. No hesitation, no emotion — just precise execution, every time.", tags: [["Instant execution","text-red-400 bg-red-400/10 border-red-400/20"],["Zero emotion","text-red-400 bg-red-400/10 border-red-400/20"],["Active 24/7","text-red-400 bg-red-400/10 border-red-400/20"]] },
+    {
+      num: "1", from: "from-emerald-400", to: "to-cyan-400",
+      title: "Chat with Nova to get set up",
+      body: "Nova, our AI setup assistant, walks you through everything in a conversation — no forms, no manuals. Connect your Telegram account, choose your signal room, link your MT5 broker account. Then tell Nova how you trade, in your own words.",
+      tags: [["Nova AI assistant","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Telegram + MT5","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Plain language rules","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"]],
+    },
+    {
+      num: "2", from: "from-cyan-400", to: "to-violet-500",
+      title: "Preview on a real signal",
+      body: "Paste a message from your channel — or pick one directly from recent messages. Nova shows a chart with entry, SL, and TP, then simulates how your strategy would have played out. You see exactly what will happen before a single order goes live.",
+      tags: [["Live signal preview","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Strategy simulation","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Zero risk","text-violet-400 bg-violet-400/10 border-violet-400/20"]],
+    },
+    {
+      num: "3", from: "from-violet-500", to: "to-red-500",
+      title: "Trades execute automatically",
+      body: "From the moment you launch, every signal in your room is handled in under a second. The system reads, extracts, filters by your rules, and opens the order — 24/7, with no action needed on your part.",
+      tags: [["Instant execution","text-red-400 bg-red-400/10 border-red-400/20"],["Zero emotion","text-red-400 bg-red-400/10 border-red-400/20"],["Always on","text-red-400 bg-red-400/10 border-red-400/20"]],
+    },
   ]
   return (
     <section id="how-it-works" className="relative py-28 px-6 overflow-hidden bg-[#07090f]">
@@ -255,7 +270,7 @@ function HowItWorks() {
         <Reveal className="text-center mb-16">
           <Badge>How It Works</Badge>
           <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">Three steps. Zero effort.</h2>
-          <p className="text-lg text-white/45 max-w-xl mx-auto">From Telegram signal to live order in under a second — fully automated, always on.</p>
+          <p className="text-lg text-white/45 max-w-xl mx-auto">Chat with Nova, preview on a real signal, and go live — all in under 5 minutes.</p>
         </Reveal>
         <div className="grid md:grid-cols-3 gap-6">
           {steps.map(({ num, from, to, title, body, tags }, i) => (
@@ -405,11 +420,12 @@ function Features() {
 
           {/* ── Row 4: Minor features strip ── */}
           <Reveal className="md:col-span-3" delay={0}>
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { path: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", cls: "text-green-400 bg-green-400/10", title: "Secure by Design", body: "Your credentials never leave your systems. Read-only Telegram access, fully encrypted." },
                 { path: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2", cls: "text-cyan-400 bg-cyan-400/10", title: "Complete Trade History", body: "Every signal, every order, every result — logged with full timestamp and details." },
                 { path: "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z", cls: "text-violet-400 bg-violet-400/10", title: "Test Any Signal Risk-Free", body: "Preview exactly how the AI interprets a message before it touches your account." },
+                { path: "M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3", cls: "text-emerald-400 bg-emerald-400/10", title: "Telegram Alerts & Reports", body: "Get notified on every executed trade. Receive a weekly P&L summary — straight to your Telegram." },
               ].map(({ path, cls, title, body }) => (
                 <div key={title} className="flex items-start gap-3 bg-white/[0.02] border border-white/5 rounded-xl p-4 hover:bg-white/[0.04] transition-colors">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${cls}`}>
@@ -424,6 +440,42 @@ function Features() {
             </div>
           </Reveal>
 
+          {/* ── Row 5: Range Orders + Community ── */}
+          <Reveal className="md:col-span-2" delay={0}>
+            <div className={`${cardBase} p-6 h-full`}>
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center text-emerald-400 bg-emerald-400/10">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="font-black text-base text-white">Range Orders & Optimized Entry</h3>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-400/10 border border-emerald-400/20 text-emerald-400">Core</span>
+                  </div>
+                  <p className="text-white/45 text-sm leading-relaxed">Don&apos;t enter blindly at the signal price. Set a range and the system waits for a more favorable entry — or skips if the price never reaches it.</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {["Configurable entry range %", "Entry if price moves in your favor", "Auto-skip if entry window missed", "Separate settings per room"].map(tag => (
+                  <span key={tag} className="text-xs px-3 py-1.5 rounded-full bg-emerald-400/10 border border-emerald-400/20 text-emerald-400">{tag}</span>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          <Reveal delay={100}>
+            <div className={`${cardBase} p-6 h-full`}>
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 text-amber-400 bg-amber-400/10">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              </div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <h3 className="font-black text-base text-white">Community & Copy Trading</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-400">Elite</span>
+              </div>
+              <p className="text-white/45 text-sm leading-relaxed">Make your room public and let others follow your signals automatically. Or browse top providers by Trust Score and copy their trades in one click.</p>
+            </div>
+          </Reveal>
+
         </div>
       </div>
     </section>
@@ -435,7 +487,7 @@ function AIPipeline() {
   const steps = [
     { letter: "1", gradient: "from-emerald-400 to-cyan-400", textBlack: true, title: "Signal detection", body: "The system reads every message in real time and instantly identifies whether it's a trading signal — even if informally written or in different languages.", tag: <><span className="px-2 py-0.5 rounded text-xs bg-emerald-400/10 text-emerald-400">Signal ✓</span><span className="px-2 py-0.5 rounded text-xs bg-white/5 text-white/40">Noise ✗</span></> },
     { letter: "2", gradient: "from-violet-700 to-violet-500", textBlack: false, title: "Automatic parsing", body: "The AI engine extracts direction, entry price, stop loss, and take profit from every signal — in any format, even unstructured.", tag: <span className="font-mono px-2 py-0.5 rounded text-xs bg-white/5 text-emerald-400">{"BUY XAUUSD @ 2342 · SL 2330 · TP 2360"}</span> },
-    { letter: "3", gradient: "from-amber-500 to-red-500", textBlack: false, title: "Custom filter", model: "Elite only", elite: true, body: "Define your trading rules in plain language. The system applies them to every signal — approve, skip, or modify before the order goes live." },
+    { letter: "3", gradient: "from-amber-500 to-red-500", textBlack: false, title: "Custom filter", model: "from Core", elite: false, body: "Define position sizing and entry rules in plain language (Core). Pro adds AI confidence filtering. Elite adds full position management — approve, modify, or close on any event." },
     { letter: "✓", gradient: "from-green-500 to-green-700", textBlack: true, title: "Order opened automatically", body: "The order is placed on your account in under a second, with stop loss and take profit already set. The position is monitored until it closes." },
   ]
   const dividerGrads = ["from-emerald-400/40 to-violet-500/40","from-violet-500/40 to-red-500/40","from-red-500/40 to-green-500/40"]
@@ -495,46 +547,55 @@ type Plan = { name: string; price: string; tagline: string; popular?: boolean; e
 
 const PLANS: Plan[] = [
   {
-    name: "Core", price: "€79", tagline: "Ideal for traders starting with signal rooms who want to automate right away.",
+    name: "Core", price: "€79", tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
     ctaLabel: "Get Started",
     features: [
       { label: "1 Telegram signal room" },
       { label: "Automatic signal detection" },
       { label: "Instant order execution" },
       { label: "Automatic stop loss & take profit" },
+      { label: "Position sizing rules", bold: true },
+      { label: "Custom signal extraction hints", bold: true },
+      { label: "Range orders with optimized entry", bold: true },
+      { label: "Entry filter: only if price moves in your favor", bold: true },
+      { label: "Telegram trade alerts (per executed order)" },
+      { label: "Weekly P&L summary via Telegram" },
       { label: "Dashboard with basic stats" },
-      { label: "Full signal history" },
-      { label: "Recent trade history" },
+      { label: "Full signal & trade history" },
       { label: "Risk-free signal testing" },
-      { label: "Step-by-step guided setup" },
+      { label: "Nova AI-guided setup chat" },
       { label: "Encrypted & protected credentials" },
     ],
-    notIncluded: ["Advanced signal analysis", "Advanced stats & backtesting", "Custom trading rules"],
+    notIncluded: ["Advanced signal analysis", "Backtesting & PDF reports", "AI position management"],
   },
   {
-    name: "Pro", price: "€149", tagline: "For active traders who want data, stats, and multiple analysts at once.",
+    name: "Pro", price: "€149", tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
     popular: true, ctaLabel: "Get Started →", prevPlan: "Core",
     features: [
       { label: "Up to 5 Telegram signal rooms", bold: true },
       { label: "Advanced signal analysis (zero false positives)" },
       { label: "Separate settings per room" },
-      { label: "Range orders with optimized entry" },
+      { label: "AI confidence threshold — filter low-certainty signals", bold: true },
       { label: "Full stats & charts" },
       { label: "Historical signal backtesting" },
       { label: "Performance dashboard (win rate, drawdown, P&L)" },
       { label: "Advanced metrics (profit factor, Sharpe ratio)" },
-      { label: "Copy settings across rooms" },
+      { label: "Trust Score per signal provider", bold: true },
+      { label: "Monthly PDF report + on-demand generation", bold: true },
     ],
-    notIncluded: ["Custom trading rules", "Automatic position management", "Copy trading across accounts"],
+    notIncluded: ["AI position management", "Signal deletion handling", "Trading hours & calendar filters"],
   },
   {
-    name: "Elite", price: "€299", tagline: "For professional traders and multi-account managers. Total control.",
+    name: "Elite", price: "€299", tagline: "Unlimited rooms, AI-managed positions, smart filters, and community sharing.",
     elite: true, ctaLabel: "Contact the team", prevPlan: "Pro",
     features: [
       { label: "Unlimited signal rooms", bold: true },
-      { label: "Custom trading rules (approve / skip / modify)", bold: true },
-      { label: "Automatic open position management", bold: true },
+      { label: "AI position management (approve / modify / close)", bold: true },
+      { label: "Signal deletion handling — auto-react when analyst deletes", bold: true },
       { label: "Auto-close when signal is revoked", bold: true },
+      { label: "Trading hours filter (UTC range + day selector)", bold: true },
+      { label: "Economic calendar — auto-pause around news events", bold: true },
+      { label: "Community room visibility — others follow your signals", bold: true },
       { label: "Copy trading across accounts", bold: true },
       { label: "Priority support with dedicated onboarding", bold: true },
       { label: "Custom strategy configuration session", bold: true },
@@ -623,17 +684,27 @@ function Pricing() {
 
 // ─── Comparison Table ──────────────────────────────────────────────────────
 const TABLE: { label: string; core: boolean | string; pro: boolean | string; elite: boolean | string }[] = [
-  { label: "Signal rooms monitored",           core: "1",    pro: "5",           elite: "Unlimited" },
-  { label: "Automatic signal detection",       core: true,   pro: true,          elite: true },
-  { label: "Advanced signal analysis",         core: false,  pro: true,          elite: true },
-  { label: "Automatic order execution",        core: true,   pro: true,          elite: true },
-  { label: "Range orders with optimal entry",  core: false,  pro: true,          elite: true },
-  { label: "Advanced stats & charts",          core: false,  pro: true,          elite: true },
-  { label: "Historical signal backtesting",    core: false,  pro: true,          elite: true },
-  { label: "Custom trading rules",             core: false,  pro: false,         elite: true },
-  { label: "Automatic position management",    core: false,  pro: false,         elite: true },
-  { label: "Auto-close on signal revocation",  core: false,  pro: false,         elite: true },
-  { label: "Copy trading across accounts",     core: false,  pro: false,         elite: true },
+  { label: "Signal rooms monitored",             core: "1",    pro: "5",           elite: "Unlimited" },
+  { label: "Automatic signal detection",         core: true,   pro: true,          elite: true },
+  { label: "Advanced signal analysis",           core: false,  pro: true,          elite: true },
+  { label: "Automatic order execution",          core: true,   pro: true,          elite: true },
+  { label: "Position sizing rules",              core: true,   pro: true,          elite: true },
+  { label: "Custom signal extraction hints",     core: true,   pro: true,          elite: true },
+  { label: "Range orders with optimized entry",  core: true,   pro: true,          elite: true },
+  { label: "Entry if favorable filter",          core: true,   pro: true,          elite: true },
+  { label: "Trade alerts & weekly P&L summary",  core: true,   pro: true,          elite: true },
+  { label: "AI confidence threshold",            core: false,  pro: true,          elite: true },
+  { label: "Trust Score per signal provider",    core: false,  pro: true,          elite: true },
+  { label: "Advanced stats & charts",            core: false,  pro: true,          elite: true },
+  { label: "Historical signal backtesting",      core: false,  pro: true,          elite: true },
+  { label: "Monthly PDF performance report",     core: false,  pro: true,          elite: true },
+  { label: "AI position management",             core: false,  pro: false,         elite: true },
+  { label: "Signal deletion handling",           core: false,  pro: false,         elite: true },
+  { label: "Auto-close on signal revocation",    core: false,  pro: false,         elite: true },
+  { label: "Trading hours filter",               core: false,  pro: false,         elite: true },
+  { label: "Economic calendar filter",           core: false,  pro: false,         elite: true },
+  { label: "Community room visibility",          core: false,  pro: false,         elite: true },
+  { label: "Copy trading across accounts",       core: false,  pro: false,         elite: true },
 ]
 
 function Cell({ val, gold }: { val: boolean | string; gold?: boolean }) {
@@ -681,9 +752,9 @@ const FAQ_ITEMS = [
   { q: "Which brokers does it work with?", a: "SignalFlow AI works with any broker that offers a MetaTrader 5 account: IC Markets, Pepperstone, Exness, XM, Tickmill, FP Markets and hundreds more. During setup, just enter your account credentials — the system verifies everything automatically." },
   { q: "Is my Telegram account safe?", a: "Yes. The system reads signal room messages in read-only mode — it never sends messages, modifies your account, or accesses your private chats. It only sees the groups you choose. Your credentials never leave your systems." },
   { q: "What is signal backtesting?", a: "Backtesting lets you test a provider's past signals against real historical market data, without risking real money. You can see how many trades would have won, total profit, max drawdown, and the equity curve. Great for evaluating a new analyst before following them." },
-  { q: "How do custom trading rules work? (Elite only)", a: "You write your rules in plain language — for example \"only enter BUY on gold\" or \"don't open new trades on Friday evening\". The system applies these rules to every signal before executing. No code required." },
+  { q: "How do custom trading rules work?", a: "You write your rules in plain language. Core includes position sizing rules (e.g. \"risk 1% per trade\"), signal extraction hints (e.g. \"ignore signals without a stop loss\"), and entry filters. Pro adds an AI confidence threshold to filter uncertain signals. Elite adds full position management rules (e.g. \"move to break-even at 50% of TP\"), trading hours, and economic calendar filters. No code required at any level." },
   { q: "Does the plan include everything, or are there hidden costs?", a: "The subscription includes everything: the automation engine, dashboard, analytics, and all infrastructure required to run the system. No surprise charges. The price you see is what you pay every month." },
-  { q: "Can I use SignalFlow AI without technical knowledge?", a: "Absolutely. It's designed specifically for non-technical users. Setup is guided step by step and takes less than 3 minutes. Nothing to install, no code to write, no need to understand the technology behind it. Just connect and it works." },
+  { q: "Can I use SignalFlow AI without technical knowledge?", a: "Absolutely. Setup is handled by Nova, our AI chat assistant — you just answer its questions in plain language. No forms, no manuals, nothing to install or code. Nova connects your Telegram, links your MT5 account, and even lets you preview a real signal before going live. Most users are up and running in under 5 minutes." },
 ]
 
 function FaqItem({ q, a }: { q: string; a: string }) {
@@ -728,7 +799,7 @@ function FinalCTA() {
       <Reveal className="relative z-10 max-w-3xl mx-auto text-center">
         <Badge>Ready to automate?</Badge>
         <h2 className="text-4xl md:text-5xl font-black mt-6 mb-6 text-white">
-          Stop missing trades.<br /><GradientText>Start in 3 minutes.</GradientText>
+          Stop missing trades.<br /><GradientText>Chat with Nova. Go live.</GradientText>
         </h2>
         <p className="text-lg text-white/48 mb-10 max-w-xl mx-auto">Connect your Telegram signal rooms and let the system execute every trade for you — no emotion, no delays, 24/7.</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
