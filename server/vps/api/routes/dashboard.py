@@ -26,7 +26,8 @@ from typing import Any
 import asyncio
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from vps.api.deps import get_current_user
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -64,7 +65,7 @@ class TestOrderResult(BaseModel):
 
 @router.get("/user")
 async def get_dashboard_user(
-    phone: str = Query(..., description="Numero di telefono registrato"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -76,14 +77,9 @@ async def get_dashboard_user(
     store      = request.app.state.user_store
     log_store  = request.app.state.signal_log_store
 
-    user = await store.get_user_by_phone(phone)
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Nessun utente trovato con il numero {phone}")
+    user_safe = {k: v for k, v in current_user.items() if k != "mt5_password"}
+    user_id = current_user["user_id"]
 
-    # Rimuovi la password dal payload di risposta
-    user_safe = {k: v for k, v in user.items() if k != "mt5_password"}
-
-    user_id = user["user_id"]
     logs    = await log_store.get_by_user_id(user_id, limit=50, offset=0)
     total   = await log_store.count_by_user_id(user_id)
 
@@ -120,9 +116,12 @@ async def _restart_listener(store, tm, user_id: str) -> None:
 @router.get("/user/{user_id}/groups")
 async def list_user_groups(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Ritorna tutti i gruppi/canali dell'utente."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user = await store.get_user(user_id)
     if user is None:
@@ -134,12 +133,15 @@ async def list_user_groups(
 @router.get("/user/{user_id}/available-groups")
 async def list_available_groups(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
     Ritorna i gruppi/canali Telegram a cui è iscritto l'utente,
     usando il client Telethon attivo, escludendo quelli già configurati.
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     tm    = request.app.state.telegram_manager
 
@@ -168,9 +170,12 @@ class AddGroupBody(BaseModel):
 async def add_user_group(
     user_id: str,
     body: AddGroupBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Aggiunge un nuovo gruppo/canale e aggiorna il listener Telegram."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     tm    = request.app.state.telegram_manager
     user  = await store.get_user(user_id)
@@ -204,9 +209,12 @@ async def update_user_group(
     user_id:  str,
     group_id: int,
     body: UpdateGroupSettingsBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Aggiorna le impostazioni di un gruppo specifico."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:
@@ -220,12 +228,15 @@ async def update_user_group(
 async def remove_user_group(
     user_id:  str,
     group_id: int,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
     Removes a group from the user's profile, closes all open follower positions,
     cleans up community follow records, and updates the Telegram listener.
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     tm                 = request.app.state.telegram_manager
     signal_log_store   = request.app.state.signal_log_store
@@ -340,10 +351,11 @@ def _compute_trust_score(trade_stats: dict, signal_stats: dict) -> dict:
 
 @router.get("/trust-scores")
 async def get_trust_scores(
-    user_id: str = Query(..., description="Telegram user_id"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Trust Score per ogni gruppo dell'utente (0-100, basato su win rate, volume, exec rate)."""
+    user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
     closed_trade_store = request.app.state.closed_trade_store
@@ -385,9 +397,12 @@ class DrawdownSettingsBody(BaseModel):
 @router.get("/user/{user_id}/drawdown-status")
 async def get_drawdown_status(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Stato drawdown: se il trading è sospeso + configurazione completa."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
@@ -406,9 +421,12 @@ async def get_drawdown_status(
 async def update_drawdown_settings(
     user_id: str,
     body: DrawdownSettingsBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Aggiorna tutte le impostazioni drawdown."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
@@ -427,9 +445,12 @@ async def update_drawdown_settings(
 @router.post("/user/{user_id}/resume-drawdown")
 async def resume_drawdown(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Riprende il trading dopo una sospensione per drawdown."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
@@ -441,6 +462,7 @@ async def resume_drawdown(
 @router.post("/test-order")
 async def test_order(
     body: TestOrderRequest,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -448,6 +470,8 @@ async def test_order(
     I segnali devono essere nel formato JSON prodotto dall'AI (vedi TestSignalInput).
     Ritorna la lista dei TradeResult senza scrivere nulla nel log.
     """
+    if body.user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store      = request.app.state.user_store
     mt5_trader = request.app.state.mt5_trader
 
@@ -516,6 +540,7 @@ class SimulateMessageBody(BaseModel):
 @router.post("/simulate-message")
 async def simulate_message(
     body: SimulateMessageBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -525,6 +550,8 @@ async def simulate_message(
 
     Non esegue ordini MT5 e non scrive nulla nel log.
     """
+    if body.user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     signal_processor = getattr(request.app.state, "signal_processor", None)
     if signal_processor is None:
         raise HTTPException(
@@ -603,8 +630,8 @@ async def simulate_message(
 
 @router.get("/recent-trades")
 async def get_recent_trades(
-    user_id: str  = Query(..., description="Telegram user_id"),
     limit:   int  = Query(5, ge=1, le=50),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -612,6 +639,7 @@ async def get_recent_trades(
     (ticket, symbol, direction, entry/close price, SL, TP, profit, reason, open/close time).
     Utile per diagnosticare problemi nel recupero dati da MT5.
     """
+    user_id = current_user["user_id"]
     closed_trade_store = request.app.state.closed_trade_store
     trades = await closed_trade_store.get_recent_trades(user_id, limit)
     return {"trades": trades}
@@ -619,7 +647,7 @@ async def get_recent_trades(
 
 @router.get("/trade-stats")
 async def get_trade_stats(
-    user_id: str  = Query(..., description="Telegram user_id"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -633,6 +661,7 @@ async def get_trade_stats(
     - P&L cumulativo (per grafico)
     - Consecutivi massimi vincite/perdite
     """
+    user_id = current_user["user_id"]
     closed_trade_store = request.app.state.closed_trade_store
     stats = await closed_trade_store.get_trade_stats(user_id)
     return stats
@@ -640,8 +669,8 @@ async def get_trade_stats(
 
 @router.get("/stats")
 async def get_dashboard_stats(
-    user_id:  str       = Query(..., description="Telegram user_id"),
     group_id: int | None = Query(None, description="Filtra per gruppo specifico (None = globale)"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -655,6 +684,7 @@ async def get_dashboard_stats(
     - Errori per step della pipeline
     - Andamento balance/equity nel tempo
     """
+    user_id = current_user["user_id"]
     log_store = request.app.state.signal_log_store
     stats = await log_store.get_stats_by_user_id(user_id, group_id=group_id)
     return stats
@@ -662,13 +692,14 @@ async def get_dashboard_stats(
 
 @router.get("/logs")
 async def get_dashboard_logs(
-    user_id:  str       = Query(..., description="Telegram user_id"),
     limit:    int       = Query(50,  ge=1, le=200),
     offset:   int       = Query(0,   ge=0),
     group_id: int | None = Query(None, description="Filtra per gruppo specifico"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Paginazione dei log segnali per un utente, opzionalmente filtrata per gruppo."""
+    user_id = current_user["user_id"]
     log_store = request.app.state.signal_log_store
 
     logs  = await log_store.get_by_user_id(user_id, limit=limit, offset=offset, group_id=group_id)
@@ -679,12 +710,13 @@ async def get_dashboard_logs(
 
 @router.get("/ai-logs")
 async def get_ai_logs(
-    user_id: str = Query(..., description="Telegram user_id"),
     limit:   int = Query(50, ge=1, le=200),
     offset:  int = Query(0,  ge=0),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Ultimi N log di chiamate AI (Flash + Pro + Strategy) per un utente."""
+    user_id = current_user["user_id"]
     ai_log_store = request.app.state.ai_log_store
     logs = await ai_log_store.get_by_user_id(user_id, limit=limit, offset=offset)
     return {"logs": logs, "total": len(logs)}
@@ -692,10 +724,11 @@ async def get_ai_logs(
 
 @router.get("/ai-stats")
 async def get_ai_stats(
-    user_id: str = Query(..., description="Telegram user_id"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Statistiche aggregate sull'utilizzo AI per un utente."""
+    user_id = current_user["user_id"]
     ai_log_store = request.app.state.ai_log_store
     stats = await ai_log_store.get_stats(user_id)
     return stats
@@ -722,6 +755,7 @@ def _rmtree_retry(path, user_id: str, retries: int = 4, delay: float = 1.5) -> N
 @router.delete("/user/{user_id}")
 async def delete_user(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -734,6 +768,8 @@ async def delete_user(
       - Elimina eventuali signal_links
       - Elimina la sessione di setup temporanea (setup_sessions.db)
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store                = request.app.state.user_store
     log_store            = request.app.state.signal_log_store
     ai_log_store         = request.app.state.ai_log_store
@@ -807,6 +843,7 @@ async def delete_user(
 @router.delete("/user/{user_id}/stats")
 async def reset_user_stats(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
@@ -814,6 +851,8 @@ async def reset_user_stats(
     i log AI e i trade chiusi. Le impostazioni (strategie, credenziali MT5)
     restano invariate.
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
     ai_log_store       = request.app.state.ai_log_store
@@ -840,12 +879,15 @@ async def generate_report(
     user_id: str,
     days: int = Query(default=30, ge=1, le=365),
     send_telegram: bool = Query(default=True),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
     Genera un report PDF per gli ultimi N giorni e lo restituisce come download.
     Se send_telegram=true, lo invia anche via Telegram.
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     closed_trade_store = request.app.state.closed_trade_store
     monthly_report_gen = request.app.state.monthly_report_gen
@@ -895,12 +937,15 @@ async def generate_report(
 @router.get("/user/{user_id}/reports")
 async def list_saved_reports(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """
     Returns metadata for all saved monthly PDF reports for this user.
     Each entry contains: id, year, month, generated_at, size_bytes.
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
@@ -916,9 +961,12 @@ async def download_saved_report(
     user_id: str,
     year:    int,
     month:   int,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Downloads a previously saved monthly PDF report as a file attachment."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
@@ -945,10 +993,11 @@ def _group_alias(token: str) -> str:
 
 @router.get("/community/groups")
 async def list_community_groups(
-    user_id: str | None = Query(None, description="When provided, adds is_following per group"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Lists all public community groups with trust score, sorted by score descending."""
+    user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
     closed_trade_store = request.app.state.closed_trade_store
@@ -956,16 +1005,15 @@ async def list_community_groups(
 
     # Pre-build the set of tokens the viewer is following (one query, O(1) lookup)
     followed_tokens: set[str] = set()
-    if user_id:
-        try:
-            following = await group_follow_store.get_following(user_id)
-            # Build token set by looking up each source group
-            for f in following:
-                src_grp = await store.get_user_group(f["source_user_id"], f["source_group_id"])
-                if src_grp and src_grp.get("community_token"):
-                    followed_tokens.add(src_grp["community_token"])
-        except Exception:
-            pass
+    try:
+        following = await group_follow_store.get_following(user_id)
+        # Build token set by looking up each source group
+        for f in following:
+            src_grp = await store.get_user_group(f["source_user_id"], f["source_group_id"])
+            if src_grp and src_grp.get("community_token"):
+                followed_tokens.add(src_grp["community_token"])
+    except Exception:
+        pass
 
     community_groups = await store.get_all_community_groups()
     results = []
@@ -1000,10 +1048,11 @@ async def list_community_groups(
 @router.get("/community/groups/{token}")
 async def get_community_group_detail(
     token:   str,
-    user_id: str | None = Query(None, description="Viewer user_id for is_following check"),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Detailed stats, equity curve and recent trades for a community group."""
+    user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
     closed_trade_store = request.app.state.closed_trade_store
@@ -1022,9 +1071,7 @@ async def get_community_group_detail(
     signal_stats  = await log_store.get_stats_by_user_id(src_uid, group_id=src_gid)
     score_data    = _compute_trust_score(trade_stats, signal_stats)
 
-    is_following = False
-    if user_id:
-        is_following = await group_follow_store.is_following(user_id, src_uid, src_gid)
+    is_following = await group_follow_store.is_following(user_id, src_uid, src_gid)
 
     return {
         "token":         token,
@@ -1047,9 +1094,12 @@ class FollowGroupBody(BaseModel):
 async def follow_community_group(
     token: str,
     body:  FollowGroupBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Follow a community group: creates shadow user_groups entry and group_follows record."""
+    if body.follower_user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     group_follow_store = request.app.state.group_follow_store
 
@@ -1089,11 +1139,12 @@ async def follow_community_group(
 @router.delete("/community/groups/{token}/follow")
 async def unfollow_community_group(
     token:           str,
-    user_id:         str  = Query(...),
     close_positions: bool = Query(default=True),
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Unfollow: optionally closes open positions, removes shadow entry and follow record."""
+    user_id = current_user["user_id"]
     store              = request.app.state.user_store
     group_follow_store = request.app.state.group_follow_store
     signal_log_store   = request.app.state.signal_log_store
@@ -1148,9 +1199,12 @@ async def unfollow_community_group(
 @router.get("/user/{user_id}/community-follows")
 async def list_community_follows(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Lists all community groups the user is following, with stats and their custom settings."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     group_follow_store = request.app.state.group_follow_store
     log_store          = request.app.state.signal_log_store
@@ -1197,9 +1251,12 @@ async def update_community_follow_settings(
     user_id: str,
     token:   str,
     body: UpdateGroupSettingsBody,
+    current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
     """Updates the follower's personal strategies for a followed community group."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
     group_follow_store = request.app.state.group_follow_store
 

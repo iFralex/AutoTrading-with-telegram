@@ -69,7 +69,7 @@ function GroupCard({
     setBusy(true)
     try {
       if (following) {
-        await api.unfollowCommunityGroup(group.token, userId)
+        await api.unfollowCommunityGroup(group.token)
         setFollowing(false)
         onFollowToggle(group.token, false)
       } else {
@@ -136,11 +136,11 @@ function DetailPanel({ token, userId }: { token: string; userId: string | undefi
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.getCommunityGroup(token, userId)
+      const res = await api.getCommunityGroup(token)
       setDetail(res)
     } catch { /* ignore */ }
     finally { setLoading(false) }
-  }, [token, userId])
+  }, [token])
 
   useEffect(() => { load() }, [load])
 
@@ -272,7 +272,7 @@ function FollowCard({
     if (!userId) return
     setBusy(true)
     try {
-      await api.unfollowCommunityGroup(follow.token, userId)
+      await api.unfollowCommunityGroup(follow.token)
       onUnfollowed()
     } catch { /* ignore */ }
     finally { setBusy(false) }
@@ -345,7 +345,7 @@ export default function CommunityPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.listCommunityGroups(user?.user_id)
+      const res = await api.listCommunityGroups()
       setGroups(res.groups)
       if (res.groups.length > 0 && !selected) setSelected(res.groups[0].token)
     } catch { /* ignore */ }

@@ -710,12 +710,9 @@ export const api = {
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
-  /** Recupera profilo utente + ultimi 50 log segnali per numero di telefono. */
-  getDashboardUser(phone: string) {
-    return call<DashboardUserResponse>(
-      "GET",
-      `/api/dashboard/user?phone=${encodeURIComponent(phone)}`
-    )
+  /** Recupera profilo utente + ultimi 50 log segnali (usa il token JWT). */
+  getDashboardUser() {
+    return callAuth<DashboardUserResponse>("GET", "/api/dashboard/user")
   },
 
   // ── Auth ─────────────────────────────────────────────────────────────────
@@ -760,7 +757,7 @@ export const api = {
   /** Carica ulteriori log segnali (paginazione, opzionalmente filtrata per gruppo). */
   getDashboardLogs(userId: string, limit = 50, offset = 0, groupId?: number) {
     const gq = groupId != null ? `&group_id=${groupId}` : ""
-    return call<DashboardLogsResponse>(
+    return callAuth<DashboardLogsResponse>(
       "GET",
       `/api/dashboard/logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}${gq}`
     )
@@ -771,7 +768,7 @@ export const api = {
    * per l'utente indicato e ritorna i TradeResult.
    */
   testOrder(userId: string, signals: TestSignalInput[]) {
-    return call<TestOrderResponse>("POST", "/api/dashboard/test-order", {
+    return callAuth<TestOrderResponse>("POST", "/api/dashboard/test-order", {
       user_id: userId,
       signals,
     })
@@ -779,7 +776,7 @@ export const api = {
 
   /** Simula la pipeline Flash+Pro su un messaggio senza eseguire ordini MT5. */
   simulateMessage(userId: string, message: string) {
-    return call<SimulateMessageResponse>("POST", "/api/dashboard/simulate-message", {
+    return callAuth<SimulateMessageResponse>("POST", "/api/dashboard/simulate-message", {
       user_id: userId,
       message,
     })
@@ -787,7 +784,7 @@ export const api = {
 
   /** Aggiorna la management strategy dell'utente. */
   updateManagementStrategy(userId: string, managementStrategy: string | null) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/management-strategy`,
       { management_strategy: managementStrategy || null }
@@ -796,7 +793,7 @@ export const api = {
 
   /** Aggiorna la sizing strategy dell'utente. */
   updateSizingStrategy(userId: string, sizingStrategy: string | null) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/sizing-strategy`,
       { sizing_strategy: sizingStrategy || null }
@@ -805,7 +802,7 @@ export const api = {
 
   /** Aggiorna la percentuale di posizionamento nel range di ingresso (0–100). */
   updateRangeEntryPct(userId: string, rangeEntryPct: number) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/range-entry-pct`,
       { range_entry_pct: rangeEntryPct }
@@ -814,7 +811,7 @@ export const api = {
 
   /** Aggiorna la strategia da eseguire quando un messaggio segnale viene eliminato. */
   updateDeletionStrategy(userId: string, deletionStrategy: string | null) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/deletion-strategy`,
       { deletion_strategy: deletionStrategy || null }
@@ -823,7 +820,7 @@ export const api = {
 
   /** Aggiorna le istruzioni custom per il prompt di estrazione Pro. */
   updateExtractionInstructions(userId: string, extractionInstructions: string | null) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/extraction-instructions`,
       { extraction_instructions: extractionInstructions || null }
@@ -832,7 +829,7 @@ export const api = {
 
   /** Azzera tutte le statistiche dell'utente (log segnali, AI, trade chiusi). */
   resetUserStats(userId: string) {
-    return call<{ ok: boolean; deleted_signal_logs: number; deleted_ai_logs: number; deleted_trades: number }>(
+    return callAuth<{ ok: boolean; deleted_signal_logs: number; deleted_ai_logs: number; deleted_trades: number }>(
       "DELETE",
       `/api/dashboard/user/${encodeURIComponent(userId)}/stats`
     )
@@ -840,7 +837,7 @@ export const api = {
 
   /** Elimina l'account utente e tutti i dati associati (Telegram, MT5, log, backtest, sessione). */
   deleteUser(userId: string) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "DELETE",
       `/api/dashboard/user/${encodeURIComponent(userId)}`
     )
@@ -850,7 +847,7 @@ export const api = {
 
   /** Ritorna i gruppi/canali Telegram disponibili (non ancora configurati) per un utente. */
   getAvailableGroups(userId: string) {
-    return call<{ groups: Group[] }>(
+    return callAuth<{ groups: Group[] }>(
       "GET",
       `/api/dashboard/user/${encodeURIComponent(userId)}/available-groups`
     )
@@ -858,7 +855,7 @@ export const api = {
 
   /** Ritorna tutti i gruppi/canali configurati per un utente. */
   getUserGroups(userId: string) {
-    return call<{ groups: UserGroup[] }>(
+    return callAuth<{ groups: UserGroup[] }>(
       "GET",
       `/api/dashboard/user/${encodeURIComponent(userId)}/groups`
     )
@@ -866,7 +863,7 @@ export const api = {
 
   /** Aggiunge un nuovo gruppo/canale e riavvia il listener. */
   addUserGroup(userId: string, groupId: number, groupName: string) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "POST",
       `/api/dashboard/user/${encodeURIComponent(userId)}/groups`,
       { group_id: groupId, group_name: groupName }
@@ -885,7 +882,7 @@ export const api = {
       "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window" | "eco_calendar_strategy"
     >>
   ) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/groups/${groupId}`,
       settings
@@ -894,7 +891,7 @@ export const api = {
 
   /** Rimuove un gruppo/canale e riavvia il listener. */
   removeUserGroup(userId: string, groupId: number) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "DELETE",
       `/api/dashboard/user/${encodeURIComponent(userId)}/groups/${groupId}`
     )
@@ -902,7 +899,7 @@ export const api = {
 
   /** Aggiorna la modalità di ingresso quando il prezzo è già favorevole. */
   updateEntryIfFavorable(userId: string, entryIfFavorable: boolean) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/entry-if-favorable`,
       { entry_if_favorable: entryIfFavorable }
@@ -912,7 +909,7 @@ export const api = {
   /** Statistiche aggregate complete per un utente (opzionalmente filtrate per gruppo). */
   getDashboardStats(userId: string, groupId?: number) {
     const gq = groupId != null ? `&group_id=${groupId}` : ""
-    return call<DashboardStats>(
+    return callAuth<DashboardStats>(
       "GET",
       `/api/dashboard/stats?user_id=${encodeURIComponent(userId)}${gq}`
     )
@@ -920,7 +917,7 @@ export const api = {
 
   /** Statistiche di performance sulle operazioni chiuse (P&L, win rate, ecc.). */
   getTradeStats(userId: string) {
-    return call<TradeStats>(
+    return callAuth<TradeStats>(
       "GET",
       `/api/dashboard/trade-stats?user_id=${encodeURIComponent(userId)}`
     )
@@ -928,7 +925,7 @@ export const api = {
 
   /** Ultimi N log di chiamate AI per un utente. */
   getAILogs(userId: string, limit = 50, offset = 0) {
-    return call<{ logs: AILog[]; total: number }>(
+    return callAuth<{ logs: AILog[]; total: number }>(
       "GET",
       `/api/dashboard/ai-logs?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`
     )
@@ -936,7 +933,7 @@ export const api = {
 
   /** Statistiche aggregate sull'utilizzo AI per un utente. */
   getAIStats(userId: string) {
-    return call<AIStats>(
+    return callAuth<AIStats>(
       "GET",
       `/api/dashboard/ai-stats?user_id=${encodeURIComponent(userId)}`
     )
@@ -944,7 +941,7 @@ export const api = {
 
   /** Ultime N posizioni chiuse con tutti i dati (per diagnostica). */
   getRecentTrades(userId: string, limit = 5) {
-    return call<{ trades: ClosedTrade[] }>(
+    return callAuth<{ trades: ClosedTrade[] }>(
       "GET",
       `/api/dashboard/recent-trades?user_id=${encodeURIComponent(userId)}&limit=${limit}`
     )
@@ -954,7 +951,7 @@ export const api = {
 
   /** Trust Score per ogni gruppo: win rate, volume e exec rate aggregati. */
   getTrustScores(userId: string) {
-    return call<{ scores: TrustScore[] }>(
+    return callAuth<{ scores: TrustScore[] }>(
       "GET",
       `/api/dashboard/trust-scores?user_id=${encodeURIComponent(userId)}`
     )
@@ -964,7 +961,7 @@ export const api = {
 
   /** Stato drawdown: se il trading è sospeso, la soglia e le impostazioni periodo/strategia. */
   getDrawdownStatus(userId: string) {
-    return call<{
+    return callAuth<{
       paused:       boolean
       threshold:    number | null
       period:       "daily" | "weekly" | "monthly" | "custom"
@@ -986,7 +983,7 @@ export const api = {
       drawdown_strategy?:    string | null
     }
   ) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/drawdown-settings`,
       settings
@@ -995,7 +992,7 @@ export const api = {
 
   /** Riprende il trading dopo una sospensione per drawdown. */
   resumeDrawdown(userId: string) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "POST",
       `/api/dashboard/user/${encodeURIComponent(userId)}/resume-drawdown`
     )
@@ -1011,7 +1008,7 @@ export const api = {
     const url =
       `${BASE_URL}/api/dashboard/user/${encodeURIComponent(userId)}/generate-report` +
       `?days=${days}&send_telegram=${sendTelegram}`
-    const res = await fetch(url, { method: "POST" })
+    const res = await fetch(url, { method: "POST", credentials: "include" })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
@@ -1029,7 +1026,7 @@ export const api = {
 
   /** Returns metadata list (no PDF bytes) for all saved monthly reports of a user. */
   listReports(userId: string) {
-    return call<{ reports: SavedReport[] }>(
+    return callAuth<{ reports: SavedReport[] }>(
       "GET",
       `/api/dashboard/user/${encodeURIComponent(userId)}/reports`
     )
@@ -1040,7 +1037,7 @@ export const api = {
    */
   async downloadSavedReport(userId: string, year: number, month: number): Promise<void> {
     const url = `${BASE_URL}/api/dashboard/user/${encodeURIComponent(userId)}/reports/${year}/${month}`
-    const res = await fetch(url)
+    const res = await fetch(url, { credentials: "include" })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
@@ -1056,24 +1053,22 @@ export const api = {
 
   // ── Community Groups (Elite) ──────────────────────────────────────────────
 
-  /** List all public community groups sorted by trust score. When userId is provided, is_following is populated per group. */
-  listCommunityGroups(userId?: string) {
-    const q = userId ? `?user_id=${encodeURIComponent(userId)}` : ""
-    return call<{ groups: CommunityGroup[] }>("GET", `/api/dashboard/community/groups${q}`)
+  /** List all public community groups sorted by trust score. */
+  listCommunityGroups() {
+    return callAuth<{ groups: CommunityGroup[] }>("GET", "/api/dashboard/community/groups")
   },
 
   /** Detailed stats for a community group (equity curve, recent trades, score). */
-  getCommunityGroup(token: string, userId?: string) {
-    const q = userId ? `?user_id=${encodeURIComponent(userId)}` : ""
-    return call<CommunityGroupDetail>(
+  getCommunityGroup(token: string) {
+    return callAuth<CommunityGroupDetail>(
       "GET",
-      `/api/dashboard/community/groups/${encodeURIComponent(token)}${q}`
+      `/api/dashboard/community/groups/${encodeURIComponent(token)}`
     )
   },
 
   /** Follow a community group (creates shadow settings entry). */
   followCommunityGroup(token: string, followerUserId: string) {
-    return call<{ ok: boolean; already_following: boolean }>(
+    return callAuth<{ ok: boolean; already_following: boolean }>(
       "POST",
       `/api/dashboard/community/groups/${encodeURIComponent(token)}/follow`,
       { follower_user_id: followerUserId }
@@ -1081,17 +1076,17 @@ export const api = {
   },
 
   /** Unfollow a community group (optionally closes open positions). */
-  unfollowCommunityGroup(token: string, userId: string, closePositions = true) {
-    return call<{ ok: boolean }>(
+  unfollowCommunityGroup(token: string, closePositions = true) {
+    return callAuth<{ ok: boolean }>(
       "DELETE",
       `/api/dashboard/community/groups/${encodeURIComponent(token)}/follow` +
-        `?user_id=${encodeURIComponent(userId)}&close_positions=${closePositions}`
+        `?close_positions=${closePositions}`
     )
   },
 
   /** List community groups the user is currently following. */
   listCommunityFollows(userId: string) {
-    return call<{ following: CommunityFollow[] }>(
+    return callAuth<{ following: CommunityFollow[] }>(
       "GET",
       `/api/dashboard/user/${encodeURIComponent(userId)}/community-follows`
     )
@@ -1106,7 +1101,7 @@ export const api = {
       "entry_if_favorable" | "deletion_strategy" | "extraction_instructions"
     >>
   ) {
-    return call<{ ok: boolean }>(
+    return callAuth<{ ok: boolean }>(
       "PATCH",
       `/api/dashboard/user/${encodeURIComponent(userId)}/community-follows/${encodeURIComponent(token)}`,
       settings
@@ -1117,17 +1112,17 @@ export const api = {
 
   /** Avvia un nuovo run di backtest in background. */
   startBacktest(payload: BacktestRunRequest) {
-    return call<{ run_id: string; status: string }>("POST", "/api/backtest/run", payload)
+    return callAuth<{ run_id: string; status: string }>("POST", "/api/backtest/run", payload)
   },
 
   /** Stato + risultati aggregati di un run (polling). */
   getBacktest(runId: string) {
-    return call<BacktestRun>("GET", `/api/backtest/${encodeURIComponent(runId)}`)
+    return callAuth<BacktestRun>("GET", `/api/backtest/${encodeURIComponent(runId)}`)
   },
 
   /** Trade simulati di un run. */
   getBacktestTrades(runId: string) {
-    return call<{ run_id: string; trades: BacktestTrade[]; total: number }>(
+    return callAuth<{ run_id: string; trades: BacktestTrade[]; total: number }>(
       "GET",
       `/api/backtest/${encodeURIComponent(runId)}/trades`
     )
@@ -1135,7 +1130,7 @@ export const api = {
 
   /** Lista di tutti i run dell'utente. */
   listBacktests(userId: string) {
-    return call<{ runs: BacktestRun[]; total: number }>(
+    return callAuth<{ runs: BacktestRun[]; total: number }>(
       "GET",
       `/api/backtest/list?user_id=${encodeURIComponent(userId)}`
     )
@@ -1143,7 +1138,7 @@ export const api = {
 
   /** Elimina un run e i suoi trade. */
   deleteBacktest(runId: string, userId: string) {
-    return call<{ deleted: string }>(
+    return callAuth<{ deleted: string }>(
       "DELETE",
       `/api/backtest/${encodeURIComponent(runId)}?user_id=${encodeURIComponent(userId)}`
     )
@@ -1151,7 +1146,7 @@ export const api = {
 
   /** Interrompe un backtest in corso. */
   cancelBacktest(runId: string, userId: string) {
-    return call<{ cancelled: string }>(
+    return callAuth<{ cancelled: string }>(
       "POST",
       `/api/backtest/${encodeURIComponent(runId)}/cancel?user_id=${encodeURIComponent(userId)}`
     )

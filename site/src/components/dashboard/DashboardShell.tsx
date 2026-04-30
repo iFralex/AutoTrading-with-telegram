@@ -66,7 +66,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
     setError(null)
     setData(null)
     try {
-      const res = await api.getDashboardUser(trimmed)
+      const res = await api.getDashboardUser()
       setData(res)
       setSection("overview")
     } catch (e: unknown) {

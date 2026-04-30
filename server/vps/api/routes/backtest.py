@@ -15,7 +15,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from vps.api.deps import get_current_user
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -40,11 +41,13 @@ class RunRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/run")
-async def start_backtest(body: RunRequest, request: Request):
+async def start_backtest(body: RunRequest, current_user: dict = Depends(get_current_user), request: Request = None):
     """
     Avvia un backtest in background.
     Ritorna immediatamente con { run_id, status: "running" }.
     """
+    if body.user_id != current_user["user_id"]:
+        raise HTTPException(403, "Accesso non autorizzato")
     bt_engine = getattr(request.app.state, "backtest_engine", None)
     bt_store  = getattr(request.app.state, "backtest_store",  None)
     user_store = request.app.state.user_store
@@ -124,8 +127,9 @@ async def start_backtest(body: RunRequest, request: Request):
 
 
 @router.get("/list")
-async def list_backtests(user_id: str, request: Request):
+async def list_backtests(current_user: dict = Depends(get_current_user), request: Request = None):
     """Lista di tutti i run per l'utente, dal più recente al più vecchio."""
+    user_id = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")
@@ -134,7 +138,7 @@ async def list_backtests(user_id: str, request: Request):
 
 
 @router.get("/{run_id}")
-async def get_backtest(run_id: str, request: Request):
+async def get_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Ritorna lo stato e tutti i risultati aggregati di un run."""
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
@@ -142,11 +146,13 @@ async def get_backtest(run_id: str, request: Request):
     run = await bt_store.get_run(run_id)
     if run is None:
         raise HTTPException(404, f"Run {run_id} non trovato")
+    if run["user_id"] != current_user["user_id"]:
+        raise HTTPException(403, "Accesso non autorizzato")
     return run
 
 
 @router.get("/{run_id}/trades")
-async def get_backtest_trades(run_id: str, request: Request):
+async def get_backtest_trades(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Ritorna tutti i trade simulati del run con dettagli completi."""
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
@@ -154,13 +160,16 @@ async def get_backtest_trades(run_id: str, request: Request):
     run = await bt_store.get_run(run_id)
     if run is None:
         raise HTTPException(404, f"Run {run_id} non trovato")
+    if run["user_id"] != current_user["user_id"]:
+        raise HTTPException(403, "Accesso non autorizzato")
     trades = await bt_store.get_trades(run_id)
     return {"run_id": run_id, "trades": trades, "total": len(trades)}
 
 
 @router.post("/{run_id}/cancel")
-async def cancel_backtest(run_id: str, user_id: str, request: Request):
+async def cancel_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Interrompe un backtest in corso."""
+    user_id = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")
@@ -183,8 +192,9 @@ async def cancel_backtest(run_id: str, user_id: str, request: Request):
 
 
 @router.delete("/{run_id}")
-async def delete_backtest(run_id: str, user_id: str, request: Request):
+async def delete_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Elimina un run e tutti i suoi trade. Richiede user_id per sicurezza."""
+    user_id = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")

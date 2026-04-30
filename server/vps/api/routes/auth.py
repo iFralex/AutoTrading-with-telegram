@@ -21,6 +21,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from vps.api.deps import require_auth
 from vps.services.auth_store import AuthStore
 from vps.services.user_store import UserStore
 from vps.services.signal_log_store import SignalLogStore
@@ -100,20 +101,7 @@ def _get_telegram(request: Request) -> TelegramManager:
     return request.app.state.telegram_manager
 
 
-async def require_auth(request: Request) -> str:
-    """Dependency: verifica sf_access cookie e ritorna il phone."""
-    token = request.cookies.get("sf_access")
-    if not token:
-        raise HTTPException(401, "Non autenticato")
-    try:
-        payload = jwt.decode(token, _secret(), algorithms=["HS256"])
-        if payload.get("type") != "access":
-            raise HTTPException(401, "Tipo token non valido")
-        return payload["sub"]
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token scaduto")
-    except jwt.PyJWTError:
-        raise HTTPException(401, "Token non valido")
+# require_auth è definito in vps.api.deps e importato sopra
 
 
 # ── Endpoint: set-password ────────────────────────────────────────────────────

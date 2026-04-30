@@ -69,7 +69,7 @@ function GroupCard({
     setBusy(true)
     try {
       if (following) {
-        await api.unfollowCommunityGroup(group.token, userId)
+        await api.unfollowCommunityGroup(group.token)
         onFollowToggle(group.token, false)
       } else {
         await api.followCommunityGroup(group.token, userId)
@@ -160,14 +160,14 @@ function DetailPanel({
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await api.getCommunityGroup(token, userId)
+      const d = await api.getCommunityGroup(token)
       setDetail(d)
     } catch {
       setDetail(null)
     } finally {
       setLoading(false)
     }
-  }, [token, userId])
+  }, [token])
 
   useEffect(() => { load() }, [load])
 
@@ -176,7 +176,7 @@ function DetailPanel({
     setFollowBusy(true)
     try {
       if (following) {
-        await api.unfollowCommunityGroup(token, userId)
+        await api.unfollowCommunityGroup(token)
         onFollowToggle(token, false)
       } else {
         await api.followCommunityGroup(token, userId)
@@ -414,7 +414,7 @@ export function CommunityPage({ userId }: { userId?: string }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.listCommunityGroups(userId)
+      const res = await api.listCommunityGroups()
       setGroups(res.groups)
       const initial: Record<string, boolean> = {}
       for (const g of res.groups) initial[g.token] = g.is_following
