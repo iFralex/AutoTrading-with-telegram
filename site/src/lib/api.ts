@@ -155,6 +155,7 @@ async function call<T>(
     res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { "Content-Type": "application/json" },
+      credentials: "include",   // invia/riceve cookie httpOnly per JWT
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
@@ -175,6 +176,21 @@ async function call<T>(
   }
 
   return res.json() as Promise<T>
+}
+
+// Chiama `callAuth` per endpoint che richiedono autenticazione:
+// prova automaticamente il refresh se il token è scaduto (401).
+async function callAuth<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await call<T>(method, path, body)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      // Tenta il refresh silenzioso
+      await call<{ status: string }>("POST", "/api/auth/refresh")
+      return call<T>(method, path, body)
+    }
+    throw e
+  }
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -700,6 +716,45 @@ export const api = {
       "GET",
       `/api/dashboard/user?phone=${encodeURIComponent(phone)}`
     )
+  },
+
+  // ── Auth ─────────────────────────────────────────────────────────────────
+
+  /** Utente corrente dal JWT (con auto-refresh se il token è scaduto). */
+  getMe() {
+    return callAuth<DashboardUserResponse>("GET", "/api/auth/me")
+  },
+
+  /** Login con phone + password → imposta cookie JWT. */
+  login(phone: string, password: string) {
+    return call<{ status: string }>("POST", "/api/auth/login", { phone, password })
+  },
+
+  /** Imposta password dopo setup completato → imposta cookie JWT. */
+  setPassword(phone: string, password: string, userId: string) {
+    return call<{ status: string }>("POST", "/api/auth/set-password", { phone, password, user_id: userId })
+  },
+
+  /** Refresh manuale del token (normalmente gestito da callAuth). */
+  refreshToken() {
+    return call<{ status: string }>("POST", "/api/auth/refresh")
+  },
+
+  /** Logout — cancella cookie e invalida refresh token. */
+  logout() {
+    return call<{ status: string }>("POST", "/api/auth/logout")
+  },
+
+  /** Avvia recupero password via OTP Telegram → restituisce login_key. */
+  forgotPassword(phone: string) {
+    return call<{ login_key: string }>("POST", "/api/auth/forgot", { phone })
+  },
+
+  /** Verifica OTP Telegram e imposta nuova password → imposta cookie JWT. */
+  recoverPassword(phone: string, otp: string, newPassword: string, loginKey: string) {
+    return call<{ status: string }>("POST", "/api/auth/recover", {
+      phone, otp, new_password: newPassword, login_key: loginKey,
+    })
   },
 
   /** Carica ulteriori log segnali (paginazione, opzionalmente filtrata per gruppo). */

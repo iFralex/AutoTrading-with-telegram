@@ -34,9 +34,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from vps.api.routes.setup import router as setup_router
 from vps.api.routes.dashboard import router as dashboard_router
 from vps.api.routes.backtest import router as backtest_router
+from vps.api.routes.auth import router as auth_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
+from vps.services.auth_store import AuthStore
 from vps.services.signal_processor import SignalProcessor
 from vps.services.mt5_trader import MT5Trader
 from vps.services.mt5_range_watcher import RangeOrderWatcher, WatchedOrder
@@ -117,6 +119,12 @@ async def lifespan(app: FastAPI):
     session_store = SetupSessionStore(_sessions_db)
     await session_store.init()
     app.state.setup_session_store = session_store
+
+    # Database autenticazione (password hash + refresh JTI)
+    _auth_db = _bot_dir / "data" / "auth.db"
+    auth_store = AuthStore(_auth_db)
+    await auth_store.init()
+    app.state.auth_store = auth_store
 
     # Log segnali (stessa users.db)
     signal_log_store = SignalLogStore(_db_path)
@@ -1325,6 +1333,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(setup_router)
 app.include_router(dashboard_router)
 app.include_router(backtest_router)

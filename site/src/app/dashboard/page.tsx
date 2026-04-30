@@ -5,7 +5,7 @@ import Link from "next/link"
 import {
   Radio, TrendingUp, Target, Layers,
   ArrowRight, CheckCircle2, XCircle, AlertCircle, Clock,
-  Wallet, BarChart3, Play, Loader2,
+  BarChart3, Play, Loader2, LogOut, Wallet,
 } from "lucide-react"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
 import { api } from "@/src/lib/api"
@@ -130,48 +130,14 @@ function ActivityRow({ log }: { log: SignalLog }) {
   )
 }
 
-// ── No-user login prompt ───────────────────────────────────────────────────────
+// ── Loading screen ─────────────────────────────────────────────────────────────
 
-function LoginPrompt() {
-  const { setPhone, loading, error } = useDashboard()
-  const [input, setInput] = useState("")
-
+function LoadingScreen() {
   return (
-    <div className="flex items-center justify-center h-full pb-20">
-      <div className="w-full max-w-sm px-6 space-y-6 text-center">
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
-          style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,182,212,0.1))", border: "1px solid rgba(16,185,129,0.2)" }}>
-          <Wallet className="w-7 h-7 text-emerald-400" />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-white">Connect your account</h2>
-          <p className="text-sm text-white/40 mt-1">Enter your phone number to access your dashboard</p>
-        </div>
-        <form
-          onSubmit={e => { e.preventDefault(); setPhone(input) }}
-          className="space-y-3"
-        >
-          <input
-            type="tel"
-            placeholder="+39 123 456 7890"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl text-sm font-mono text-white placeholder:text-white/20 focus:outline-none transition-all"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)" }}
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="w-full py-3 rounded-xl text-sm font-bold text-black disabled:opacity-40 transition-all flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(90deg, #10b981, #06b6d4)" }}
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {loading ? "Loading…" : "Continue"}
-          </button>
-        </form>
-        {error && (
-          <p className="text-xs text-red-400 px-4 py-3 rounded-xl border border-red-500/20 bg-red-500/5">{error}</p>
-        )}
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center space-y-3">
+        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mx-auto" />
+        <p className="text-sm text-white/40">Loading your account…</p>
       </div>
     </div>
   )
@@ -180,21 +146,12 @@ function LoginPrompt() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
-  const { user, logs, totalLogs, loading, reload } = useDashboard()
+  const { user, logs, totalLogs, loading, reload, logout } = useDashboard()
   const [pausing, setPausing] = useState(false)
 
-  if (loading && !user) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center space-y-3">
-          <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mx-auto" />
-          <p className="text-sm text-white/40">Loading your account…</p>
-        </div>
-      </div>
-    )
-  }
+  if (loading && !user) return <LoadingScreen />
 
-  if (!user) return <LoginPrompt />
+  if (!user) return null
 
   // Compute KPIs from recent logs
   const signals     = logs.filter(l => l.is_signal).length
@@ -226,17 +183,27 @@ export default function HomePage() {
             {totalLogs.toLocaleString()} messages monitored across {user.groups.length} room{user.groups.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {!user.active && (
+        <div className="flex items-center gap-2">
+          {!user.active && (
+            <button
+              onClick={handleResume}
+              disabled={pausing}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/10 transition-all"
+              style={{ background: "rgba(255,255,255,0.03)" }}
+            >
+              {pausing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              Resume bot
+            </button>
+          )}
           <button
-            onClick={handleResume}
-            disabled={pausing}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/10 transition-all"
+            onClick={logout}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-white/[0.08] text-white/35 hover:text-white/60 hover:border-white/[0.16] transition-all"
             style={{ background: "rgba(255,255,255,0.03)" }}
           >
-            {pausing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Resume bot
+            <LogOut className="w-4 h-4" />
+            Log out
           </button>
-        )}
+        </div>
       </div>
 
       {/* ── KPI row ─────────────────────────────────────────────────────────── */}

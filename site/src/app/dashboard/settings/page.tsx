@@ -283,7 +283,6 @@ function DangerZone({ userId, phone, onDeleted }: {
     try {
       await api.deleteUser(userId)
       try { await api.deleteSession(phone) } catch { /* best-effort */ }
-      sessionStorage.removeItem("sf_phone")
       onDeleted()
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Deletion failed")
@@ -386,11 +385,10 @@ function DangerZone({ userId, phone, onDeleted }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { user, phone, setPhone } = useDashboard()
+  const { user, logout } = useDashboard()
 
-  const handleDeleted = () => {
-    setPhone("")
-    window.location.href = "/"
+  const handleDeleted = async () => {
+    await logout()
   }
 
   if (!user) return (
@@ -439,7 +437,7 @@ export default function SettingsPage() {
         icon={AlertTriangle}
         accent="red"
       >
-        <DangerZone userId={user.user_id} phone={phone} onDeleted={handleDeleted} />
+        <DangerZone userId={user.user_id} phone={user.phone} onDeleted={handleDeleted} />
       </Section>
     </div>
   )

@@ -10,7 +10,7 @@ import { normalizePhone } from "@/src/lib/utils"
 type Phase =
   | "phone" | "session_found" | "creds" | "otp" | "twofa"
   | "group" | "mt5" | "ai_rules" | "sample_msg" | "chart"
-  | "simulating" | "sim_done" | "plan" | "launching" | "done"
+  | "simulating" | "sim_done" | "plan" | "password" | "launching" | "done"
 
 interface SData {
   phone: string; apiId: string; apiHash: string; loginKey: string
@@ -78,6 +78,7 @@ type ChatMsg =
   | { id: string; from: "nova"; type: "strategies_summary"; strategies: Strategies; advanced?: AdvancedSettings }
   | { id: string; from: "nova"; type: "advanced_form" }
   | { id: string; from: "nova"; type: "action_buttons"; buttons: { label: string; action: string; primary?: boolean }[] }
+  | { id: string; from: "nova"; type: "password_form" }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -422,6 +423,39 @@ function SampleMsgForm({ onSubmit, onSkip, loading, recentMsgs }: {
         </PrimaryBtn>
         <GhostBtn onClick={onSkip}>Skip simulation</GhostBtn>
       </div>
+    </div>
+  )
+}
+
+function PasswordForm({ onSubmit, loading }: { onSubmit: (pw: string) => void; loading: boolean }) {
+  const [pw,      setPw]      = useState("")
+  const [confirm, setConfirm] = useState("")
+  const [err,     setErr]     = useState<string | null>(null)
+
+  function submit() {
+    if (pw.length < 8) { setErr("Minimum 8 characters"); return }
+    if (pw !== confirm) { setErr("Passwords don't match"); return }
+    setErr(null)
+    onSubmit(pw)
+  }
+
+  return (
+    <div className="space-y-3 min-w-64">
+      <div>
+        <label className={lbl}>Password</label>
+        <input type="password" className={inp} placeholder="Min. 8 characters" value={pw}
+          onChange={e => { setPw(e.target.value); setErr(null) }} autoFocus autoComplete="new-password" />
+      </div>
+      <div>
+        <label className={lbl}>Confirm password</label>
+        <input type="password" className={inp} placeholder="Repeat password" value={confirm}
+          onChange={e => { setConfirm(e.target.value); setErr(null) }} autoComplete="new-password"
+          onKeyDown={e => e.key === "Enter" && submit()} />
+      </div>
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      <PrimaryBtn onClick={submit} disabled={!pw || !confirm} loading={loading} className="w-full">
+        Set password & launch →
+      </PrimaryBtn>
     </div>
   )
 }
@@ -1920,10 +1954,17 @@ export default function NovaChatWizard() {
 
   async function handlePlanSelect(p: "core" | "pro" | "elite") {
     userMsg(`I'll go with the ${p.charAt(0).toUpperCase() + p.slice(1)} plan`)
-    await novaText("Almost done — finalizing your setup…")
+    await novaText("Almost there! 🔐 Last step: set a password to protect your account.")
+    setPhase("password")
+    setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "password_form" } as ChatMsg])
+  }
+
+  async function handlePasswordSet(password: string) {
+    userMsg("Password set ✓")
+    await novaText("Finalizing your setup…")
     setPhase("launching")
     try {
-      await api.completeSetup({
+      const { user_id } = await api.completeSetup({
         login_key: sdata.loginKey,
         user_id: sdata.userId,
         api_id: Number(sdata.apiId),
@@ -1947,13 +1988,14 @@ export default function NovaChatWizard() {
         eco_calendar_enabled: advanced.ecoCalendarEnabled || undefined,
         eco_calendar_window: advanced.ecoCalendarEnabled ? advanced.ecoCalendarWindow : undefined,
       })
+      await api.setPassword(sdata.phone, password, user_id)
       await novaText("🎉 **Your bot is live!** Redirecting you to the dashboard…")
       setPhase("done")
-      setTimeout(() => router.push(`/dashboard?phone=${encodeURIComponent(sdata.phone)}`), 2000)
+      setTimeout(() => router.push("/dashboard"), 2000)
     } catch (ex) {
-      setPhase("plan")
+      setPhase("password")
       await novaText(`Setup failed: ${ex instanceof ApiError ? ex.message : "Please try again."}`)
-      await showPlanForm(strategies, advanced)
+      setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "password_form" } as ChatMsg])
     }
   }
 
@@ -2127,6 +2169,13 @@ export default function NovaChatWizard() {
       return (
         <NovaBubble key={key}>
           {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} strategies={strategies} advanced={advanced} onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
+        </NovaBubble>
+      )
+
+    if (msg.type === "password_form")
+      return (
+        <NovaBubble key={key}>
+          {done ? <CompletedBadge /> : <PasswordForm loading={formLoading} onSubmit={pw => { markSubmitted(key); handlePasswordSet(pw) }} />}
         </NovaBubble>
       )
 

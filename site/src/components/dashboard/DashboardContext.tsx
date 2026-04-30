@@ -1,8 +1,8 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
-import { api, type DashboardUser, type SignalLog, type DashboardUserResponse } from "@/src/lib/api"
-import { normalizePhone } from "@/src/lib/utils"
+import { useRouter } from "next/navigation"
+import { api, ApiError, type DashboardUser, type SignalLog, type DashboardUserResponse } from "@/src/lib/api"
 
 interface DashboardContextValue {
   user: DashboardUser | null
@@ -10,10 +10,9 @@ interface DashboardContextValue {
   totalLogs: number
   loading: boolean
   error: string | null
-  phone: string
-  setPhone: (p: string) => void
   reload: () => Promise<void>
   updateData: (data: DashboardUserResponse) => void
+  logout: () => Promise<void>
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
@@ -25,53 +24,36 @@ export function useDashboard() {
 }
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
-  const [phone, setPhoneState] = useState("")
-  const [user, setUser]       = useState<DashboardUser | null>(null)
-  const [logs, setLogs]       = useState<SignalLog[]>([])
+  const router = useRouter()
+  const [user,      setUser]      = useState<DashboardUser | null>(null)
+  const [logs,      setLogs]      = useState<SignalLog[]>([])
   const [totalLogs, setTotalLogs] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState<string | null>(null)
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState<string | null>(null)
 
-  const loadUser = useCallback(async (p: string) => {
-    if (!p.trim()) return
+  const loadUser = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.getDashboardUser(p.trim())
+      const res = await api.getMe()
       setUser(res.user)
       setLogs(res.logs)
       setTotalLogs(res.total_logs)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load account data")
-      setUser(null)
+      if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
+        // Token scaduto e refresh fallito, o utente non trovato → login
+        router.push("/login")
+      } else {
+        setError(e instanceof Error ? e.message : "Errore nel caricamento")
+      }
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [router])
 
-  const setPhone = useCallback((p: string) => {
-    const normalized = normalizePhone(p)
-    setPhoneState(normalized)
-    if (normalized) {
-      sessionStorage.setItem("sf_phone", normalized)
-      loadUser(normalized)
-    }
-  }, [loadUser])
+  useEffect(() => { loadUser() }, [loadUser])
 
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const params  = new URLSearchParams(window.location.search)
-    const urlPhone = normalizePhone(params.get("phone") ?? "")
-    const cached   = normalizePhone(sessionStorage.getItem("sf_phone") ?? "")
-    const p = urlPhone || cached
-    if (p) {
-      setPhoneState(p)
-      if (urlPhone) sessionStorage.setItem("sf_phone", urlPhone)
-      loadUser(p)
-    }
-  }, [loadUser])
-
-  const reload = useCallback(async () => { await loadUser(phone) }, [loadUser, phone])
+  const reload = useCallback(async () => { await loadUser() }, [loadUser])
 
   const updateData = useCallback((data: DashboardUserResponse) => {
     setUser(data.user)
@@ -79,9 +61,14 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setTotalLogs(data.total_logs)
   }, [])
 
+  const logout = useCallback(async () => {
+    try { await api.logout() } catch { /* ignora errori di rete */ }
+    router.push("/login")
+  }, [router])
+
   return (
     <DashboardContext.Provider
-      value={{ user, logs, totalLogs, loading, error, phone, setPhone, reload, updateData }}
+      value={{ user, logs, totalLogs, loading, error, reload, updateData, logout }}
     >
       {children}
     </DashboardContext.Provider>
