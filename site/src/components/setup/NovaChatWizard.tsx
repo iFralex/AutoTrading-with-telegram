@@ -10,7 +10,7 @@ import { normalizePhone } from "@/src/lib/utils"
 type Phase =
   | "phone" | "session_found" | "creds" | "otp" | "twofa"
   | "group" | "mt5" | "ai_rules" | "sample_msg" | "chart"
-  | "simulating" | "sim_done" | "plan" | "password" | "launching" | "done"
+  | "simulating" | "sim_done" | "plan" | "payment" | "password" | "launching" | "done"
 
 interface SData {
   phone: string; apiId: string; apiHash: string; loginKey: string
@@ -1271,6 +1271,7 @@ export default function NovaChatWizard() {
   const lastActionBtnIdRef = useRef<string | null>(null)
 
   const [resetConfirm, setResetConfirm] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState<"core" | "pro" | "elite" | null>(null)
 
   async function handleReset() {
     const userId = sdata.userId
@@ -1280,6 +1281,7 @@ export default function NovaChatWizard() {
     }
     setMessages([])
     setPhase("phone")
+    setSelectedPlan(null)
     setFormLoading(false)
     setChatLoading(false)
     setChatInput("")
@@ -1365,6 +1367,61 @@ export default function NovaChatWizard() {
 
   useEffect(() => {
     async function boot() {
+      // Check if returning from Stripe Checkout
+      const params = new URLSearchParams(window.location.search)
+      const paymentSuccess = params.get("payment_success")
+      const stripeSessionId = params.get("stripe_session_id")
+      const returnPhone = params.get("phone")
+
+      if (paymentSuccess === "1" && stripeSessionId && returnPhone) {
+        // Remove query params from URL without triggering a reload
+        window.history.replaceState({}, "", "/setup")
+        await novaText("✅ Payment confirmed! Setting up your account…", 500)
+        setPhase("payment")
+        try {
+          const res = await api.verifyPayment(stripeSessionId, returnPhone)
+          if (!res.paid) {
+            await novaText("⚠️ Payment not yet confirmed by Stripe. Please wait a moment and refresh, or contact support.")
+            return
+          }
+          // Restore session state
+          const sess = await api.getSession(returnPhone)
+          if (sess.exists && !sess.setup_complete) {
+            upd({
+              phone: returnPhone,
+              apiId: String(sess.api_id ?? ""),
+              apiHash: sess.api_hash ?? "",
+              loginKey: sess.login_key ?? "",
+              userId: sess.user_id ?? "",
+              groupId: sess.group_id ?? "",
+              groupName: sess.group_name ?? "",
+              mt5Login: String(sess.mt5_login ?? ""),
+              mt5Server: sess.mt5_server ?? "",
+            })
+            if (res.plan) setSelectedPlan(res.plan as "core" | "pro" | "elite")
+          }
+          await novaText("🔐 Last step: set a password to protect your account.")
+          setPhase("password")
+          setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "password_form" } as ChatMsg])
+        } catch {
+          await novaText("Something went wrong verifying your payment. Please contact support.")
+        }
+        return
+      }
+
+      // Check if payment was cancelled
+      if (params.get("payment_cancelled") === "1") {
+        window.history.replaceState({}, "", "/setup")
+        const cancelPhone = params.get("phone") ?? ""
+        upd({ phone: cancelPhone })
+        await novaText(
+          "👋 Hi! I'm **Nova**, your personal setup assistant. I'll guide you through connecting your Telegram signal room to MetaTrader 5 — just a few minutes and you're live.\n\nWhat's your phone number? (include country code, e.g. +39 123 4567890)",
+          900
+        )
+        await novaForm("phone_form", {}, 150)
+        return
+      }
+
       await novaText(
         "👋 Hi! I'm **Nova**, your personal setup assistant. I'll guide you through connecting your Telegram signal room to MetaTrader 5 — just a few minutes and you're live.\n\nWhat's your phone number? (include country code, e.g. +39 123 4567890)",
         900
@@ -1954,9 +2011,17 @@ export default function NovaChatWizard() {
 
   async function handlePlanSelect(p: "core" | "pro" | "elite") {
     userMsg(`I'll go with the ${p.charAt(0).toUpperCase() + p.slice(1)} plan`)
-    await novaText("Almost there! 🔐 Last step: set a password to protect your account.")
-    setPhase("password")
-    setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "password_form" } as ChatMsg])
+    setSelectedPlan(p)
+    setPhase("payment")
+    await novaText("Redirecting you to secure checkout… 💳")
+    try {
+      await api.saveSession({ phone: sdata.phone, plan: p })
+      const { checkout_url } = await api.createCheckoutSession(sdata.phone, p)
+      window.location.href = checkout_url
+    } catch {
+      setPhase("plan")
+      await novaText("Couldn't start checkout. Please try again.")
+    }
   }
 
   async function handlePasswordSet(password: string) {
@@ -1987,6 +2052,7 @@ export default function NovaChatWizard() {
         trading_hours_end: advanced.tradingHoursEnabled ? advanced.tradingHoursEnd : undefined,
         eco_calendar_enabled: advanced.ecoCalendarEnabled || undefined,
         eco_calendar_window: advanced.ecoCalendarEnabled ? advanced.ecoCalendarWindow : undefined,
+        plan: selectedPlan || undefined,
       })
       await api.setPassword(sdata.phone, password, user_id)
       await novaText("🎉 **Your bot is live!** Redirecting you to the dashboard…")

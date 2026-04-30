@@ -74,6 +74,9 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN drawdown_period TEXT NOT NULL DEFAULT 'daily'",
     "ALTER TABLE users ADD COLUMN drawdown_period_days INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE users ADD COLUMN drawdown_strategy TEXT",
+    "ALTER TABLE users ADD COLUMN plan TEXT",
+    "ALTER TABLE users ADD COLUMN stripe_customer_id TEXT",
+    "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT",
 ]
 
 # ── Tabella multi-gruppo ──────────────────────────────────────────────────────
@@ -232,9 +235,10 @@ class UserStore:
                      group_id, group_name,
                      mt5_login, mt5_password_enc, mt5_server,
                      sizing_strategy, management_strategy, range_entry_pct,
-                     entry_if_favorable, deletion_strategy, extraction_instructions, active)
+                     entry_if_favorable, deletion_strategy, extraction_instructions,
+                     plan, active)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     api_id                  = excluded.api_id,
                     api_hash                = excluded.api_hash,
@@ -247,6 +251,7 @@ class UserStore:
                     sizing_strategy         = excluded.sizing_strategy,
                     management_strategy     = excluded.management_strategy,
                     extraction_instructions = excluded.extraction_instructions,
+                    plan                    = excluded.plan,
                     active                  = 1
                 """,
                 (
@@ -265,6 +270,7 @@ class UserStore:
                     int(bool(user.get("entry_if_favorable"))),
                     user.get("deletion_strategy"),
                     user.get("extraction_instructions"),
+                    user.get("plan"),
                 ),
             )
             await db.commit()
@@ -722,6 +728,9 @@ class UserStore:
             "drawdown_period":      row["drawdown_period"]      if "drawdown_period"      in row.keys() else "daily",
             "drawdown_period_days": row["drawdown_period_days"] if "drawdown_period_days" in row.keys() else 1,
             "drawdown_strategy":    row["drawdown_strategy"]    if "drawdown_strategy"    in row.keys() else None,
+            "plan":                 row["plan"]                 if "plan"                 in row.keys() else None,
+            "stripe_customer_id":   row["stripe_customer_id"]   if "stripe_customer_id"   in row.keys() else None,
+            "stripe_subscription_id": row["stripe_subscription_id"] if "stripe_subscription_id" in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -768,6 +777,9 @@ class UserStore:
             "drawdown_period":      row["drawdown_period"]      if "drawdown_period"      in row.keys() else "daily",
             "drawdown_period_days": row["drawdown_period_days"] if "drawdown_period_days" in row.keys() else 1,
             "drawdown_strategy":    row["drawdown_strategy"]    if "drawdown_strategy"    in row.keys() else None,
+            "plan":                 row["plan"]                 if "plan"                 in row.keys() else None,
+            "stripe_customer_id":   row["stripe_customer_id"]   if "stripe_customer_id"   in row.keys() else None,
+            "stripe_subscription_id": row["stripe_subscription_id"] if "stripe_subscription_id" in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -779,6 +791,43 @@ class UserStore:
             "range_entry_pct":       first.get("range_entry_pct", 0),
             "entry_if_favorable":    first.get("entry_if_favorable", False),
         }
+
+    async def update_billing_info(
+        self,
+        user_id: str,
+        plan: str | None = None,
+        stripe_customer_id: str | None = None,
+        stripe_subscription_id: str | None = None,
+    ) -> None:
+        """Aggiorna i campi di fatturazione Stripe per un utente."""
+        parts: list[str] = []
+        values: list = []
+        if plan is not None:
+            parts.append("plan = ?"); values.append(plan)
+        if stripe_customer_id is not None:
+            parts.append("stripe_customer_id = ?"); values.append(stripe_customer_id)
+        if stripe_subscription_id is not None:
+            parts.append("stripe_subscription_id = ?"); values.append(stripe_subscription_id)
+        if not parts:
+            return
+        values.append(user_id)
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                f"UPDATE users SET {', '.join(parts)} WHERE user_id = ?", values
+            )
+            await db.commit()
+
+    async def get_user_by_stripe_customer(self, stripe_customer_id: str) -> dict | None:
+        """Cerca un utente per stripe_customer_id."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT user_id FROM users WHERE stripe_customer_id = ?", (stripe_customer_id,)
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return await self.get_user(row["user_id"])
 
     # ── Signal links ──────────────────────────────────────────────────────────
 

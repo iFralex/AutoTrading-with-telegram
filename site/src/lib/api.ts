@@ -68,6 +68,7 @@ export interface CompleteSetupPayload {
   eco_calendar_window?: number
   eco_calendar_strategy?: string
   community_visible?: boolean
+  plan?: string
 }
 
 export interface SetupSession {
@@ -99,6 +100,8 @@ export interface SetupSession {
   eco_calendar_window?: number | null
   eco_calendar_strategy?: string | null
   community_visible?: boolean | null
+  plan?: string | null
+  stripe_session_id?: string | null
 }
 
 export type SessionResponse = SetupSession | { exists: false }
@@ -129,6 +132,7 @@ export interface SaveSessionPayload {
   eco_calendar_window?: number
   eco_calendar_strategy?: string
   community_visible?: boolean
+  plan?: string
 }
 
 // ── Errore tipizzato ──────────────────────────────────────────────────────────
@@ -257,6 +261,9 @@ export interface DashboardUser {
   drawdown_period:      "daily" | "weekly" | "monthly" | "custom"
   drawdown_period_days: number
   drawdown_strategy:    string | null
+  plan:                     string | null
+  stripe_subscription_id:   string | null
+  stripe_customer_id:       string | null
   groups: UserGroup[]
 }
 
@@ -547,6 +554,50 @@ export const api = {
     return call<{ ok: boolean }>(
       "DELETE",
       `/api/setup/session?phone=${encodeURIComponent(phone)}`
+    )
+  },
+
+  // ── Billing ───────────────────────────────────────────────────────────────
+
+  /** Crea una sessione Stripe Checkout e ritorna l'URL a cui redirezionare l'utente. */
+  createCheckoutSession(phone: string, plan: "core" | "pro" | "elite") {
+    return call<{ checkout_url: string }>(
+      "POST",
+      "/api/billing/create-checkout-session",
+      { phone, plan }
+    )
+  },
+
+  /** Verifica che il pagamento Stripe sia andato a buon fine. */
+  verifyPayment(stripeSessionId: string, phone: string) {
+    return call<{ paid: boolean; plan: string | null; stripe_session_id: string }>(
+      "GET",
+      `/api/billing/verify-payment?stripe_session_id=${encodeURIComponent(stripeSessionId)}&phone=${encodeURIComponent(phone)}`
+    )
+  },
+
+  /** Ritorna lo stato dell'abbonamento corrente (piano, cancellazione schedulata, ecc.). */
+  getSubscription() {
+    return callAuth<{
+      plan: string | null
+      stripe_subscription_id: string | null
+      stripe_customer_id: string | null
+      cancel_at_period_end: boolean
+      current_period_end: number | null
+      status: string | null
+    }>("GET", "/api/billing/subscription")
+  },
+
+  /** Crea una sessione Stripe Customer Portal (per cambiare o cancellare il piano). */
+  createCustomerPortal() {
+    return callAuth<{ portal_url: string }>("POST", "/api/billing/customer-portal")
+  },
+
+  /** Cancella l'abbonamento a fine del periodo corrente. */
+  cancelSubscription() {
+    return callAuth<{ status: string; current_period_end: number | null }>(
+      "POST",
+      "/api/billing/cancel-subscription"
     )
   },
 

@@ -5,7 +5,7 @@ import { api, type DashboardUserResponse, type UserGroup, type Group, type Trust
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
   Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw, Copy,
-  ShieldAlert, Play,
+  ShieldAlert, Play, CreditCard, Zap, Star, Crown, AlertTriangle,
 } from "lucide-react"
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -96,6 +96,9 @@ export function SettingsPage({
           Canali monitorati e impostazioni AI/ordini per ciascuno
         </p>
       </div>
+
+      {/* ── Piano e abbonamento ──────────────────────────────────────────── */}
+      <PlanSection user={user} />
 
       {/* ── Protezione account (drawdown) ───────────────────────────────── */}
       <DrawdownProtectionSection
@@ -1536,6 +1539,175 @@ function RadioField({
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
           <X className="w-3 h-3" />Annulla
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Plan section ──────────────────────────────────────────────────────────────
+
+const PLAN_META: Record<string, {
+  label: string; price: string
+  Icon: React.ComponentType<{ className?: string }>
+  color: string; border: string; bg: string
+}> = {
+  core:  { label: "Core",  price: "€79/mese",  Icon: Zap,   color: "text-blue-400",   border: "border-blue-500/20",   bg: "bg-blue-600/10"   },
+  pro:   { label: "Pro",   price: "€149/mese", Icon: Star,  color: "text-indigo-400", border: "border-indigo-500/20", bg: "bg-indigo-600/10" },
+  elite: { label: "Elite", price: "€299/mese", Icon: Crown, color: "text-amber-400",  border: "border-amber-500/20",  bg: "bg-amber-600/10"  },
+}
+
+function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) {
+  const plan = user.plan?.toLowerCase() ?? null
+  const meta = plan ? PLAN_META[plan] : null
+  const hasCustomerId = !!user.stripe_customer_id
+  const hasSubId = !!user.stripe_subscription_id
+
+  const [sub, setSub] = useState<{
+    cancel_at_period_end: boolean
+    current_period_end: number | null
+    status: string | null
+  } | null>(null)
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
+  const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!plan) return
+    api.getSubscription()
+      .then(res => setSub({
+        cancel_at_period_end: res.cancel_at_period_end,
+        current_period_end: res.current_period_end,
+        status: res.status,
+      }))
+      .catch(() => {})
+  }, [plan])
+
+  async function handlePortal() {
+    setPortalLoading(true)
+    setError(null)
+    try {
+      const { portal_url } = await api.createCustomerPortal()
+      window.location.href = portal_url
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Errore")
+      setPortalLoading(false)
+    }
+  }
+
+  async function handleCancel() {
+    setCancelLoading(true)
+    setError(null)
+    try {
+      const res = await api.cancelSubscription()
+      setSub(prev => prev
+        ? { ...prev, cancel_at_period_end: true, current_period_end: res.current_period_end }
+        : null
+      )
+      setCancelConfirm(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Errore")
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
+  const periodEnd = sub?.current_period_end
+    ? new Date(sub.current_period_end * 1000).toLocaleDateString("it-IT", {
+        day: "numeric", month: "long", year: "numeric",
+      })
+    : null
+
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-card/30 p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <CreditCard className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground">Piano e abbonamento</h2>
+      </div>
+
+      {!plan || !meta ? (
+        <p className="text-sm text-muted-foreground">Nessun piano attivo.</p>
+      ) : (
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-lg ${meta.bg} border ${meta.border} flex items-center justify-center shrink-0`}>
+            <meta.Icon className={`w-4 h-4 ${meta.color}`} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-foreground">{meta.label}</span>
+              {sub?.cancel_at_period_end && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-600/10 border border-amber-500/20 text-amber-400 font-medium">
+                  Cancellazione schedulata
+                </span>
+              )}
+              {sub?.status === "active" && !sub.cancel_at_period_end && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                  Attivo
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {meta.price}
+              {sub?.cancel_at_period_end && periodEnd ? ` · Scade il ${periodEnd}` : ""}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+      )}
+
+      <div className="flex flex-wrap gap-2 items-center">
+        {hasCustomerId && (
+          <button
+            onClick={handlePortal}
+            disabled={portalLoading || cancelLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+          >
+            {portalLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />}
+            Gestisci abbonamento
+          </button>
+        )}
+
+        {hasSubId && !sub?.cancel_at_period_end && (
+          cancelConfirm ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Confermi la cancellazione?</span>
+              <button
+                onClick={handleCancel}
+                disabled={cancelLoading || portalLoading}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white transition-colors"
+              >
+                {cancelLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Sì, cancella
+              </button>
+              <button
+                onClick={() => setCancelConfirm(false)}
+                disabled={cancelLoading}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setCancelConfirm(true)}
+              disabled={portalLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-red-400 hover:border-red-500/20 transition-all disabled:opacity-50"
+            >
+              <AlertTriangle className="w-3 h-3" />
+              Cancella abbonamento
+            </button>
+          )
+        )}
+
+        {sub?.cancel_at_period_end && periodEnd && (
+          <p className="w-full text-xs text-amber-400/80 flex items-center gap-1.5 mt-1">
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            L&apos;abbonamento si concluderà il {periodEnd}. Usa &ldquo;Gestisci abbonamento&rdquo; per ripristinarlo.
+          </p>
+        )}
       </div>
     </div>
   )

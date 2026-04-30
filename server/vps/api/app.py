@@ -35,6 +35,7 @@ from vps.api.routes.setup import router as setup_router
 from vps.api.routes.dashboard import router as dashboard_router
 from vps.api.routes.backtest import router as backtest_router
 from vps.api.routes.auth import router as auth_router
+from vps.api.routes.billing import router as billing_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
@@ -1334,6 +1335,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.include_router(setup_router)
 app.include_router(dashboard_router)
 app.include_router(backtest_router)

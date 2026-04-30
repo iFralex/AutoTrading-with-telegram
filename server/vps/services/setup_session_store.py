@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS setup_sessions (
     eco_calendar_window     INTEGER DEFAULT 30,
     eco_calendar_strategy   TEXT,
     community_visible       INTEGER DEFAULT 0,
+    plan                    TEXT,
+    stripe_session_id       TEXT,
     updated_at              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -74,6 +76,7 @@ _ALLOWED_FIELDS = {
     "trading_hours_days",
     "eco_calendar_enabled", "eco_calendar_window", "eco_calendar_strategy",
     "community_visible",
+    "plan", "stripe_session_id",
 }
 
 # Mappatura nomi frontend → colonne DB
@@ -138,6 +141,8 @@ class SetupSessionStore:
                 "ALTER TABLE setup_sessions ADD COLUMN eco_calendar_window INTEGER DEFAULT 30",
                 "ALTER TABLE setup_sessions ADD COLUMN eco_calendar_strategy TEXT",
                 "ALTER TABLE setup_sessions ADD COLUMN community_visible INTEGER DEFAULT 0",
+                "ALTER TABLE setup_sessions ADD COLUMN plan TEXT",
+                "ALTER TABLE setup_sessions ADD COLUMN stripe_session_id TEXT",
             ]:
                 try:
                     await db.execute(_sql)
@@ -191,6 +196,8 @@ class SetupSessionStore:
             "eco_calendar_window":     row["eco_calendar_window"] if row["eco_calendar_window"] is not None else 30,
             "eco_calendar_strategy":   row["eco_calendar_strategy"],
             "community_visible":       bool(row["community_visible"] or 0),
+            "plan":                    row["plan"],
+            "stripe_session_id":       row["stripe_session_id"],
         }
 
     async def get_mt5_password(self, phone: str) -> str | None:

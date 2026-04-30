@@ -138,6 +138,7 @@ class CompleteSetupBody(BaseModel):
     eco_calendar_window: int = 30
     eco_calendar_strategy: str | None = None
     community_visible: bool = False
+    plan: str | None = None
 
 
 # ── Session endpoints ────────────────────────────────────────────────────────
@@ -1774,6 +1775,7 @@ async def complete_setup(
             "mt5_login":    body.mt5_login,
             "mt5_password": mt5_password,
             "mt5_server":   body.mt5_server,
+            "plan":         body.plan,
         })
 
         # Popola il primo gruppo nella tabella multi-gruppo
