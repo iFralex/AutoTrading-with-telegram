@@ -1811,6 +1811,29 @@ async def complete_setup(
         # Pulizia della sessione temporanea
         await ss.delete(body.phone)
 
+        # Messaggio di benvenuto via Telegram
+        plan_label = {"core": "Core", "pro": "Pro", "elite": "Elite"}.get(body.plan or "", "")
+        welcome_lines = [
+            "🎉 *Benvenuto su AutoTrading!*",
+            "",
+            "Il tuo bot è ora attivo e in ascolto sul canale segnali.",
+            "",
+        ]
+        if body.mt5_login:
+            welcome_lines += [f"🔗 Account MT5: `{body.mt5_login}` su {body.mt5_server or 'server configurato'}"]
+        if plan_label:
+            welcome_lines += [f"📦 Piano: *{plan_label}*"]
+        welcome_lines += [
+            "",
+            "Quando ricevi un segnale dal canale, il bot lo elaborerà automaticamente e ti notificherà qui.",
+            "",
+            "Puoi gestire tutto dal dashboard. Buon trading! 📈",
+        ]
+        try:
+            tm.notify_user(body.user_id, "\n".join(welcome_lines))
+        except Exception as _w_exc:
+            logger.warning("Messaggio di benvenuto non inviato a %s: %s", body.user_id, _w_exc)
+
         logger.info("Setup completato — utente %s attivo", body.user_id)
         return {"status": "active", "user_id": body.user_id}
 
