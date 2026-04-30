@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { api, type DashboardUser, type SignalLog, type DashboardUserResponse } from "@/src/lib/api"
+import { normalizePhone } from "@/src/lib/utils"
 
 interface DashboardContextValue {
   user: DashboardUser | null
@@ -49,18 +50,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setPhone = useCallback((p: string) => {
-    setPhoneState(p)
-    if (p) {
-      sessionStorage.setItem("sf_phone", p)
-      loadUser(p)
+    const normalized = normalizePhone(p)
+    setPhoneState(normalized)
+    if (normalized) {
+      sessionStorage.setItem("sf_phone", normalized)
+      loadUser(normalized)
     }
   }, [loadUser])
 
   useEffect(() => {
     if (typeof window === "undefined") return
     const params  = new URLSearchParams(window.location.search)
-    const urlPhone = params.get("phone") ?? ""
-    const cached   = sessionStorage.getItem("sf_phone") ?? ""
+    const urlPhone = normalizePhone(params.get("phone") ?? "")
+    const cached   = normalizePhone(sessionStorage.getItem("sf_phone") ?? "")
     const p = urlPhone || cached
     if (p) {
       setPhoneState(p)

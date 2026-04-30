@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { api, ApiError, type Group, type VerifyCodeResponse } from "@/src/lib/api"
+import { normalizePhone } from "@/src/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1341,7 +1342,8 @@ export default function NovaChatWizard() {
 
   // ── Phase handlers ────────────────────────────────────────────────────────
 
-  async function handlePhone(phone: string) {
+  async function handlePhone(rawPhone: string) {
+    const phone = normalizePhone(rawPhone)
     setFormLoading(true)
     userMsg(phone)
     try {

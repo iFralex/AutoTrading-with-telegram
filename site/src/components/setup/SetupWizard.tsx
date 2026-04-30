@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { api, ApiError, type SetupSession, type Group, type MT5Account, type VerifyCodeResponse } from "@/src/lib/api"
+import { normalizePhone } from "@/src/lib/utils"
 import NovaChatWizard from "./NovaChatWizard"
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -289,7 +290,7 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
 
   // ── Phone ─────────────────────────────────────────────────────────────────
   async function handlePhone() {
-    const phone = data.phone.trim()
+    const phone = normalizePhone(data.phone)
     if (!phone) return
     setLoading(true); setErr(null); setFoundSession(null)
     try {
@@ -475,7 +476,7 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
                 placeholder="39 333 123 4567"
                 value={data.phone}
                 autoFocus
-                onChange={e => { update({ phone: e.target.value.replace(/\D/g, "") }); clrErr() }}
+                onChange={e => { update({ phone: normalizePhone(e.target.value) }); clrErr() }}
                 onKeyDown={e => e.key === "Enter" && data.phone && !loading && handlePhone()}
               />
             </div>
