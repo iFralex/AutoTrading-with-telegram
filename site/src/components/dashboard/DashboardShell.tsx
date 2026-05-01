@@ -16,6 +16,7 @@ import {
   History,
   TrendingUp,
   Users,
+  ShoppingCart,
 } from "lucide-react"
 import { api, type DashboardUserResponse } from "@/src/lib/api"
 import { OverviewPage }   from "./pages/OverviewPage"
@@ -26,11 +27,12 @@ import { LogsPage }       from "./pages/LogsPage"
 import { TestPage }       from "./pages/TestPage"
 import { TradesPage }     from "./pages/TradesPage"
 import { BacktestPage }   from "./pages/BacktestPage"
-import { CommunityPage }  from "./pages/CommunityPage"
+import { CommunityPage }    from "./pages/CommunityPage"
+import { ManualOrderPage }  from "./pages/ManualOrderPage"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades" | "backtest" | "community"
+type Section = "overview" | "analytics" | "ai" | "settings" | "logs" | "test" | "trades" | "backtest" | "community" | "orders"
 
 const NAV: {
   id: Section
@@ -45,6 +47,7 @@ const NAV: {
   { id: "logs",       label: "Log Segnali",    Icon: ScrollText },
   { id: "trades",     label: "Trade Recenti",  Icon: History },
   { id: "backtest",   label: "Backtest",       Icon: TrendingUp },
+  { id: "orders",     label: "Manual Order",   Icon: ShoppingCart },
   { id: "community",  label: "Community",      Icon: Users, alwaysEnabled: true },
   { id: "test",       label: "Strumenti",      Icon: FlaskConical },
 ]
@@ -259,7 +262,8 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
               {section === "logs"      && <LogsPage      data={data} />}
               {section === "trades"    && <TradesPage    userId={data.user.user_id} />}
               {section === "backtest"  && <BacktestPage  userId={data.user.user_id} user={data.user} />}
-              {section === "test"      && <TestPage      userId={data.user.user_id} />}
+              {section === "orders"    && <ManualOrderPage userId={data.user.user_id} />}
+              {section === "test"      && <TestPage       userId={data.user.user_id} />}
             </>
           )}
         </main>
