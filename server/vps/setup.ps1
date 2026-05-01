@@ -113,10 +113,16 @@ $envExmp = "$InstallDir\bot\vps\.env.example"
 if (-not (Test-Path $envDest)) {
     Copy-Item $envExmp $envDest
     # Genera una chiave di cifratura Fernet casuale
-    $key = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    (Get-Content $envDest) -replace "ENCRYPTION_KEY=.*", "ENCRYPTION_KEY=$key" |
+    $encKey = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Genera un segreto casuale per la dashboard admin
+    $adminSecret = python -c "import secrets; print(secrets.token_hex(32))"
+    (Get-Content $envDest) `
+        -replace "ENCRYPTION_KEY=.*", "ENCRYPTION_KEY=$encKey" `
+        -replace "ADMIN_SECRET=.*",   "ADMIN_SECRET=$adminSecret" |
         Set-Content $envDest
-    Write-OK ".env creato con chiave di cifratura generata"
+    Write-OK ".env creato con chiavi generate automaticamente"
+    Write-Warn "ADMIN_SECRET generato: $adminSecret"
+    Write-Warn "Copialo in NEXT_PUBLIC_ADMIN_SECRET nel .env.local del frontend"
     Write-Warn "Apri $envDest e configura le variabili rimanenti"
 } else {
     Write-OK ".env gia' presente, non sovrascritto"
