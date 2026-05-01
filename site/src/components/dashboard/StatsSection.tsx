@@ -534,7 +534,7 @@ function TrustScoreSection({ scores }: { scores: TrustScore[] }) {
                   <div className="w-full">
                     <InlineBar pct={s.score ?? 0} colorClass={scoreBarColor(s.score)} />
                   </div>
-                  {s.breakdown && (
+                  {s.breakdown && s.breakdown.win_rate_score != null && (
                     <div className="flex gap-4 flex-wrap text-[10px] text-white/30">
                       <span>Win rate: <span className="text-emerald-400">{s.breakdown.win_rate_score.toFixed(1)}pt</span></span>
                       <span>PF: <span className="text-cyan-400">{s.breakdown.profit_factor_score.toFixed(1)}pt</span></span>
@@ -598,7 +598,7 @@ export function StatsSection({ userId, groupId }: { userId: string; groupId?: nu
         setStats(s)
         setTradeStats(t)
         setAiStats(a)
-        setTrustScores(ts.scores)
+        setTrustScores(ts?.scores ?? [])
       })
       .catch(e => setError(e instanceof Error ? e.message : "Unknown error"))
       .finally(() => setLoading(false))
