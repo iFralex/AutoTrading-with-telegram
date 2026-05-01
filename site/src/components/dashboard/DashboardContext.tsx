@@ -41,10 +41,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setTotalLogs(res.total_logs)
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
-        // Token scaduto e refresh fallito, o utente non trovato → login
+        // Clear sf_logged_in so the middleware doesn't redirect back to /dashboard
+        document.cookie = "sf_logged_in=; max-age=0; path=/"
         router.push("/login")
       } else {
-        setError(e instanceof Error ? e.message : "Errore nel caricamento")
+        setError(e instanceof Error ? e.message : "Session error")
       }
     } finally {
       setLoading(false)
@@ -63,6 +64,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await api.logout() } catch { /* ignora errori di rete */ }
+    document.cookie = "sf_logged_in=; max-age=0; path=/"
     router.push("/login")
   }, [router])
 
