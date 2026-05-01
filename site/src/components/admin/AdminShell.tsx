@@ -9,6 +9,8 @@ import {
 } from "lucide-react"
 import {
   adminApi,
+  setAdminSecret,
+  getAdminSecret,
   type AdminOverview,
   type AdminUser,
   type AdminUserDetail,
@@ -1278,13 +1280,105 @@ function Pagination({ total, limit, offset, onChange }: { total: number; limit: 
   )
 }
 
+// ── Login screen ──────────────────────────────────────────────────────────────
+
+const LS_KEY = "admin_secret"
+
+function AdminLogin({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [value, setValue]   = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  const submit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = value.trim()
+    if (!trimmed) return
+    setLoading(true)
+    setError(null)
+    setAdminSecret(trimmed)
+    try {
+      await adminApi.getOverview()
+      localStorage.setItem(LS_KEY, trimmed)
+      onAuthenticated()
+    } catch (err) {
+      setAdminSecret("")
+      const msg = String(err)
+      setError(msg.includes("401") ? "Wrong secret — try again." : msg)
+    } finally {
+      setLoading(false)
+    }
+  }, [value, onAuthenticated])
+
+  return (
+    <div
+      className="flex h-screen items-center justify-center"
+      style={{ background: "linear-gradient(135deg, #07090f 0%, #0b0f1a 100%)" }}
+    >
+      <div className="w-full max-w-sm px-6 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto"
+            style={{ background: "linear-gradient(135deg, #f59e0b, #ef4444)" }}>
+            <span className="text-black text-lg font-black">A</span>
+          </div>
+          <h1 className="text-lg font-bold text-white">Admin access</h1>
+          <p className="text-sm text-white/40">Enter the admin secret to continue</p>
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            type="password"
+            placeholder="Admin secret"
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            autoFocus
+            className="
+              w-full px-4 py-2.5 text-sm font-mono
+              bg-white/[0.04] border border-white/[0.08] rounded-xl
+              placeholder:text-white/20 text-white/80
+              focus:outline-none focus:border-amber-500/40 focus:bg-white/[0.06]
+              transition-all
+            "
+          />
+          {error && (
+            <p className="text-xs text-red-400 flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />{error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={loading || !value.trim()}
+            className="
+              w-full py-2.5 text-sm font-semibold rounded-xl
+              bg-amber-500/20 border border-amber-500/30 text-amber-400
+              hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed
+              transition-colors flex items-center justify-center gap-2
+            "
+          >
+            {loading ? <><RefreshCw className="w-4 h-4 animate-spin" />Verifying…</> : "Connect"}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Shell ─────────────────────────────────────────────────────────────────────
 
 export function AdminShell() {
+  const [ready, setReady]       = useState(false)
   const [tab, setTab]           = useState<Tab>("overview")
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [loading, setLoading]   = useState(true)
+
+  // On mount: restore cached secret or fall back to env var
+  useEffect(() => {
+    const cached = localStorage.getItem(LS_KEY)
+    if (cached) setAdminSecret(cached)
+    setReady(!!getAdminSecret())
+  }, [])
+
+  const handleAuthenticated = useCallback(() => setReady(true), [])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -1299,7 +1393,9 @@ export function AdminShell() {
     }
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { if (ready) refresh() }, [ready, refresh])
+
+  if (!ready) return <AdminLogin onAuthenticated={handleAuthenticated} />
 
   return (
     <div

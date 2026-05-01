@@ -4,7 +4,17 @@
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-const SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET ?? ""
+
+// Secret resolution order: runtime (set via setAdminSecret) → env var → ""
+let _runtimeSecret = ""
+
+export function setAdminSecret(s: string): void {
+  _runtimeSecret = s
+}
+
+export function getAdminSecret(): string {
+  return _runtimeSecret || process.env.NEXT_PUBLIC_ADMIN_SECRET || ""
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +143,7 @@ async function call<T>(path: string, params: Record<string, string | number | bo
     if (v !== undefined) url.searchParams.set(k, String(v))
   }
   const res = await fetch(url.toString(), {
-    headers: { "x-admin-secret": SECRET },
+    headers: { "x-admin-secret": getAdminSecret() },
     cache: "no-store",
   })
   if (!res.ok) {
