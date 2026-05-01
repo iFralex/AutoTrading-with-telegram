@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Users, Bot, Radio, TrendingUp, Cpu,
   DollarSign, AlertCircle, RefreshCw, ChevronRight, ChevronDown,
   ArrowUpRight, ArrowDownRight, Activity, MessageSquare, Search, X,
+  Copy, Check,
 } from "lucide-react"
 import {
   adminApi,
@@ -54,6 +55,34 @@ function fmtInt(n: number | null | undefined) {
 function pct(wins: number, total: number) {
   if (!total) return "0%"
   return `${Math.round((wins / total) * 100)}%`
+}
+
+function useCopy() {
+  const [copied, setCopied] = useState(false)
+  const copy = useCallback((text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    })
+  }, [])
+  return { copy, copied }
+}
+
+function formatHistoryMarkdown(
+  messages: TelegramHistoryMessage[],
+  mode: "messages" | "full",
+  groupName?: string,
+): string {
+  if (mode === "messages") {
+    return messages.map(m => m.text).join("\n\n")
+  }
+  const header = groupName ? `# ${groupName}\n\n` : ""
+  const body = messages.map(m => {
+    const date = m.date_iso.slice(0, 16).replace("T", " ")
+    const sender = m.sender_name ? ` — ${m.sender_name}` : ""
+    return `**${date}**${sender}\n${m.text}`
+  }).join("\n\n---\n\n")
+  return header + body
 }
 
 function Pill({ children, color }: { children: React.ReactNode; color?: "green" | "red" | "amber" | "blue" | "purple" }) {
@@ -936,17 +965,12 @@ function MessagesTab() {
                         {histError && <p className="text-xs text-red-400">{histError}</p>}
 
                         {histMessages && (
-                          <div className="space-y-1.5 mt-2">
-                            <p className="text-[10px] text-white/30">{fmtInt(histMessages.length)} messages from Telegram</p>
-                            {histMessages.map(msg => (
-                              <TelegramHistoryRow
-                                key={msg.id}
-                                msg={msg}
-                                open={histExpandedId === msg.id}
-                                onToggle={() => setHistExpandedId(histExpandedId === msg.id ? null : msg.id)}
-                              />
-                            ))}
-                          </div>
+                          <HistoryResults
+                            messages={histMessages}
+                            groupName={selectedUser.groups.find(g => g.group_id === selectedGroup)?.group_name}
+                            expandedId={histExpandedId}
+                            onToggle={id => setHistExpandedId(histExpandedId === id ? null : id)}
+                          />
                         )}
                       </div>
                     )}
@@ -1037,6 +1061,52 @@ function MessageRow({ msg, open, onToggle }: { msg: Message; open: boolean; onTo
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function CopyButton({ label, text }: { label: string; text: string }) {
+  const { copy, copied } = useCopy()
+  return (
+    <button
+      onClick={() => copy(text)}
+      className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-medium rounded-lg border border-white/[0.08] text-white/40 hover:text-white/70 hover:border-white/[0.15] transition-colors"
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copied!" : label}
+    </button>
+  )
+}
+
+function HistoryResults({
+  messages, groupName, expandedId, onToggle,
+}: {
+  messages: TelegramHistoryMessage[]
+  groupName: string | undefined
+  expandedId: number | null
+  onToggle: (id: number) => void
+}) {
+  return (
+    <div className="space-y-1.5 mt-2">
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] text-white/30 flex-1">{fmtInt(messages.length)} messages from Telegram</p>
+        <CopyButton
+          label="Copy messages"
+          text={formatHistoryMarkdown(messages, "messages")}
+        />
+        <CopyButton
+          label="Copy with metadata"
+          text={formatHistoryMarkdown(messages, "full", groupName)}
+        />
+      </div>
+      {messages.map(msg => (
+        <TelegramHistoryRow
+          key={msg.id}
+          msg={msg}
+          open={expandedId === msg.id}
+          onToggle={() => onToggle(msg.id)}
+        />
+      ))}
     </div>
   )
 }
