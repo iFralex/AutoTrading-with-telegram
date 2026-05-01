@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
   Play, RefreshCw, Trash2, ChevronDown, ChevronUp,
-  TrendingUp, TrendingDown, Minus, AlertTriangle,
-  Clock, BarChart2, Users, Target, Zap, DollarSign,
-  CheckCircle, XCircle, AlertCircle, X,
+  Minus, AlertTriangle,
+  Clock, BarChart2, Users, Target,
+  CheckCircle, X,
 } from "lucide-react"
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -360,18 +360,15 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
           : null
       case "running:signal_detection":
         return run.signals_detected != null
-          ? `${run.signals_detected} segnali rilevati (${run.signal_detection_rate?.toFixed(1) ?? "—"}%)` +
-            (run.flash_cost_usd ? ` · $${run.flash_cost_usd.toFixed(4)}` : "")
+          ? `${run.signals_detected} segnali rilevati (${run.signal_detection_rate?.toFixed(1) ?? "—"}%)`
           : null
       case "running:signal_extraction":
         return run.signals_extracted != null
-          ? `${run.signals_extracted} segnali estratti` +
-            (run.pro_cost_usd ? ` · $${run.pro_cost_usd.toFixed(4)}` : "")
+          ? `${run.signals_extracted} segnali estratti`
           : null
       case "running:ai_pretrade":
         return run.ai_approved != null
-          ? `${run.ai_approved} approvati · ${run.ai_rejected} rifiutati · ${run.ai_modified} modificati` +
-            (run.pretrade_cost_usd ? ` · $${run.pretrade_cost_usd.toFixed(4)}` : "")
+          ? `${run.ai_approved} approvati · ${run.ai_rejected} rifiutati · ${run.ai_modified} modificati`
           : null
       case "running:mt5_bars":
         return null
@@ -458,13 +455,20 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
         })}
       </div>
 
-      {/* Costo AI totale */}
-      {(run.total_ai_cost_usd > 0 || run.total_ai_seconds > 0) && (
-        <div className="flex gap-4 pt-1 border-t border-white/[0.05] text-[11px] text-muted-foreground">
-          {run.total_ai_cost_usd > 0 && <span>Costo AI totale: <span className="font-mono text-foreground">${run.total_ai_cost_usd.toFixed(4)}</span></span>}
-          {run.total_ai_seconds > 0 && <span>Tempo AI: <span className="font-mono text-foreground">{run.total_ai_seconds.toFixed(1)}s</span></span>}
-        </div>
-      )}
+      {/* Live stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/[0.05] text-xs">
+        {[
+          { label: "Messaggi",         v: run.total_messages },
+          { label: "Segnali rilevati", v: run.signals_detected },
+          { label: "Segnali estratti", v: run.signals_extracted },
+          { label: "Trade simulati",   v: run.total_trades },
+        ].map(({ label, v }) => (
+          <div key={label} className="bg-white/[0.02] rounded-lg p-2.5 border border-white/[0.05]">
+            <p className="text-muted-foreground mb-0.5">{label}</p>
+            <p className="font-mono font-semibold text-foreground">{v ?? "—"}</p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -526,13 +530,7 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
             {fmtTs(run.started_at)} · {run.total_messages ?? 0} messaggi · {run.period_from ? `${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {run.use_ai && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-600/10 text-violet-400 border border-violet-500/20 font-medium">
-              AI agentica
-            </span>
-          )}
-        </div>
+        <div />
       </div>
 
       {/* KPIs principali */}
@@ -583,6 +581,14 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
           sub={run.best_trade_usd !== null ? `${fmtUsd(run.best_trade_usd)} / ${fmtUsd(run.worst_trade_usd)}` : fmtPips(run.worst_trade_pips)}
           positive={true}
         />
+        {run.avg_rr_ratio != null && (
+          <KpiCard
+            label="Avg R/R"
+            value={fmtNum(run.avg_rr_ratio)}
+            sub="rischio / rendimento medio"
+            positive={run.avg_rr_ratio > 1 ? true : run.avg_rr_ratio < 1 ? false : null}
+          />
+        )}
       </div>
 
       {/* Trade counts */}
@@ -724,19 +730,24 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Per simbolo</h4>
             <div className="space-y-2">
               {run.symbol_stats_json.map(s => (
-                <div key={s.symbol} className="flex items-center gap-3 text-xs">
-                  <span className="w-20 font-mono font-semibold shrink-0 text-foreground">{s.symbol}</span>
-                  <div className="flex-1 bg-white/[0.03] rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${s.win_rate >= 50 ? "bg-emerald-500/60" : "bg-red-500/60"}`}
-                      style={{ width: `${Math.min(100, s.win_rate)}%` }}
-                    />
+                <div key={s.symbol} className="space-y-0.5">
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="w-20 font-mono font-semibold shrink-0 text-foreground">{s.symbol}</span>
+                    <div className="flex-1 bg-white/[0.03] rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${s.win_rate >= 50 ? "bg-emerald-500/60" : "bg-red-500/60"}`}
+                        style={{ width: `${Math.min(100, s.win_rate)}%` }}
+                      />
+                    </div>
+                    <span className="w-12 text-right font-mono text-muted-foreground shrink-0">{fmtPct(s.win_rate)}</span>
+                    <span className={`w-20 text-right font-mono font-semibold shrink-0 ${s.pnl_pips > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {fmtPips(s.pnl_pips)}
+                    </span>
+                    <span className="w-16 text-right font-mono text-muted-foreground shrink-0">
+                      avg {s.avg_pips >= 0 ? "+" : ""}{s.avg_pips.toFixed(1)}
+                    </span>
+                    <span className="w-10 text-right text-muted-foreground shrink-0">{s.trades}t</span>
                   </div>
-                  <span className="w-14 text-right font-mono text-muted-foreground">{fmtPct(s.win_rate)}</span>
-                  <span className={`w-20 text-right font-mono font-semibold ${s.pnl_pips > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {fmtPips(s.pnl_pips)}
-                  </span>
-                  <span className="w-10 text-right text-muted-foreground">{s.trades}t</span>
                 </div>
               ))}
             </div>
@@ -751,15 +762,19 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
             </h4>
             <div className="space-y-2">
               {run.sender_stats_json.slice(0, 10).map(s => (
-                <div key={s.sender_name} className="flex items-center gap-3 text-xs">
-                  <span className="w-28 truncate font-medium text-foreground shrink-0">{s.sender_name}</span>
-                  <span className="w-10 text-right text-muted-foreground shrink-0">{s.signals}sg</span>
-                  <span className={`w-14 text-right font-mono ${s.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>
-                    {fmtPct(s.win_rate)}
-                  </span>
-                  <span className={`flex-1 text-right font-mono font-semibold ${s.pnl_pips > 0 ? "text-emerald-400" : s.pnl_pips < 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                    {fmtPips(s.pnl_pips)}
-                  </span>
+                <div key={s.sender_name} className="text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="w-28 truncate font-medium text-foreground shrink-0">{s.sender_name}</span>
+                    <span className="text-muted-foreground shrink-0">{s.messages}msg</span>
+                    <span className="text-muted-foreground shrink-0">{s.signals}sg</span>
+                    <span className="text-muted-foreground shrink-0">{s.trades}t</span>
+                    <span className={`w-12 text-right font-mono shrink-0 ${s.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>
+                      {fmtPct(s.win_rate)}
+                    </span>
+                    <span className={`flex-1 text-right font-mono font-semibold ${s.pnl_pips > 0 ? "text-emerald-400" : s.pnl_pips < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                      {fmtPips(s.pnl_pips)}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -767,93 +782,50 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
         )}
       </div>
 
-      {/* Distribuzione per ora */}
-      {run.time_stats_json?.by_hour && Object.keys(run.time_stats_json.by_hour).length > 0 && (
-        <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trade per ora del giorno</h4>
-          <ResponsiveContainer width="100%" height={120}>
-            <BarChart data={
-              Array.from({ length: 24 }, (_, h) => {
-                const d = run.time_stats_json!.by_hour[String(h)]
-                return { h: String(h).padStart(2, "0"), trades: d?.trades ?? 0, wins: d?.wins ?? 0 }
-              })
-            }>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="h" tick={{ fontSize: 9, fill: "#6b7280" }} />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 12 }}
-              />
-              <Bar dataKey="trades" fill="#6366f1" radius={[3, 3, 0, 0]} opacity={0.7} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* AI stats (se use_ai) */}
-      {run.use_ai && (
-        <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5" /> Decisioni AI
-          </h4>
-          <div className="grid grid-cols-3 gap-3 text-xs">
-            <div className="text-center p-3 bg-emerald-600/5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-              <p className="font-bold text-emerald-400 text-base">{run.ai_approved ?? 0}</p>
-              <p className="text-muted-foreground">Approvati</p>
-            </div>
-            <div className="text-center p-3 bg-red-600/5 rounded-lg border border-red-500/10">
-              <XCircle className="w-4 h-4 text-red-400 mx-auto mb-1" />
-              <p className="font-bold text-red-400 text-base">{run.ai_rejected ?? 0}</p>
-              <p className="text-muted-foreground">Rifiutati</p>
-            </div>
-            <div className="text-center p-3 bg-amber-600/5 rounded-lg border border-amber-500/10">
-              <AlertCircle className="w-4 h-4 text-amber-400 mx-auto mb-1" />
-              <p className="font-bold text-amber-400 text-base">{run.ai_modified ?? 0}</p>
-              <p className="text-muted-foreground">Modificati</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Costi AI */}
-      <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-          <DollarSign className="w-3.5 h-3.5" /> Costi AI (Flex tier)
-        </h4>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div>
-            <p className="text-muted-foreground">Flash ({run.flash_calls} call)</p>
-            <p className="font-mono font-semibold">${fmtNum(run.flash_cost_usd, 4)}</p>
-            <p className="text-muted-foreground font-mono">
-              ↑{(run.flash_tokens_in ?? 0).toLocaleString()} ↓{(run.flash_tokens_out ?? 0).toLocaleString()} tok
-            </p>
-            <p className="text-muted-foreground">{fmtNum(run.flash_time_seconds, 0)}s</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Pro ({run.pro_calls} call)</p>
-            <p className="font-mono font-semibold">${fmtNum(run.pro_cost_usd, 4)}</p>
-            <p className="text-muted-foreground font-mono">
-              ↑{(run.pro_tokens_in ?? 0).toLocaleString()} ↓{(run.pro_tokens_out ?? 0).toLocaleString()} tok
-            </p>
-            <p className="text-muted-foreground">{fmtNum(run.pro_time_seconds, 0)}s</p>
-          </div>
-          {run.use_ai && (
-            <div>
-              <p className="text-muted-foreground">Pre-trade ({run.pretrade_calls} call)</p>
-              <p className="font-mono font-semibold">${fmtNum(run.pretrade_cost_usd, 4)}</p>
-              <p className="text-muted-foreground font-mono">
-                ↑{(run.pretrade_tokens_in ?? 0).toLocaleString()} ↓{(run.pretrade_tokens_out ?? 0).toLocaleString()} tok
-              </p>
+      {/* Distribuzione per ora e giorno */}
+      {run.time_stats_json && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {run.time_stats_json.by_hour && Object.keys(run.time_stats_json.by_hour).length > 0 && (
+            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trade per ora del giorno</h4>
+              <ResponsiveContainer width="100%" height={120}>
+                <BarChart data={
+                  Array.from({ length: 24 }, (_, h) => {
+                    const d = run.time_stats_json!.by_hour[String(h)]
+                    return { h: String(h).padStart(2, "0"), trades: d?.trades ?? 0, pnl: d?.pnl_pips ?? 0 }
+                  })
+                }>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="h" tick={{ fontSize: 9, fill: "#6b7280" }} />
+                  <YAxis hide />
+                  <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }} />
+                  <Bar dataKey="trades" name="Trade" fill="#6366f1" radius={[3, 3, 0, 0]} opacity={0.7} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           )}
-          <div className="sm:col-start-4">
-            <p className="text-muted-foreground">Totale</p>
-            <p className="font-mono font-bold text-sm">${fmtNum(run.total_ai_cost_usd, 4)}</p>
-            <p className="text-muted-foreground">{fmtNum(run.total_ai_seconds, 0)}s AI</p>
-          </div>
+          {run.time_stats_json.by_weekday && Object.keys(run.time_stats_json.by_weekday).length > 0 && (
+            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trade per giorno della settimana</h4>
+              <ResponsiveContainer width="100%" height={120}>
+                <BarChart data={
+                  ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].map((day, idx) => {
+                    const key = String(idx + 1)
+                    const d = run.time_stats_json!.by_weekday[key]
+                    return { day, trades: d?.trades ?? 0, pnl: d?.pnl_pips ?? 0 }
+                  })
+                }>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="day" tick={{ fontSize: 9, fill: "#6b7280" }} />
+                  <YAxis hide />
+                  <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }} />
+                  <Bar dataKey="trades" name="Trade" fill="#10b981" radius={[3, 3, 0, 0]} opacity={0.7} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Copertura barre MT5 */}
       {run.bars_coverage_json && Object.keys(run.bars_coverage_json).length > 0 && (
@@ -901,7 +873,6 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                     ["P&L (pip)", "pnl_pips"],
                     ["P&L (USD)", "pnl_usd"],
                     ["Durata",    "duration_min"],
-                    ["AI",        "ai_approved"],
                   ] as [string, keyof BacktestTrade][]).map(([label, key]) => (
                     <th
                       key={key}
@@ -946,14 +917,6 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                       {t.pnl_usd !== null ? fmtUsd(t.pnl_usd) : "—"}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDur(t.duration_min)}</td>
-                    <td className="px-3 py-2">
-                      {t.ai_approved === null
-                        ? <Minus className="w-3 h-3 text-muted-foreground/40" />
-                        : t.ai_approved === 1
-                          ? <span title={t.ai_reason ?? ""}><CheckCircle className="w-3 h-3 text-emerald-400" /></span>
-                          : <span title={t.ai_reason ?? ""}><XCircle className="w-3 h-3 text-red-400" /></span>
-                      }
-                    </td>
                   </tr>
                 ))}
               </tbody>

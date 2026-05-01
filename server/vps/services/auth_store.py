@@ -62,8 +62,12 @@ class AuthStore:
     async def verify_password(self, phone: str, password: str) -> bool:
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
+            # Exact match first; fall back to suffix match for numbers entered
+            # without the country code prefix (e.g. "3331234567" → "+393331234567").
+            digits_only = "".join(c for c in phone if c.isdigit())
             cur = await db.execute(
-                "SELECT password_hash FROM auth WHERE phone = ?", (phone,)
+                "SELECT password_hash FROM auth WHERE phone = ? OR phone LIKE ?",
+                (phone, "%" + digits_only),
             )
             row = await cur.fetchone()
         if row is None:
@@ -75,8 +79,10 @@ class AuthStore:
 
     async def has_password(self, phone: str) -> bool:
         async with aiosqlite.connect(self._db_path) as db:
+            digits_only = "".join(c for c in phone if c.isdigit())
             cur = await db.execute(
-                "SELECT 1 FROM auth WHERE phone = ?", (phone,)
+                "SELECT 1 FROM auth WHERE phone = ? OR phone LIKE ?",
+                (phone, "%" + digits_only),
             )
             return await cur.fetchone() is not None
 
