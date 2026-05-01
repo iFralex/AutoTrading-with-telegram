@@ -18,12 +18,17 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+# Circuit breaker: after an MT5 init failure, skip that user for this many seconds.
+_MT5_BACKOFF_SECS = 30
+_mt5_failure_times: dict[str, float] = {}
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mt5-price-watch")
 _level_counter = itertools.count()
@@ -197,15 +202,24 @@ def _check_levels_sync(levels: list[WatchedPriceLevel]) -> set[int]:
         return set()
 
     first = levels[0]
+    user_id = first.user_id
+
+    # Circuit breaker: skip user if we failed recently to avoid holding the GIL
+    if time.monotonic() - _mt5_failure_times.get(user_id, 0) < _MT5_BACKOFF_SECS:
+        return set()
+
     terminal_path = str(first.user_dir / "terminal64.exe")
 
-    if not mt5.initialize(path=terminal_path, portable=True):
+    if not mt5.initialize(path=terminal_path, portable=True, timeout=10_000):
         code, msg = mt5.last_error()
+        _mt5_failure_times[user_id] = time.monotonic()
         logger.warning(
-            "PriceLevelWatcher utente %s: initialize fallito (%s, cod.%d) — skip ciclo",
-            first.user_id, msg, code,
+            "PriceLevelWatcher utente %s: initialize fallito (%s, cod.%d) — backoff %ds",
+            user_id, msg, code, _MT5_BACKOFF_SECS,
         )
         return set()
+
+    _mt5_failure_times.pop(user_id, None)
 
     if not mt5.login(first.mt5_login, password=first.mt5_password, server=first.mt5_server):
         code, msg = mt5.last_error()

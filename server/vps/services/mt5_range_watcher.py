@@ -17,11 +17,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Circuit breaker: after an MT5 init failure, skip that user for this many seconds
+# before retrying, to avoid hammering MT5 (and potentially holding the GIL).
+_MT5_BACKOFF_SECS = 30
+_mt5_failure_times: dict[str, float] = {}
 
 # Worker singolo: MT5 è un singleton per processo, non possono girare
 # due sessioni in parallelo senza interferire.
@@ -138,15 +144,24 @@ def _check_user_sync(orders: list[WatchedOrder]) -> set[int]:
         return set()
 
     first = orders[0]
+    user_id = first.user_id
+
+    # Circuit breaker: skip user if we failed recently to avoid holding the GIL
+    if time.monotonic() - _mt5_failure_times.get(user_id, 0) < _MT5_BACKOFF_SECS:
+        return set()
+
     terminal_path = str(first.user_dir / "terminal64.exe")
 
-    if not mt5.initialize(path=terminal_path, portable=True):
+    if not mt5.initialize(path=terminal_path, portable=True, timeout=10_000):
         code, msg = mt5.last_error()
+        _mt5_failure_times[user_id] = time.monotonic()
         logger.warning(
-            "Watcher utente %s: initialize fallito (%s, cod.%d) — skip ciclo",
-            first.user_id, msg, code,
+            "Watcher utente %s: initialize fallito (%s, cod.%d) — backoff %ds",
+            user_id, msg, code, _MT5_BACKOFF_SECS,
         )
         return set()
+
+    _mt5_failure_times.pop(user_id, None)
 
     if not mt5.login(first.mt5_login, password=first.mt5_password, server=first.mt5_server):
         code, msg = mt5.last_error()
