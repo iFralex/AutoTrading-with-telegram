@@ -83,6 +83,26 @@ export interface StrategyLog {
   error_msg: string | null; tool_calls: unknown[] | null
 }
 
+export interface MessageUser {
+  user_id:   string
+  phone:     string | null
+  msg_count: number
+  groups:    { group_id: number; group_name: string }[]
+}
+
+export interface Message {
+  id:          number
+  ts:          string
+  sender_name: string | null
+  message_text: string
+  is_signal:   number
+  group_id:    number | null
+  group_name:  string | null
+  error_step:  string | null
+  signals:     unknown[] | null
+  results:     unknown[] | null
+}
+
 export interface Revenue {
   total_mrr_usd: number
   by_plan: { plan: string | null; users: number; active_users: number; price_usd: number; mrr_usd: number }[]
@@ -149,4 +169,16 @@ export const adminApi = {
 
   getRevenue: () =>
     call<Revenue>("/api/admin/revenue"),
+
+  getMessageUsers: () =>
+    call<MessageUser[]>("/api/admin/messages/users"),
+
+  getMessages: (p: { userId: string; groupId?: number; search?: string; limit?: number; offset?: number }) =>
+    call<{ total: number; messages: Message[] }>("/api/admin/messages", {
+      user_id:  p.userId,
+      group_id: p.groupId,
+      search:   p.search,
+      limit:    p.limit,
+      offset:   p.offset,
+    }),
 }

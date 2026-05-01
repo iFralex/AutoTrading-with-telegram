@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import {
   LayoutDashboard, Users, Bot, Radio, TrendingUp, Cpu,
   DollarSign, AlertCircle, RefreshCw, ChevronRight, ChevronDown,
-  ArrowUpRight, ArrowDownRight, Activity,
+  ArrowUpRight, ArrowDownRight, Activity, MessageSquare, Search, X,
 } from "lucide-react"
 import {
   adminApi,
@@ -18,15 +18,18 @@ import {
   type TradeStats,
   type StrategyLog,
   type Revenue,
+  type MessageUser,
+  type Message,
 } from "@/src/lib/admin-api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "users" | "ai" | "signals" | "trades" | "strategy" | "revenue"
+type Tab = "overview" | "users" | "ai" | "signals" | "trades" | "strategy" | "revenue" | "messages"
 
 const TABS: { id: Tab; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "overview",  label: "Overview",    Icon: LayoutDashboard },
   { id: "users",     label: "Users",       Icon: Users           },
+  { id: "messages",  label: "Messages",    Icon: MessageSquare   },
   { id: "ai",        label: "AI & Costs",  Icon: Bot             },
   { id: "signals",   label: "Signals",     Icon: Radio           },
   { id: "trades",    label: "Trades",      Icon: TrendingUp      },
@@ -674,6 +677,246 @@ function StrategyLogRow({ log }: { log: StrategyLog }) {
   )
 }
 
+function MessagesTab() {
+  const [users, setUsers]           = useState<MessageUser[] | null>(null)
+  const [selectedUser, setSelectedUser] = useState<MessageUser | null>(null)
+  const [selectedGroup, setSelectedGroup] = useState<number | null>(null)
+  const [search, setSearch]         = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [messages, setMessages]     = useState<{ total: number; messages: Message[] } | null>(null)
+  const [offset, setOffset]         = useState(0)
+  const [loadingMsgs, setLoadingMsgs] = useState(false)
+  const [error, setError]           = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const LOG_LIMIT = 50
+
+  useEffect(() => {
+    adminApi.getMessageUsers()
+      .then(setUsers)
+      .catch(e => setError(String(e)))
+  }, [])
+
+  // debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const loadMessages = useCallback(async (uid: string, gid: number | null, s: string, off: number) => {
+    setLoadingMsgs(true)
+    try {
+      const res = await adminApi.getMessages({
+        userId: uid,
+        groupId: gid ?? undefined,
+        search: s || undefined,
+        limit: LOG_LIMIT,
+        offset: off,
+      })
+      setMessages(res)
+      setOffset(off)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoadingMsgs(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedUser) return
+    loadMessages(selectedUser.user_id, selectedGroup, debouncedSearch, 0)
+  }, [selectedUser, selectedGroup, debouncedSearch, loadMessages])
+
+  const selectUser = (u: MessageUser) => {
+    setSelectedUser(u)
+    setSelectedGroup(null)
+    setSearch("")
+    setMessages(null)
+    setExpandedId(null)
+  }
+
+  if (error) return <ErrorBanner message={error} />
+  if (!users) return <Spinner />
+
+  return (
+    <div className="flex gap-4 h-[calc(100vh-120px)] min-h-0">
+
+      {/* ── User list sidebar ── */}
+      <div className="w-56 shrink-0 flex flex-col gap-1 overflow-y-auto rounded-xl border border-white/[0.06] p-2">
+        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider px-2 py-1">
+          Users ({users.length})
+        </p>
+        {users.map(u => (
+          <button
+            key={u.user_id}
+            onClick={() => selectUser(u)}
+            className={`w-full text-left rounded-lg px-3 py-2 transition-colors ${
+              selectedUser?.user_id === u.user_id
+                ? "bg-amber-500/10 border border-amber-500/20 text-amber-300"
+                : "border border-transparent text-white/50 hover:bg-white/[0.04] hover:text-white/70"
+            }`}
+          >
+            <p className="text-xs font-mono truncate">{u.phone ?? u.user_id.slice(-8)}</p>
+            <p className="text-[10px] text-white/30 mt-0.5">{fmtInt(u.msg_count)} msgs</p>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Message pane ── */}
+      <div className="flex-1 min-w-0 flex flex-col gap-3">
+        {!selectedUser ? (
+          <div className="flex items-center justify-center h-full text-white/20 text-sm">
+            Select a user to browse their messages
+          </div>
+        ) : (
+          <>
+            {/* Controls bar */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {/* Group filter */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => setSelectedGroup(null)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                    selectedGroup === null
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                      : "border-white/[0.08] text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  All groups
+                </button>
+                {selectedUser.groups.map(g => (
+                  <button
+                    key={g.group_id}
+                    onClick={() => setSelectedGroup(g.group_id)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors max-w-[160px] truncate ${
+                      selectedGroup === g.group_id
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                        : "border-white/[0.08] text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
+                    }`}
+                    title={g.group_name}
+                  >
+                    {g.group_name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search */}
+              <div className="relative ml-auto">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search messages…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-52 pl-7 pr-7 py-1.5 text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder:text-white/20 text-white/60 focus:outline-none focus:border-amber-500/30"
+                />
+                {search && (
+                  <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Messages list */}
+            {loadingMsgs ? (
+              <Spinner />
+            ) : !messages ? null : (
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
+                <p className="text-[10px] text-white/30 px-1">{fmtInt(messages.total)} messages</p>
+                {messages.messages.map(msg => (
+                  <MessageRow
+                    key={msg.id}
+                    msg={msg}
+                    open={expandedId === msg.id}
+                    onToggle={() => setExpandedId(expandedId === msg.id ? null : msg.id)}
+                  />
+                ))}
+                <Pagination
+                  total={messages.total}
+                  limit={LOG_LIMIT}
+                  offset={offset}
+                  onChange={o => loadMessages(selectedUser.user_id, selectedGroup, debouncedSearch, o)}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MessageRow({ msg, open, onToggle }: { msg: Message; open: boolean; onToggle: () => void }) {
+  const isSignal = msg.is_signal === 1
+  const hasError = !!msg.error_step
+
+  return (
+    <div className={`rounded-xl border overflow-hidden transition-colors ${
+      hasError ? "border-red-500/20 bg-red-500/[0.02]" :
+      isSignal ? "border-emerald-500/15 bg-emerald-500/[0.02]" :
+      "border-white/[0.06]"
+    }`}>
+      <button
+        className="w-full flex items-start gap-3 px-4 py-2.5 text-xs hover:bg-white/[0.02] transition-colors text-left"
+        onClick={onToggle}
+      >
+        {/* Timestamp + sender */}
+        <div className="shrink-0 text-right w-28 space-y-0.5">
+          <p className="text-white/30 font-mono">{msg.ts.slice(0, 16).replace("T", " ")}</p>
+          {msg.sender_name && <p className="text-white/40 truncate">{msg.sender_name}</p>}
+        </div>
+
+        {/* Badges */}
+        <div className="shrink-0 flex flex-col gap-1 items-start w-16 pt-0.5">
+          {isSignal && <Pill color="green">signal</Pill>}
+          {hasError && <Pill color="red">{msg.error_step}</Pill>}
+          {!isSignal && !hasError && <Pill color="amber">msg</Pill>}
+        </div>
+
+        {/* Group */}
+        {msg.group_name && (
+          <span className="shrink-0 text-[10px] text-white/30 pt-0.5 max-w-[100px] truncate">{msg.group_name}</span>
+        )}
+
+        {/* Message preview */}
+        <span className="flex-1 min-w-0 text-white/60 leading-relaxed line-clamp-2 whitespace-pre-wrap">
+          {msg.message_text}
+        </span>
+
+        {open
+          ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          : <ChevronRight className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+        }
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 border-t border-white/[0.04] space-y-3 mt-0.5">
+          <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap mt-2">{msg.message_text}</p>
+          {msg.error_step && (
+            <p className="text-red-400 text-xs">Error at <strong>{msg.error_step}</strong></p>
+          )}
+          {msg.signals && msg.signals.length > 0 && (
+            <div>
+              <p className="text-[10px] text-white/30 mb-1 uppercase tracking-wider">Extracted signals</p>
+              <pre className="text-white/50 bg-white/[0.02] rounded-lg p-3 overflow-x-auto text-[11px] max-h-48 overflow-y-auto">
+                {JSON.stringify(msg.signals, null, 2)}
+              </pre>
+            </div>
+          )}
+          {msg.results && msg.results.length > 0 && (
+            <div>
+              <p className="text-[10px] text-white/30 mb-1 uppercase tracking-wider">MT5 results</p>
+              <pre className="text-white/50 bg-white/[0.02] rounded-lg p-3 overflow-x-auto text-[11px] max-h-48 overflow-y-auto">
+                {JSON.stringify(msg.results, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RevenueTab() {
   const [data, setData] = useState<Revenue | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -868,6 +1111,7 @@ export function AdminShell() {
 
           {tab === "overview"  && (loading ? <Spinner /> : overview ? <OverviewTab data={overview} /> : null)}
           {tab === "users"     && <UsersTab />}
+          {tab === "messages"  && <MessagesTab />}
           {tab === "ai"        && <AiTab />}
           {tab === "signals"   && <SignalsTab />}
           {tab === "trades"    && <TradesTab />}

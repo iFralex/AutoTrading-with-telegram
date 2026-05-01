@@ -14,6 +14,8 @@ Endpoints:
   GET /api/admin/trades             — global trade stats
   GET /api/admin/strategy/logs      — paginated strategy execution logs
   GET /api/admin/revenue            — subscription / billing overview
+  GET /api/admin/messages/users     — users + groups that have messages
+  GET /api/admin/messages           — paginated raw messages (filterable by user/group)
 """
 
 from __future__ import annotations
@@ -606,3 +608,106 @@ async def get_revenue(request: Request) -> dict[str, Any]:
         "recent_subscriptions": [dict(r) for r in recent_subs],
         "monthly_growth": [dict(r) for r in monthly_growth],
     }
+
+
+# ── Messages browser ──────────────────────────────────────────────────────────
+
+@router.get("/messages/users")
+async def get_messages_users(request: Request) -> list[dict[str, Any]]:
+    """
+    Returns every user that has at least one message in signal_logs,
+    with the list of distinct groups (id + name) seen for that user.
+    """
+    _check_auth(request)
+    db_path = _db(request)
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+
+        users = await (await db.execute("""
+            SELECT sl.user_id, u.phone, COUNT(*) AS msg_count
+            FROM signal_logs sl
+            LEFT JOIN users u ON u.user_id = sl.user_id
+            GROUP BY sl.user_id
+            ORDER BY msg_count DESC
+        """)).fetchall()
+
+        groups = await (await db.execute("""
+            SELECT DISTINCT user_id, group_id, group_name
+            FROM signal_logs
+            WHERE group_id IS NOT NULL
+            ORDER BY user_id, group_name
+        """)).fetchall()
+
+    groups_by_user: dict[str, list[dict]] = {}
+    for g in groups:
+        uid = g["user_id"]
+        groups_by_user.setdefault(uid, []).append({
+            "group_id": g["group_id"],
+            "group_name": g["group_name"],
+        })
+
+    return [
+        {
+            **dict(u),
+            "groups": groups_by_user.get(u["user_id"], []),
+        }
+        for u in users
+    ]
+
+
+@router.get("/messages")
+async def get_messages(
+    request: Request,
+    user_id: str = Query(...),
+    group_id: int | None = Query(None),
+    search: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """
+    Paginated messages for a given user, optionally filtered by group and
+    full-text search on message_text.
+    """
+    _check_auth(request)
+    db_path = _db(request)
+
+    conditions = ["user_id=?"]
+    params: list[Any] = [user_id]
+
+    if group_id is not None:
+        conditions.append("group_id=?")
+        params.append(group_id)
+    if search:
+        conditions.append("message_text LIKE ?")
+        params.append(f"%{search}%")
+
+    where = "WHERE " + " AND ".join(conditions)
+
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        total_row = await (await db.execute(
+            f"SELECT COUNT(*) AS cnt FROM signal_logs {where}", params
+        )).fetchone()
+        rows = await (await db.execute(
+            f"SELECT id, ts, sender_name, message_text, is_signal, "
+            f"group_id, group_name, error_step, signals_json, results_json "
+            f"FROM signal_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        for field in ("signals_json", "results_json"):
+            raw = d.pop(field, None)
+            key = field.replace("_json", "")
+            if raw:
+                try:
+                    d[key] = json.loads(raw)
+                except Exception:
+                    d[key] = None
+            else:
+                d[key] = None
+        results.append(d)
+
+    return {"total": total_row["cnt"], "messages": results}
