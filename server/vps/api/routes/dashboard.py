@@ -315,7 +315,7 @@ def _compute_trust_score(trade_stats: dict, signal_stats: dict) -> dict:
     """
     total_trades = int(trade_stats.get("total_trades") or 0)
     if total_trades == 0:
-        return {"score": None, "label": "Nessun dato", "breakdown": {}}
+        return {"score": None, "label": "No data", "breakdown": {}}
 
     wins               = int(trade_stats.get("wins") or 0)
     win_rate           = wins / total_trades * 100
@@ -331,10 +331,10 @@ def _compute_trust_score(trade_stats: dict, signal_stats: dict) -> dict:
 
     score = max(0, min(100, round(win_rate_score + pf_score + volume_score + exec_score + streak_score)))
 
-    if score >= 75:   label = "Eccellente"
-    elif score >= 55: label = "Buono"
-    elif score >= 35: label = "Discreto"
-    else:             label = "Basso"
+    if score >= 75:   label = "Excellent"
+    elif score >= 55: label = "Good"
+    elif score >= 35: label = "Fair"
+    else:             label = "Low"
 
     return {
         "score": score,

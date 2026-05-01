@@ -487,9 +487,9 @@ function TrustScoreSection({ scores }: { scores: TrustScore[] }) {
   if (scores.length === 0) return null
 
   const labelColor = (label: string) =>
-    label === "Eccellente" || label === "Excellent" ? "text-emerald-400"
-      : label === "Buono" || label === "Good"       ? "text-cyan-400"
-      : label === "Discreto" || label === "Fair"    ? "text-amber-400"
+    label === "Excellent" ? "text-emerald-400"
+      : label === "Good"  ? "text-cyan-400"
+      : label === "Fair"  ? "text-amber-400"
       : "text-red-400"
 
   const scoreBarColor = (score: number | null) =>

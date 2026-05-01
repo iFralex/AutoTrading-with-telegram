@@ -40,16 +40,16 @@ const NAV: {
   Icon: React.ComponentType<{ className?: string }>
   alwaysEnabled?: boolean
 }[] = [
-  { id: "overview",   label: "Panoramica",     Icon: LayoutDashboard },
-  { id: "analytics",  label: "Statistiche",    Icon: BarChart2 },
-  { id: "ai",         label: "AI & Costi",     Icon: Bot },
-  { id: "settings",   label: "Configurazione", Icon: Settings2 },
-  { id: "logs",       label: "Log Segnali",    Icon: ScrollText },
-  { id: "trades",     label: "Trade Recenti",  Icon: History },
+  { id: "overview",   label: "Overview",       Icon: LayoutDashboard },
+  { id: "analytics",  label: "Statistics",     Icon: BarChart2 },
+  { id: "ai",         label: "AI & Costs",     Icon: Bot },
+  { id: "settings",   label: "Configuration",  Icon: Settings2 },
+  { id: "logs",       label: "Signal Logs",    Icon: ScrollText },
+  { id: "trades",     label: "Recent Trades",  Icon: History },
   { id: "backtest",   label: "Backtest",       Icon: TrendingUp },
   { id: "orders",     label: "Manual Order",   Icon: ShoppingCart },
   { id: "community",  label: "Community",      Icon: Users, alwaysEnabled: true },
-  { id: "test",       label: "Strumenti",      Icon: FlaskConical },
+  { id: "test",       label: "Tools",          Icon: FlaskConical },
 ]
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
       setData(res)
       setSection("overview")
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore sconosciuto")
+      setError(e instanceof Error ? e.message : "Unknown error")
     } finally {
       setLoading(false)
     }
@@ -211,7 +211,7 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
                 transition-colors shrink-0
               "
             >
-              {loading ? "…" : "Cerca"}
+              {loading ? "…" : "Search"}
             </button>
           </form>
 
@@ -221,14 +221,14 @@ export function DashboardShell({ initialPhone = "" }: { initialPhone?: string })
               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${data.user.active ? "bg-emerald-400" : "bg-muted-foreground/40"}`} />
               <span className="text-sm font-mono text-foreground/70">{data.user.phone}</span>
               <span className="hidden sm:block text-xs px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/[0.08] text-muted-foreground">
-                {data.user.groups.length} {data.user.groups.length === 1 ? "canale" : "canali"}
+                {data.user.groups.length} {data.user.groups.length === 1 ? "channel" : "channels"}
               </span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
                 data.user.active
                   ? "bg-emerald-600/10 text-emerald-400 border-emerald-500/20"
                   : "bg-white/[0.04] text-muted-foreground border-white/10"
               }`}>
-                {data.user.active ? "Attivo" : "Inattivo"}
+                {data.user.active ? "Active" : "Inactive"}
               </span>
             </div>
           )}
@@ -283,9 +283,9 @@ function EmptyState({ onSearch }: { onSearch: (phone: string) => void }) {
           <LayoutDashboard className="w-7 h-7 text-indigo-400" />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-foreground">Nessun utente selezionato</h2>
+          <h2 className="text-base font-semibold text-foreground">No user selected</h2>
           <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-            Inserisci un numero di telefono per accedere al profilo, ai log e alle statistiche.
+            Enter a phone number to access the profile, logs and statistics.
           </p>
         </div>
         <form
@@ -310,7 +310,7 @@ function EmptyState({ onSearch }: { onSearch: (phone: string) => void }) {
             disabled={!localPhone.trim()}
             className="px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors shrink-0"
           >
-            Cerca
+            Search
           </button>
         </form>
       </div>
@@ -323,7 +323,7 @@ function LoadingState() {
     <div className="flex items-center justify-center h-full pb-16">
       <div className="text-center space-y-3">
         <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-400 rounded-full animate-spin mx-auto" />
-        <p className="text-sm text-muted-foreground">Caricamento dati utente…</p>
+        <p className="text-sm text-muted-foreground">Loading user data…</p>
       </div>
     </div>
   )
