@@ -6,15 +6,16 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Radio, TrendingUp, FlaskConical,
   Users, Layers, Settings, ChevronLeft, ChevronRight,
-  Zap, AlertTriangle, Loader2, ShoppingCart,
+  Zap, AlertTriangle, Loader2, ShoppingCart, BarChart2,
 } from "lucide-react"
 import { DashboardProvider, useDashboard } from "./DashboardContext"
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 const NAV_MAIN = [
-  { href: "/dashboard",           label: "Home",       Icon: LayoutDashboard },
-  { href: "/dashboard/signals",   label: "Signals",    Icon: Radio },
+  { href: "/dashboard",            label: "Home",        Icon: LayoutDashboard },
+  { href: "/dashboard/statistics", label: "Statistics",  Icon: BarChart2 },
+  { href: "/dashboard/signals",    label: "Signals",     Icon: Radio },
   { href: "/dashboard/trades",    label: "Trades",     Icon: TrendingUp },
   { href: "/dashboard/backtest",  label: "Backtest",   Icon: FlaskConical },
   { href: "/dashboard/orders",    label: "Orders",     Icon: ShoppingCart },
@@ -28,6 +29,7 @@ const NAV_BOTTOM = [
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard":            "Home",
+  "/dashboard/statistics": "Statistics",
   "/dashboard/signals":    "Signals",
   "/dashboard/trades":     "Trades",
   "/dashboard/backtest":   "Backtest",
