@@ -1267,7 +1267,7 @@ function TrustScoreTag({ score }: { score: TrustScore | null }) {
     ...(score.profit_factor != null ? [`PF: ${score.profit_factor.toFixed(2)}`] : []),
     ...(score.max_consecutive_losses != null ? [`Max losses: ${score.max_consecutive_losses}`] : []),
     ...(bd ? [
-      `Breakdown: WR ${bd.win_rate_pts}pt · PF ${bd.profit_factor_pts}pt · Vol ${bd.volume_pts}pt · Exec ${bd.exec_rate_pts}pt · Streak ${bd.streak_pts}pt`,
+      `Breakdown: WR ${bd.win_rate_score}pt · PF ${bd.profit_factor_score}pt · Vol ${bd.volume_score}pt · Exec ${bd.exec_rate_score}pt · Streak ${bd.streak_score}pt`,
     ] : []),
   ]
   return (

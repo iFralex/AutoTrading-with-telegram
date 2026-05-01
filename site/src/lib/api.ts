@@ -233,11 +233,11 @@ export interface UserGroup {
 }
 
 export interface TrustScoreBreakdown {
-  win_rate_pts:          number
-  profit_factor_pts:     number
-  volume_pts:            number
-  exec_rate_pts:         number
-  streak_pts:            number
+  win_rate_score:       number
+  profit_factor_score:  number
+  volume_score:         number
+  exec_rate_score:      number
+  streak_score:         number
 }
 
 export interface TrustScore {
