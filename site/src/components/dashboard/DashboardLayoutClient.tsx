@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Radio, TrendingUp, FlaskConical,
   Users, Layers, Settings, ChevronLeft, ChevronRight,
-  Zap, AlertTriangle, Loader2,
+  Zap, AlertTriangle, Loader2, ShoppingCart,
 } from "lucide-react"
 import { DashboardProvider, useDashboard } from "./DashboardContext"
 
@@ -17,6 +17,7 @@ const NAV_MAIN = [
   { href: "/dashboard/signals",   label: "Signals",    Icon: Radio },
   { href: "/dashboard/trades",    label: "Trades",     Icon: TrendingUp },
   { href: "/dashboard/backtest",  label: "Backtest",   Icon: FlaskConical },
+  { href: "/dashboard/orders",    label: "Orders",     Icon: ShoppingCart },
   { href: "/dashboard/community", label: "Community",  Icon: Users },
   { href: "/dashboard/rooms",     label: "Rooms",      Icon: Layers },
 ]
@@ -30,6 +31,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard/signals":    "Signals",
   "/dashboard/trades":     "Trades",
   "/dashboard/backtest":   "Backtest",
+  "/dashboard/orders":     "Manual Order",
   "/dashboard/community":  "Community",
   "/dashboard/rooms":      "Rooms",
   "/dashboard/settings":   "Settings",
