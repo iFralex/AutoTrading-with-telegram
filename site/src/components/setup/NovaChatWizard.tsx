@@ -1117,14 +1117,50 @@ function getRelevantMissing(
   return []
 }
 
+const PLAN_PRICE_NUM: Record<string, number> = { core: 79, pro: 149, elite: 299 }
+
+type CouponState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "valid"; percent_off: number; label: string; code: string }
+  | { status: "invalid"; message: string }
+
 function PlanForm({ onSelect, notes, strategies, advanced }: {
-  onSelect: (plan: "core" | "pro" | "elite") => void
+  onSelect: (plan: "core" | "pro" | "elite", coupon?: string) => void
   notes?: PlanNotes
   strategies: Strategies
   advanced: AdvancedSettings
 }) {
   const [sel, setSel] = useState<"core" | "pro" | "elite" | null>(null)
   const [expanded, setExpanded] = useState<"core" | "pro" | "elite" | null>(null)
+  const [couponInput, setCouponInput] = useState("")
+  const [coupon, setCoupon] = useState<CouponState>({ status: "idle" })
+
+  async function applyCoupon() {
+    const code = couponInput.trim()
+    if (!code) return
+    setCoupon({ status: "loading" })
+    try {
+      const res = await api.validateCoupon(code)
+      if (res.valid && res.percent_off !== undefined) {
+        setCoupon({ status: "valid", percent_off: res.percent_off, label: res.label ?? "", code })
+      } else {
+        setCoupon({ status: "invalid", message: "Invalid discount code." })
+      }
+    } catch {
+      setCoupon({ status: "invalid", message: "Couldn't validate the code. Try again." })
+    }
+  }
+
+  function discountedPrice(base: number): string {
+    if (coupon.status !== "valid") return `€${base}`
+    if (coupon.percent_off === 100) return "Free"
+    return `€${Math.round(base * (1 - coupon.percent_off / 100))}`
+  }
+
+  const isFree = coupon.status === "valid" && coupon.percent_off === 100
+  const hasDiscount = coupon.status === "valid"
+
   return (
     <div className="space-y-2.5 min-w-72 max-w-sm">
       {PLANS.map(p => {
@@ -1132,6 +1168,7 @@ function PlanForm({ onSelect, notes, strategies, advanced }: {
         const isOpen = expanded === p.id
         const fullFeatures = PLAN_FULL_FEATURES[p.id]
         const missing = getRelevantMissing(p.id, strategies, advanced)
+        const basePrice = PLAN_PRICE_NUM[p.id]
         return (
           <div key={p.id}>
             <button
@@ -1149,7 +1186,14 @@ function PlanForm({ onSelect, notes, strategies, advanced }: {
                     </span>
                   )}
                 </div>
-                <span className="font-bold text-white">{p.price}</span>
+                <div className="flex items-center gap-1.5">
+                  {hasDiscount && (
+                    <span className="text-xs text-white/30 line-through">€{basePrice}</span>
+                  )}
+                  <span className={`font-bold ${isFree ? "text-emerald-400" : "text-white"}`}>
+                    {discountedPrice(basePrice)}
+                  </span>
+                </div>
               </div>
               <p className="text-xs text-white/38 mb-1.5">{p.tagline}</p>
               <div className="flex flex-wrap gap-x-3 gap-y-0.5">
@@ -1203,8 +1247,60 @@ function PlanForm({ onSelect, notes, strategies, advanced }: {
           </div>
         )
       })}
-      <PrimaryBtn onClick={() => sel && onSelect(sel)} disabled={!sel} className="w-full">
-        {sel ? `Start with ${PLANS.find(p => p.id === sel)!.name} →` : "Select a plan"}
+
+      {/* ── Codice sconto ──────────────────────────────────────────────────── */}
+      <div className="pt-1">
+        {coupon.status === "valid" ? (
+          <div className="flex items-center justify-between rounded-lg border border-emerald-500/25 bg-emerald-500/8 px-3 py-2">
+            <div>
+              <span className="text-[11px] font-semibold text-emerald-400">
+                {coupon.percent_off === 100 ? "100% off — Free access" : `${coupon.percent_off}% discount applied`}
+              </span>
+              <p className="text-[10px] text-emerald-400/60">{coupon.label}</p>
+            </div>
+            <button
+              onClick={() => { setCoupon({ status: "idle" }); setCouponInput("") }}
+              className="text-white/25 hover:text-white/50 transition-colors text-[11px]"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <input
+                value={couponInput}
+                onChange={e => { setCouponInput(e.target.value); if (coupon.status === "invalid") setCoupon({ status: "idle" }) }}
+                onKeyDown={e => e.key === "Enter" && applyCoupon()}
+                placeholder="Discount code"
+                className="flex-1 bg-black/25 border border-white/8 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-white/18 transition-colors"
+              />
+              <button
+                onClick={applyCoupon}
+                disabled={!couponInput.trim() || coupon.status === "loading"}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 disabled:opacity-30 transition-all"
+              >
+                {coupon.status === "loading" ? "…" : "Apply"}
+              </button>
+            </div>
+            {coupon.status === "invalid" && (
+              <p className="text-[10px] text-red-400/80 px-0.5">{coupon.message}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <PrimaryBtn
+        onClick={() => sel && onSelect(sel, coupon.status === "valid" ? coupon.code : undefined)}
+        disabled={!sel}
+        className="w-full"
+      >
+        {!sel
+          ? "Select a plan"
+          : isFree
+            ? `Activate ${PLANS.find(p => p.id === sel)!.name} for free →`
+            : `Start with ${PLANS.find(p => p.id === sel)!.name} →`
+        }
       </PrimaryBtn>
     </div>
   )
@@ -2009,15 +2105,34 @@ export default function NovaChatWizard() {
     } finally { setChatLoading(false); setChatInput("") }
   }
 
-  async function handlePlanSelect(p: "core" | "pro" | "elite") {
-    userMsg(`I'll go with the ${p.charAt(0).toUpperCase() + p.slice(1)} plan`)
+  async function handlePlanSelect(p: "core" | "pro" | "elite", coupon?: string) {
+    const planLabel = p.charAt(0).toUpperCase() + p.slice(1)
+    userMsg(coupon
+      ? `I'll go with the ${planLabel} plan (code: ${coupon})`
+      : `I'll go with the ${planLabel} plan`
+    )
     setSelectedPlan(p)
     setPhase("payment")
-    await novaText("Redirecting you to secure checkout… 💳")
+
+    if (coupon) {
+      // Valida il coupon prima di procedere (doppia verifica lato frontend)
+      await novaText("Applying your discount code… ⏳", 400)
+    } else {
+      await novaText("Redirecting you to secure checkout… 💳")
+    }
+
     try {
       await api.saveSession({ phone: sdata.phone, plan: p })
-      const { checkout_url } = await api.createCheckoutSession(sdata.phone, p)
-      window.location.href = checkout_url
+      const res = await api.createCheckoutSession(sdata.phone, p, coupon)
+
+      if (res.skip_payment) {
+        // Codice 100%: salta Stripe e vai direttamente alla password
+        await novaText("🎉 Discount applied! Last step: set a password to protect your account.")
+        setPhase("password")
+        setMessages(prev => [...noTyping(prev), { id: uid(), from: "nova", type: "password_form" } as ChatMsg])
+      } else {
+        window.location.href = res.checkout_url!
+      }
     } catch {
       setPhase("plan")
       await novaText("Couldn't start checkout. Please try again.")
@@ -2234,7 +2349,7 @@ export default function NovaChatWizard() {
     if (msg.type === "plan_form")
       return (
         <NovaBubble key={key}>
-          {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} strategies={strategies} advanced={advanced} onSelect={p => { markSubmitted(key); handlePlanSelect(p) }} />}
+          {done ? <CompletedBadge /> : <PlanForm notes={msg.notes} strategies={strategies} advanced={advanced} onSelect={(p, coupon) => { markSubmitted(key); handlePlanSelect(p, coupon) }} />}
         </NovaBubble>
       )
 

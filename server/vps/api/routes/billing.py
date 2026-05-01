@@ -1,12 +1,13 @@
 """
 Billing routes — integrazione Stripe Checkout.
 
+GET  /api/billing/validate-coupon          → valida codice sconto
 POST /api/billing/create-checkout-session  → crea sessione Stripe Checkout (setup iniziale)
 GET  /api/billing/verify-payment           → verifica che il pagamento sia andato a buon fine
-POST /api/billing/customer-portal         → crea sessione Stripe Customer Portal (cambia/cancella piano)
-POST /api/billing/cancel-subscription     → cancella l'abbonamento a fine periodo
-GET  /api/billing/subscription            → stato abbonamento corrente
-POST /api/billing/webhook                 → webhook Stripe
+POST /api/billing/customer-portal          → crea sessione Stripe Customer Portal
+POST /api/billing/cancel-subscription      → cancella l'abbonamento a fine periodo
+GET  /api/billing/subscription             → stato abbonamento corrente
+POST /api/billing/webhook                  → webhook Stripe
 """
 
 from __future__ import annotations
@@ -15,16 +16,17 @@ import logging
 import os
 
 import stripe
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from vps.api.deps import get_current_user
-from fastapi import Depends
 from vps.services.setup_session_store import SetupSessionStore
 from vps.services.user_store import UserStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+
+# ── Configurazione piani ──────────────────────────────────────────────────────
 
 PLAN_PRICES: dict[str, str] = {
     "core":  os.environ.get("STRIPE_PRICE_CORE",  ""),
@@ -38,6 +40,17 @@ PLAN_LABELS: dict[str, str] = {
     "elite": "Elite",
 }
 
+# ── Codici sconto hardcoded ───────────────────────────────────────────────────
+# percent_off=100 → salta Stripe completamente
+# percent_off=50  → applica coupon Stripe al 50%
+
+_COUPONS: dict[str, dict] = {
+    "free":        {"percent_off": 100, "label": "Accesso gratuito"},
+    "beta_tester": {"percent_off": 50,  "label": "Beta Tester — 50% di sconto"},
+}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _stripe_client() -> stripe.StripeClient:
     key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -58,11 +71,27 @@ def _get_store(request: Request) -> UserStore:
     return request.app.state.user_store
 
 
+# ── GET /validate-coupon ──────────────────────────────────────────────────────
+
+@router.get("/validate-coupon")
+async def validate_coupon(code: str) -> dict:
+    """Valida un codice sconto e restituisce il tipo di sconto."""
+    info = _COUPONS.get(code.strip().lower())
+    if not info:
+        return {"valid": False}
+    return {
+        "valid": True,
+        "percent_off": info["percent_off"],
+        "label": info["label"],
+    }
+
+
 # ── POST /create-checkout-session ────────────────────────────────────────────
 
 class CreateCheckoutBody(BaseModel):
     phone: str
-    plan: str   # "core" | "pro" | "elite"
+    plan: str          # "core" | "pro" | "elite"
+    coupon_code: str | None = None
 
 
 @router.post("/create-checkout-session")
@@ -73,6 +102,24 @@ async def create_checkout_session(
     if body.plan not in PLAN_PRICES:
         raise HTTPException(400, f"Piano non valido: {body.plan}")
 
+    ss: SetupSessionStore = _get_session_store(request)
+
+    # ── Valida codice sconto (se presente) ────────────────────────────────────
+    coupon_info: dict | None = None
+    if body.coupon_code:
+        coupon_info = _COUPONS.get(body.coupon_code.strip().lower())
+        if not coupon_info:
+            raise HTTPException(400, "Codice sconto non valido")
+
+    # ── 100% di sconto → salta Stripe ─────────────────────────────────────────
+    if coupon_info and coupon_info["percent_off"] == 100:
+        await ss.upsert(body.phone, {
+            "plan": body.plan,
+            "stripe_session_id": f"FREE_{body.coupon_code.strip().lower()}",
+        })
+        return {"skip_payment": True, "plan": body.plan}
+
+    # ── Pagamento via Stripe ──────────────────────────────────────────────────
     price_id = PLAN_PRICES[body.plan]
     if not price_id:
         raise HTTPException(503, f"STRIPE_PRICE_{body.plan.upper()} non configurata")
@@ -80,27 +127,41 @@ async def create_checkout_session(
     client = _stripe_client()
     base = _base_url()
 
+    session_params: dict = {
+        "mode": "subscription",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": (
+            f"{base}/setup"
+            f"?payment_success=1"
+            f"&phone={body.phone}"
+            f"&stripe_session_id={{CHECKOUT_SESSION_ID}}"
+        ),
+        "cancel_url": f"{base}/setup?payment_cancelled=1&phone={body.phone}",
+        "metadata": {"phone": body.phone, "plan": body.plan},
+    }
+
+    # ── 50% di sconto → crea coupon Stripe one-time ───────────────────────────
+    if coupon_info:
+        try:
+            coupon = client.coupons.create(params={
+                "percent_off": coupon_info["percent_off"],
+                "duration": "once",
+                "name": coupon_info["label"],
+            })
+            session_params["discounts"] = [{"coupon": coupon.id}]
+        except stripe.StripeError as exc:
+            logger.error("Stripe coupon creation: %s", exc)
+            raise HTTPException(502, f"Errore Stripe: {getattr(exc, 'user_message', None) or str(exc)}")
+
     try:
-        session = client.checkout.sessions.create(params={
-            "mode": "subscription",
-            "line_items": [{"price": price_id, "quantity": 1}],
-            "success_url": (
-                f"{base}/setup"
-                f"?payment_success=1"
-                f"&phone={body.phone}"
-                f"&stripe_session_id={{CHECKOUT_SESSION_ID}}"
-            ),
-            "cancel_url": f"{base}/setup?payment_cancelled=1&phone={body.phone}",
-            "metadata": {"phone": body.phone, "plan": body.plan},
-        })
+        session = client.checkout.sessions.create(params=session_params)
     except stripe.StripeError as exc:
         logger.error("Stripe create_checkout_session: %s", exc)
         raise HTTPException(502, f"Errore Stripe: {getattr(exc, 'user_message', None) or str(exc)}")
 
-    ss: SetupSessionStore = _get_session_store(request)
     await ss.upsert(body.phone, {"plan": body.plan, "stripe_session_id": session.id})
 
-    return {"checkout_url": session.url}
+    return {"checkout_url": session.url, "skip_payment": False}
 
 
 # ── GET /verify-payment ───────────────────────────────────────────────────────
@@ -111,6 +172,13 @@ async def verify_payment(
     phone: str,
     request: Request,
 ) -> dict:
+    # Sessione FREE (codice 100%) — pagamento già verificato lato backend
+    if stripe_session_id.startswith("FREE_"):
+        ss: SetupSessionStore = _get_session_store(request)
+        sess = await ss.get(phone)
+        plan = (sess or {}).get("plan")
+        return {"paid": True, "plan": plan, "stripe_session_id": stripe_session_id}
+
     client = _stripe_client()
     try:
         session = client.checkout.sessions.retrieve(stripe_session_id)
@@ -123,7 +191,7 @@ async def verify_payment(
     if paid:
         plan = session.metadata.get("plan") if session.metadata else None
         if not plan:
-            ss: SetupSessionStore = _get_session_store(request)
+            ss = _get_session_store(request)
             sess = await ss.get(phone)
             plan = (sess or {}).get("plan")
         return {"paid": True, "plan": plan, "stripe_session_id": stripe_session_id}
@@ -138,7 +206,6 @@ async def get_subscription(
     current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ) -> dict:
-    """Ritorna il piano corrente e lo stato dell'abbonamento Stripe."""
     plan = current_user.get("plan")
     sub_id = current_user.get("stripe_subscription_id")
     customer_id = current_user.get("stripe_customer_id")
@@ -152,7 +219,7 @@ async def get_subscription(
         "status": None,
     }
 
-    if sub_id:
+    if sub_id and not sub_id.startswith("FREE_"):
         try:
             client = _stripe_client()
             sub = client.subscriptions.retrieve(sub_id)
@@ -172,7 +239,6 @@ async def customer_portal(
     current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ) -> dict:
-    """Crea una sessione Stripe Customer Portal per cambiare o cancellare il piano."""
     customer_id = current_user.get("stripe_customer_id")
     if not customer_id:
         raise HTTPException(400, "Nessun cliente Stripe associato a questo account. Contatta il supporto.")
@@ -199,10 +265,9 @@ async def cancel_subscription(
     current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ) -> dict:
-    """Cancella l'abbonamento a fine del periodo corrente (non rimborsa il periodo già pagato)."""
     sub_id = current_user.get("stripe_subscription_id")
-    if not sub_id:
-        raise HTTPException(400, "Nessun abbonamento attivo trovato.")
+    if not sub_id or sub_id.startswith("FREE_"):
+        raise HTTPException(400, "Nessun abbonamento Stripe attivo trovato.")
 
     client = _stripe_client()
     try:
@@ -242,11 +307,10 @@ async def stripe_webhook(request: Request) -> dict:
         sess = event["data"]["object"]
         phone = (sess.get("metadata") or {}).get("phone")
         plan  = (sess.get("metadata") or {}).get("plan")
-        customer_id   = sess.get("customer")
+        customer_id     = sess.get("customer")
         subscription_id = sess.get("subscription")
 
         if phone and plan:
-            # Find user by phone and store billing info
             user = await store.get_user_by_phone(phone)
             if user:
                 await store.update_billing_info(
@@ -264,7 +328,6 @@ async def stripe_webhook(request: Request) -> dict:
         sub = event["data"]["object"]
         customer_id = sub.get("customer")
         new_plan = None
-        # Try to derive plan from price ID
         items = (sub.get("items") or {}).get("data") or []
         if items:
             price_id = items[0].get("price", {}).get("id", "")
@@ -290,10 +353,7 @@ async def stripe_webhook(request: Request) -> dict:
         if customer_id:
             user = await store.get_user_by_stripe_customer(customer_id)
             if user:
-                await store.update_billing_info(
-                    user["user_id"],
-                    stripe_subscription_id=None,
-                )
+                await store.update_billing_info(user["user_id"], stripe_subscription_id=None)
                 logger.info("subscription.deleted: user %s", user["user_id"])
 
     return {"received": True}

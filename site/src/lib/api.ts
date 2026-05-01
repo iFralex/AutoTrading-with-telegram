@@ -559,12 +559,20 @@ export const api = {
 
   // ── Billing ───────────────────────────────────────────────────────────────
 
-  /** Crea una sessione Stripe Checkout e ritorna l'URL a cui redirezionare l'utente. */
-  createCheckoutSession(phone: string, plan: "core" | "pro" | "elite") {
-    return call<{ checkout_url: string }>(
+  /** Valida un codice sconto. */
+  validateCoupon(code: string) {
+    return call<{ valid: boolean; percent_off?: number; label?: string }>(
+      "GET",
+      `/api/billing/validate-coupon?code=${encodeURIComponent(code)}`
+    )
+  },
+
+  /** Crea una sessione Stripe Checkout e ritorna l'URL (o skip_payment=true per codici 100%). */
+  createCheckoutSession(phone: string, plan: "core" | "pro" | "elite", couponCode?: string) {
+    return call<{ checkout_url?: string; skip_payment: boolean; plan?: string }>(
       "POST",
       "/api/billing/create-checkout-session",
-      { phone, plan }
+      { phone, plan, ...(couponCode ? { coupon_code: couponCode } : {}) }
     )
   },
 
