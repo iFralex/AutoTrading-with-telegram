@@ -84,10 +84,18 @@ export interface StrategyLog {
 }
 
 export interface MessageUser {
-  user_id:   string
-  phone:     string | null
-  msg_count: number
-  groups:    { group_id: number; group_name: string }[]
+  user_id:      string
+  phone:        string | null
+  msg_count:    number
+  bot_msg_count: number
+  groups:       { group_id: number; group_name: string }[]
+}
+
+export interface BotMessage {
+  id:           number
+  ts:           string
+  message_text: string
+  message_type: string | null
 }
 
 export interface Message {
@@ -180,5 +188,14 @@ export const adminApi = {
       search:   p.search,
       limit:    p.limit,
       offset:   p.offset,
+    }),
+
+  getBotMessages: (p: { userId: string; messageType?: string; search?: string; limit?: number; offset?: number }) =>
+    call<{ total: number; messages: BotMessage[] }>("/api/admin/messages/bot", {
+      user_id:      p.userId,
+      message_type: p.messageType,
+      search:       p.search,
+      limit:        p.limit,
+      offset:       p.offset,
     }),
 }

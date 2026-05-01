@@ -58,6 +58,7 @@ from vps.services.economic_calendar import EconomicCalendarService
 from vps.services.monthly_report import MonthlyReportGenerator
 from vps.services.monthly_report_store import MonthlyReportStore
 from vps.services.group_follow_store import GroupFollowStore
+from vps.services.bot_message_store import BotMessageStore
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -200,6 +201,10 @@ async def lifespan(app: FastAPI):
     group_follow_store = GroupFollowStore(_db_path)
     await group_follow_store.init()
     app.state.group_follow_store = group_follow_store
+
+    # Messaggi inviati dal bot all'utente (notifiche, report, alert)
+    bot_message_store = BotMessageStore(_db_path)
+    await bot_message_store.init()
 
     # Backtest store + engine
     backtest_store = BacktestStore(_db_path)
@@ -359,11 +364,14 @@ async def lifespan(app: FastAPI):
                                         )
                                         if dd_strategy and strategy_executor:
                                             # Esegui la strategia di drawdown invece di bloccare
-                                            await tm.send_to_user(
-                                                user_id,
+                                            _dd_text = (
                                                 f"⚠️ Drawdown {period_label} {loss_pct:.1f}% ≥ soglia {threshold_pct}%\n"
                                                 f"📊 Balance: {balance:.2f} | Perdita periodo: {period_pnl:.2f}\n"
-                                                f"🤖 Esecuzione strategia drawdown in corso…",
+                                                f"🤖 Esecuzione strategia drawdown in corso…"
+                                            )
+                                            await tm.send_to_user(user_id, _dd_text)
+                                            asyncio.get_event_loop().create_task(
+                                                bot_message_store.insert(user_id, _dd_text, "drawdown_alert")
                                             )
                                             try:
                                                 result = await strategy_executor.on_event(
@@ -397,12 +405,15 @@ async def lifespan(app: FastAPI):
                                         else:
                                             app.state.drawdown_paused_users.add(user_id)
                                             app.state.drawdown_paused_periods[user_id] = dd_period
-                                            await tm.send_to_user(
-                                                user_id,
+                                            _pause_text = (
                                                 f"⛔ Trading sospeso\n\n"
                                                 f"📉 Drawdown {period_label}: {loss_pct:.1f}%\n"
                                                 f"🔴 Soglia: {threshold_pct}%\n\n"
-                                                f"Riprendi manualmente dal dashboard quando sei pronto.",
+                                                f"Riprendi manualmente dal dashboard quando sei pronto."
+                                            )
+                                            await tm.send_to_user(user_id, _pause_text)
+                                            asyncio.get_event_loop().create_task(
+                                                bot_message_store.insert(user_id, _pause_text, "drawdown_paused")
                                             )
                 except Exception as dd_exc:
                     ulog.warning("Drawdown check utente %s fallito: %s", user_id, dd_exc)
@@ -896,10 +907,14 @@ async def lifespan(app: FastAPI):
                     f"📍 {sig.order_type} {sig.symbol}",
                     f"❌ {res.error or 'Errore sconosciuto'}",
                 ]
+            _trade_text = "\n".join(lines)
             try:
-                await tm.send_to_user(user_id, "\n".join(lines))
+                await tm.send_to_user(user_id, _trade_text)
             except Exception as _notify_exc:
                 ulog.warning("Alert trade fallito: %s", _notify_exc)
+            asyncio.get_event_loop().create_task(
+                bot_message_store.insert(user_id, _trade_text, "trade_notification")
+            )
 
         # ── Step 7: registra ordini range nel watcher ─────────────────────────
         for result in results:
@@ -1130,6 +1145,9 @@ async def lifespan(app: FastAPI):
                 await asyncio.get_event_loop().run_in_executor(
                     None, tm.notify_user, uid, text
                 )
+                asyncio.get_event_loop().create_task(
+                    bot_message_store.insert(uid, text, "weekly_report")
+                )
                 logger.info("Report settimanale inviato a utente %s", uid)
             except Exception as exc:
                 logger.warning("Report settimanale utente %s fallito: %s", uid, exc)
@@ -1256,6 +1274,9 @@ async def lifespan(app: FastAPI):
 
                 await asyncio.get_event_loop().run_in_executor(
                     None, tm.notify_user, uid, text
+                )
+                asyncio.get_event_loop().create_task(
+                    bot_message_store.insert(uid, text, "monthly_report")
                 )
                 if pdf_bytes:
                     filename = f"report_{year_m}_{month:02d}.pdf"

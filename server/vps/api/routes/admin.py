@@ -615,8 +615,8 @@ async def get_revenue(request: Request) -> dict[str, Any]:
 @router.get("/messages/users")
 async def get_messages_users(request: Request) -> list[dict[str, Any]]:
     """
-    Returns every user that has at least one message in signal_logs,
-    with the list of distinct groups (id + name) seen for that user.
+    Returns every user that has at least one message in signal_logs or bot_messages,
+    with distinct groups and per-direction counts.
     """
     _check_auth(request)
     db_path = _db(request)
@@ -624,10 +624,14 @@ async def get_messages_users(request: Request) -> list[dict[str, Any]]:
         db.row_factory = aiosqlite.Row
 
         users = await (await db.execute("""
-            SELECT sl.user_id, u.phone, COUNT(*) AS msg_count
-            FROM signal_logs sl
-            LEFT JOIN users u ON u.user_id = sl.user_id
-            GROUP BY sl.user_id
+            SELECT u.user_id, u.phone,
+                   COUNT(DISTINCT sl.id) AS msg_count,
+                   COUNT(DISTINCT bm.id) AS bot_msg_count
+            FROM users u
+            LEFT JOIN signal_logs sl  ON sl.user_id = u.user_id
+            LEFT JOIN bot_messages bm ON bm.user_id = u.user_id
+            WHERE sl.id IS NOT NULL OR bm.id IS NOT NULL
+            GROUP BY u.user_id
             ORDER BY msg_count DESC
         """)).fetchall()
 
@@ -711,3 +715,41 @@ async def get_messages(
         results.append(d)
 
     return {"total": total_row["cnt"], "messages": results}
+
+
+@router.get("/messages/bot")
+async def get_bot_messages(
+    request: Request,
+    user_id: str = Query(...),
+    message_type: str | None = Query(None),
+    search: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Messaggi inviati dal bot all'utente (notifiche, report, alert)."""
+    _check_auth(request)
+    db_path = _db(request)
+
+    conditions = ["user_id=?"]
+    params: list[Any] = [user_id]
+    if message_type:
+        conditions.append("message_type=?")
+        params.append(message_type)
+    if search:
+        conditions.append("message_text LIKE ?")
+        params.append(f"%{search}%")
+
+    where = "WHERE " + " AND ".join(conditions)
+
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        total_row = await (await db.execute(
+            f"SELECT COUNT(*) AS cnt FROM bot_messages {where}", params
+        )).fetchone()
+        rows = await (await db.execute(
+            f"SELECT id, ts, message_text, message_type "
+            f"FROM bot_messages {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )).fetchall()
+
+    return {"total": total_row["cnt"], "messages": [dict(r) for r in rows]}

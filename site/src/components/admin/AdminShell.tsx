@@ -20,6 +20,7 @@ import {
   type Revenue,
   type MessageUser,
   type Message,
+  type BotMessage,
 } from "@/src/lib/admin-api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -677,17 +678,21 @@ function StrategyLogRow({ log }: { log: StrategyLog }) {
   )
 }
 
+type MsgDirection = "incoming" | "bot"
+
 function MessagesTab() {
-  const [users, setUsers]           = useState<MessageUser[] | null>(null)
+  const [users, setUsers]               = useState<MessageUser[] | null>(null)
   const [selectedUser, setSelectedUser] = useState<MessageUser | null>(null)
+  const [direction, setDirection]       = useState<MsgDirection>("incoming")
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null)
-  const [search, setSearch]         = useState("")
+  const [search, setSearch]             = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
-  const [messages, setMessages]     = useState<{ total: number; messages: Message[] } | null>(null)
-  const [offset, setOffset]         = useState(0)
-  const [loadingMsgs, setLoadingMsgs] = useState(false)
-  const [error, setError]           = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [incoming, setIncoming]         = useState<{ total: number; messages: Message[] } | null>(null)
+  const [botMsgs, setBotMsgs]           = useState<{ total: number; messages: BotMessage[] } | null>(null)
+  const [offset, setOffset]             = useState(0)
+  const [loadingMsgs, setLoadingMsgs]   = useState(false)
+  const [error, setError]               = useState<string | null>(null)
+  const [expandedId, setExpandedId]     = useState<number | null>(null)
   const LOG_LIMIT = 50
 
   useEffect(() => {
@@ -696,41 +701,45 @@ function MessagesTab() {
       .catch(e => setError(String(e)))
   }, [])
 
-  // debounce search input
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400)
     return () => clearTimeout(t)
   }, [search])
 
-  const loadMessages = useCallback(async (uid: string, gid: number | null, s: string, off: number) => {
+  const loadIncoming = useCallback(async (uid: string, gid: number | null, s: string, off: number) => {
     setLoadingMsgs(true)
     try {
-      const res = await adminApi.getMessages({
-        userId: uid,
-        groupId: gid ?? undefined,
-        search: s || undefined,
-        limit: LOG_LIMIT,
-        offset: off,
-      })
-      setMessages(res)
+      const res = await adminApi.getMessages({ userId: uid, groupId: gid ?? undefined, search: s || undefined, limit: LOG_LIMIT, offset: off })
+      setIncoming(res)
       setOffset(off)
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoadingMsgs(false)
-    }
+    } catch (e) { setError(String(e)) }
+    finally { setLoadingMsgs(false) }
+  }, [])
+
+  const loadBot = useCallback(async (uid: string, s: string, off: number) => {
+    setLoadingMsgs(true)
+    try {
+      const res = await adminApi.getBotMessages({ userId: uid, search: s || undefined, limit: LOG_LIMIT, offset: off })
+      setBotMsgs(res)
+      setOffset(off)
+    } catch (e) { setError(String(e)) }
+    finally { setLoadingMsgs(false) }
   }, [])
 
   useEffect(() => {
     if (!selectedUser) return
-    loadMessages(selectedUser.user_id, selectedGroup, debouncedSearch, 0)
-  }, [selectedUser, selectedGroup, debouncedSearch, loadMessages])
+    setOffset(0)
+    setExpandedId(null)
+    if (direction === "incoming") loadIncoming(selectedUser.user_id, selectedGroup, debouncedSearch, 0)
+    else loadBot(selectedUser.user_id, debouncedSearch, 0)
+  }, [selectedUser, direction, selectedGroup, debouncedSearch, loadIncoming, loadBot])
 
   const selectUser = (u: MessageUser) => {
     setSelectedUser(u)
     setSelectedGroup(null)
     setSearch("")
-    setMessages(null)
+    setIncoming(null)
+    setBotMsgs(null)
     setExpandedId(null)
   }
 
@@ -756,7 +765,9 @@ function MessagesTab() {
             }`}
           >
             <p className="text-xs font-mono truncate">{u.phone ?? u.user_id.slice(-8)}</p>
-            <p className="text-[10px] text-white/30 mt-0.5">{fmtInt(u.msg_count)} msgs</p>
+            <p className="text-[10px] text-white/30 mt-0.5">
+              {fmtInt(u.msg_count)} in · {fmtInt(u.bot_msg_count)} bot
+            </p>
           </button>
         ))}
       </div>
@@ -769,45 +780,57 @@ function MessagesTab() {
           </div>
         ) : (
           <>
-            {/* Controls bar */}
+            {/* Direction + group + search bar */}
             <div className="flex items-center gap-2 flex-wrap shrink-0">
-              {/* Group filter */}
-              <div className="flex items-center gap-1 flex-wrap">
-                <button
-                  onClick={() => setSelectedGroup(null)}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                    selectedGroup === null
-                      ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                      : "border-white/[0.08] text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
-                  }`}
-                >
-                  All groups
-                </button>
-                {selectedUser.groups.map(g => (
+
+              {/* Direction toggle */}
+              <div className="flex rounded-lg overflow-hidden border border-white/[0.08]">
+                {(["incoming", "bot"] as MsgDirection[]).map(d => (
                   <button
-                    key={g.group_id}
-                    onClick={() => setSelectedGroup(g.group_id)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors max-w-[160px] truncate ${
-                      selectedGroup === g.group_id
-                        ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                        : "border-white/[0.08] text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
+                    key={d}
+                    onClick={() => { setDirection(d); setSelectedGroup(null); setSearch("") }}
+                    className={`text-xs px-3 py-1.5 transition-colors ${
+                      direction === d
+                        ? "bg-amber-500/15 text-amber-400"
+                        : "text-white/40 hover:text-white/60 hover:bg-white/[0.04]"
                     }`}
-                    title={g.group_name}
                   >
-                    {g.group_name}
+                    {d === "incoming" ? `Incoming (${fmtInt(selectedUser.msg_count)})` : `Bot sent (${fmtInt(selectedUser.bot_msg_count)})`}
                   </button>
                 ))}
               </div>
+
+              {/* Group filter — only for incoming */}
+              {direction === "incoming" && selectedUser.groups.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  <button
+                    onClick={() => setSelectedGroup(null)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${selectedGroup === null ? "border-amber-500/30 bg-amber-500/10 text-amber-400" : "border-white/[0.08] text-white/40 hover:text-white/60"}`}
+                  >
+                    All
+                  </button>
+                  {selectedUser.groups.map(g => (
+                    <button
+                      key={g.group_id}
+                      onClick={() => setSelectedGroup(g.group_id)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors max-w-[140px] truncate ${selectedGroup === g.group_id ? "border-amber-500/30 bg-amber-500/10 text-amber-400" : "border-white/[0.08] text-white/40 hover:text-white/60"}`}
+                      title={g.group_name}
+                    >
+                      {g.group_name}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Search */}
               <div className="relative ml-auto">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Search messages…"
+                  placeholder="Search…"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  className="w-52 pl-7 pr-7 py-1.5 text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder:text-white/20 text-white/60 focus:outline-none focus:border-amber-500/30"
+                  className="w-48 pl-7 pr-7 py-1.5 text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder:text-white/20 text-white/60 focus:outline-none focus:border-amber-500/30"
                 />
                 {search && (
                   <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
@@ -817,26 +840,27 @@ function MessagesTab() {
               </div>
             </div>
 
-            {/* Messages list */}
-            {loadingMsgs ? (
-              <Spinner />
-            ) : !messages ? null : (
+            {/* List */}
+            {loadingMsgs ? <Spinner /> : (
               <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
-                <p className="text-[10px] text-white/30 px-1">{fmtInt(messages.total)} messages</p>
-                {messages.messages.map(msg => (
-                  <MessageRow
-                    key={msg.id}
-                    msg={msg}
-                    open={expandedId === msg.id}
-                    onToggle={() => setExpandedId(expandedId === msg.id ? null : msg.id)}
-                  />
-                ))}
-                <Pagination
-                  total={messages.total}
-                  limit={LOG_LIMIT}
-                  offset={offset}
-                  onChange={o => loadMessages(selectedUser.user_id, selectedGroup, debouncedSearch, o)}
-                />
+                {direction === "incoming" && incoming && (
+                  <>
+                    <p className="text-[10px] text-white/30 px-1">{fmtInt(incoming.total)} messages</p>
+                    {incoming.messages.map(msg => (
+                      <MessageRow key={msg.id} msg={msg} open={expandedId === msg.id} onToggle={() => setExpandedId(expandedId === msg.id ? null : msg.id)} />
+                    ))}
+                    <Pagination total={incoming.total} limit={LOG_LIMIT} offset={offset} onChange={o => loadIncoming(selectedUser.user_id, selectedGroup, debouncedSearch, o)} />
+                  </>
+                )}
+                {direction === "bot" && botMsgs && (
+                  <>
+                    <p className="text-[10px] text-white/30 px-1">{fmtInt(botMsgs.total)} messages</p>
+                    {botMsgs.messages.map(msg => (
+                      <BotMessageRow key={msg.id} msg={msg} open={expandedId === msg.id} onToggle={() => setExpandedId(expandedId === msg.id ? null : msg.id)} />
+                    ))}
+                    <Pagination total={botMsgs.total} limit={LOG_LIMIT} offset={offset} onChange={o => loadBot(selectedUser.user_id, debouncedSearch, o)} />
+                  </>
+                )}
               </div>
             )}
           </>
@@ -911,6 +935,45 @@ function MessageRow({ msg, open, onToggle }: { msg: Message; open: boolean; onTo
               </pre>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BotMessageRow({ msg, open, onToggle }: { msg: BotMessage; open: boolean; onToggle: () => void }) {
+  const typeColor: Record<string, "green" | "amber" | "red" | "blue" | "purple"> = {
+    trade_notification: "green",
+    drawdown_alert:     "amber",
+    drawdown_paused:    "red",
+    weekly_report:      "blue",
+    monthly_report:     "purple",
+  }
+  const color = typeColor[msg.message_type ?? ""] ?? "blue"
+
+  return (
+    <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+      <button
+        className="w-full flex items-start gap-3 px-4 py-2.5 text-xs hover:bg-white/[0.02] transition-colors text-left"
+        onClick={onToggle}
+      >
+        <div className="shrink-0 text-right w-28">
+          <p className="text-white/30 font-mono">{msg.ts.slice(0, 16).replace("T", " ")}</p>
+        </div>
+        <div className="shrink-0 w-28">
+          <Pill color={color}>{msg.message_type ?? "notification"}</Pill>
+        </div>
+        <span className="flex-1 min-w-0 text-white/60 leading-relaxed line-clamp-2 whitespace-pre-wrap">
+          {msg.message_text}
+        </span>
+        {open
+          ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          : <ChevronRight className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+        }
+      </button>
+      {open && (
+        <div className="px-4 pb-3 border-t border-white/[0.04] mt-0.5">
+          <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap mt-2">{msg.message_text}</p>
         </div>
       )}
     </div>
