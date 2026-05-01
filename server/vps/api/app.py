@@ -36,6 +36,7 @@ from vps.api.routes.dashboard import router as dashboard_router
 from vps.api.routes.backtest import router as backtest_router
 from vps.api.routes.auth import router as auth_router
 from vps.api.routes.billing import router as billing_router
+from vps.api.routes.admin import router as admin_router
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
@@ -110,6 +111,7 @@ async def lifespan(app: FastAPI):
     # Percorsi esposti per gli endpoint che ne hanno bisogno
     app.state.sessions_dir  = _sessions_dir
     app.state.mt5_users_dir = _mt5_users_dir
+    app.state.db_path       = _db_path
 
     # Database utenti
     store = UserStore(_db_path)
@@ -1339,6 +1341,7 @@ app.include_router(billing_router)
 app.include_router(setup_router)
 app.include_router(dashboard_router)
 app.include_router(backtest_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
