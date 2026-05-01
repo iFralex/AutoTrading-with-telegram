@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts"
 import { Loader2, AlertTriangle } from "lucide-react"
-import { api, type DashboardStats, type TradeStats, type AIStats, type TrustScore } from "@/src/lib/api"
+import { api, type DashboardStats, type TradeStats, type TrustScore } from "@/src/lib/api"
 
 // ── Colour constants ──────────────────────────────────────────────────────────
 
@@ -387,100 +387,6 @@ function TradePerformanceSection({ ts }: { ts: TradeStats }) {
   )
 }
 
-// ── AI Usage Section ──────────────────────────────────────────────────────────
-
-function AIStatsSection({ ai }: { ai: AIStats }) {
-  const CALL_TYPE_LABELS: Record<string, string> = {
-    flash_detect:       "Flash Detection",
-    pro_extract:        "Signal Extraction",
-    strategy_pretrade:  "Pre-trade Strategy",
-    strategy_event:     "Event Strategy",
-  }
-
-  const totalCalls = ai.total_calls
-  const maxCalls   = Math.max(...ai.by_call_type.map(c => c.calls), 1)
-
-  return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-4">
-        <div className="h-px flex-1 bg-white/[0.06]" />
-        <span className="text-[11px] uppercase tracking-widest text-violet-400 font-semibold px-2">
-          🤖 AI Usage
-        </span>
-        <div className="h-px flex-1 bg-white/[0.06]" />
-      </div>
-
-      {/* Global AI KPIs */}
-      <div>
-        <SectionLabel>AI Overview</SectionLabel>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon="📞" label="Total AI calls"    value={totalCalls.toLocaleString()}          valueClass="text-violet-400" />
-          <StatCard icon="🔤" label="Total tokens"      value={ai.total_tokens.toLocaleString()}     valueClass="text-cyan-400" />
-          <StatCard icon="💵" label="Total AI cost"     value={`$${ai.total_cost_usd.toFixed(4)}`}   valueClass={ai.total_cost_usd > 0 ? "text-amber-400" : "text-white/40"} />
-          <StatCard icon="⏱️" label="Avg latency"       value={`${Math.round(ai.avg_latency_ms)} ms`} valueClass="text-indigo-400" />
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
-          <StatCard icon="📥" label="Prompt tokens"     value={ai.total_prompt_tokens.toLocaleString()}     valueClass="text-white/70" />
-          <StatCard icon="📤" label="Completion tokens" value={ai.total_completion_tokens.toLocaleString()} valueClass="text-white/70" />
-          <StatCard icon="❌" label="AI errors"          value={ai.total_errors}                             valueClass={ai.total_errors > 0 ? "text-red-400" : "text-white/40"} />
-        </div>
-      </div>
-
-      {/* By call type */}
-      {ai.by_call_type.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <SectionLabel sub="Calls broken down by AI pipeline step">By Call Type</SectionLabel>
-            <PanelBox className="space-y-3">
-              {ai.by_call_type.map(ct => {
-                const pct = (ct.calls / maxCalls) * 100
-                const label = CALL_TYPE_LABELS[ct.call_type] ?? ct.call_type
-                return (
-                  <div key={ct.call_type} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-violet-300 font-medium">{label}</span>
-                      <span className="text-white/40 font-mono">{ct.calls} calls · ${ct.cost_usd.toFixed(4)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <InlineBar pct={pct} colorClass="bg-violet-500/60" />
-                      </div>
-                      <span className="text-[10px] text-white/30 font-mono w-16 text-right">
-                        {Math.round(ct.avg_latency_ms)}ms avg
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </PanelBox>
-          </div>
-
-          {ai.by_model.length > 0 && (
-            <div>
-              <SectionLabel sub="Token usage and cost per AI model">By Model</SectionLabel>
-              <PanelBox className="space-y-4">
-                {ai.by_model.map(m => (
-                  <div key={m.model} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-white/70">{m.model}</span>
-                      <span className="text-amber-400 font-mono">${m.cost_usd.toFixed(4)}</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-[10px] text-white/30">
-                      <span>{m.calls} calls</span>
-                      <span>{m.total_tokens.toLocaleString()} tokens</span>
-                      <span>{Math.round(m.avg_latency_ms)}ms avg</span>
-                    </div>
-                  </div>
-                ))}
-              </PanelBox>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Trust Score Section ───────────────────────────────────────────────────────
 
 function TrustScoreSection({ scores }: { scores: TrustScore[] }) {
@@ -580,7 +486,6 @@ function TrustScoreSection({ scores }: { scores: TrustScore[] }) {
 export function StatsSection({ userId, groupId }: { userId: string; groupId?: number }) {
   const [stats,       setStats]       = useState<DashboardStats | null>(null)
   const [tradeStats,  setTradeStats]  = useState<TradeStats | null>(null)
-  const [aiStats,     setAiStats]     = useState<AIStats | null>(null)
   const [trustScores, setTrustScores] = useState<TrustScore[]>([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState<string | null>(null)
@@ -591,13 +496,11 @@ export function StatsSection({ userId, groupId }: { userId: string; groupId?: nu
     Promise.all([
       api.getDashboardStats(userId, groupId),
       api.getTradeStats(userId),
-      api.getAIStats(userId).catch(() => null),
       api.getTrustScores(userId).catch(() => ({ scores: [] })),
     ])
-      .then(([s, t, a, ts]) => {
+      .then(([s, t, ts]) => {
         setStats(s)
         setTradeStats(t)
-        setAiStats(a)
         setTrustScores(ts?.scores ?? [])
       })
       .catch(e => setError(e instanceof Error ? e.message : "Unknown error"))
@@ -987,10 +890,6 @@ export function StatsSection({ userId, groupId }: { userId: string; groupId?: nu
         <TrustScoreSection scores={trustScores} />
       )}
 
-      {/* ── 9. AI USAGE ──────────────────────────────────────────────────── */}
-      {aiStats && aiStats.total_calls > 0 && (
-        <AIStatsSection ai={aiStats} />
-      )}
 
     </div>
   )
