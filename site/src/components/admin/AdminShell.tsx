@@ -21,6 +21,7 @@ import {
   type MessageUser,
   type Message,
   type BotMessage,
+  type TelegramHistoryMessage,
 } from "@/src/lib/admin-api"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -695,6 +696,16 @@ function MessagesTab() {
   const [expandedId, setExpandedId]     = useState<number | null>(null)
   const LOG_LIMIT = 50
 
+  // ── Telegram history fetch ──
+  const [historyOpen, setHistoryOpen]           = useState(false)
+  const [histFromDate, setHistFromDate]         = useState("")
+  const [histUntilDate, setHistUntilDate]       = useState("")
+  const [histLimit, setHistLimit]               = useState(500)
+  const [histLoading, setHistLoading]           = useState(false)
+  const [histError, setHistError]               = useState<string | null>(null)
+  const [histMessages, setHistMessages]         = useState<TelegramHistoryMessage[] | null>(null)
+  const [histExpandedId, setHistExpandedId]     = useState<number | null>(null)
+
   useEffect(() => {
     adminApi.getMessageUsers()
       .then(setUsers)
@@ -734,6 +745,27 @@ function MessagesTab() {
     else loadBot(selectedUser.user_id, debouncedSearch, 0)
   }, [selectedUser, direction, selectedGroup, debouncedSearch, loadIncoming, loadBot])
 
+  const fetchHistory = useCallback(async () => {
+    if (!selectedUser || !selectedGroup) return
+    setHistLoading(true)
+    setHistError(null)
+    setHistMessages(null)
+    try {
+      const res = await adminApi.getTelegramHistory({
+        userId:    selectedUser.user_id,
+        groupId:   selectedGroup,
+        limit:     histLimit,
+        fromDate:  histFromDate || undefined,
+        untilDate: histUntilDate || undefined,
+      })
+      setHistMessages(res.messages)
+    } catch (e) {
+      setHistError(String(e))
+    } finally {
+      setHistLoading(false)
+    }
+  }, [selectedUser, selectedGroup, histLimit, histFromDate, histUntilDate])
+
   const selectUser = (u: MessageUser) => {
     setSelectedUser(u)
     setSelectedGroup(null)
@@ -741,6 +773,9 @@ function MessagesTab() {
     setIncoming(null)
     setBotMsgs(null)
     setExpandedId(null)
+    setHistMessages(null)
+    setHistError(null)
+    setHistoryOpen(false)
   }
 
   if (error) return <ErrorBanner message={error} />
@@ -845,12 +880,77 @@ function MessagesTab() {
               <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
                 {direction === "incoming" && incoming && (
                   <>
-                    <p className="text-[10px] text-white/30 px-1">{fmtInt(incoming.total)} messages</p>
+                    <p className="text-[10px] text-white/30 px-1">{fmtInt(incoming.total)} messages logged by bot</p>
                     {incoming.messages.map(msg => (
                       <MessageRow key={msg.id} msg={msg} open={expandedId === msg.id} onToggle={() => setExpandedId(expandedId === msg.id ? null : msg.id)} />
                     ))}
                     <Pagination total={incoming.total} limit={LOG_LIMIT} offset={offset} onChange={o => loadIncoming(selectedUser.user_id, selectedGroup, debouncedSearch, o)} />
                   </>
+                )}
+
+                {/* ── Fetch historical from Telegram ── */}
+                {direction === "incoming" && selectedGroup && (
+                  <div className="rounded-xl border border-white/[0.06] overflow-hidden mt-2">
+                    <button
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-white/50 hover:text-white/70 hover:bg-white/[0.02] transition-colors"
+                      onClick={() => setHistoryOpen(o => !o)}
+                    >
+                      <Activity className="w-3.5 h-3.5 shrink-0" />
+                      <span className="font-medium">Fetch history from Telegram</span>
+                      <span className="text-white/30 text-[10px] ml-1">— retrieve messages not yet in the bot logs</span>
+                      {historyOpen ? <ChevronDown className="w-3 h-3 ml-auto shrink-0" /> : <ChevronRight className="w-3 h-3 ml-auto shrink-0" />}
+                    </button>
+
+                    {historyOpen && (
+                      <div className="px-4 pb-4 border-t border-white/[0.04] space-y-3">
+                        <div className="flex flex-wrap gap-3 mt-3">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[10px] text-white/30 uppercase tracking-wider">From date</span>
+                            <input type="date" value={histFromDate} onChange={e => setHistFromDate(e.target.value)}
+                              className="text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-white/60 focus:outline-none focus:border-amber-500/30" />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[10px] text-white/30 uppercase tracking-wider">Until date</span>
+                            <input type="date" value={histUntilDate} onChange={e => setHistUntilDate(e.target.value)}
+                              className="text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-white/60 focus:outline-none focus:border-amber-500/30" />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[10px] text-white/30 uppercase tracking-wider">Max messages</span>
+                            <input type="number" min={1} max={5000} value={histLimit} onChange={e => setHistLimit(Number(e.target.value))}
+                              className="w-24 text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-white/60 focus:outline-none focus:border-amber-500/30" />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              onClick={fetchHistory}
+                              disabled={histLoading}
+                              className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/20 disabled:opacity-40 transition-colors flex items-center gap-1.5"
+                            >
+                              {histLoading
+                                ? <><RefreshCw className="w-3 h-3 animate-spin" />Fetching…</>
+                                : "Fetch"
+                              }
+                            </button>
+                          </div>
+                        </div>
+
+                        {histError && <p className="text-xs text-red-400">{histError}</p>}
+
+                        {histMessages && (
+                          <div className="space-y-1.5 mt-2">
+                            <p className="text-[10px] text-white/30">{fmtInt(histMessages.length)} messages from Telegram</p>
+                            {histMessages.map(msg => (
+                              <TelegramHistoryRow
+                                key={msg.id}
+                                msg={msg}
+                                open={histExpandedId === msg.id}
+                                onToggle={() => setHistExpandedId(histExpandedId === msg.id ? null : msg.id)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {direction === "bot" && botMsgs && (
                   <>
@@ -935,6 +1035,35 @@ function MessageRow({ msg, open, onToggle }: { msg: Message; open: boolean; onTo
               </pre>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TelegramHistoryRow({ msg, open, onToggle }: { msg: TelegramHistoryMessage; open: boolean; onToggle: () => void }) {
+  return (
+    <div className="rounded-xl border border-amber-500/10 bg-amber-500/[0.02] overflow-hidden">
+      <button
+        className="w-full flex items-start gap-3 px-4 py-2.5 text-xs hover:bg-white/[0.02] transition-colors text-left"
+        onClick={onToggle}
+      >
+        <div className="shrink-0 text-right w-28 space-y-0.5">
+          <p className="text-white/30 font-mono">{msg.date_iso.slice(0, 16).replace("T", " ")}</p>
+          {msg.sender_name && <p className="text-white/40 truncate">{msg.sender_name}</p>}
+        </div>
+        <span className="shrink-0"><Pill color="amber">history</Pill></span>
+        <span className="flex-1 min-w-0 text-white/60 leading-relaxed line-clamp-2 whitespace-pre-wrap">
+          {msg.text}
+        </span>
+        {open
+          ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          : <ChevronRight className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+        }
+      </button>
+      {open && (
+        <div className="px-4 pb-3 border-t border-white/[0.04] mt-0.5">
+          <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap mt-2">{msg.text}</p>
         </div>
       )}
     </div>

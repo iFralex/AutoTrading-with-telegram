@@ -98,6 +98,13 @@ export interface BotMessage {
   message_type: string | null
 }
 
+export interface TelegramHistoryMessage {
+  id:          number
+  date_iso:    string
+  sender_name: string
+  text:        string
+}
+
 export interface Message {
   id:          number
   ts:          string
@@ -197,5 +204,14 @@ export const adminApi = {
       search:       p.search,
       limit:        p.limit,
       offset:       p.offset,
+    }),
+
+  getTelegramHistory: (p: { userId: string; groupId: number; limit?: number; fromDate?: string; untilDate?: string }) =>
+    call<{ total: number; messages: TelegramHistoryMessage[] }>("/api/admin/messages/telegram-history", {
+      user_id:    p.userId,
+      group_id:   p.groupId,
+      limit:      p.limit,
+      from_date:  p.fromDate,
+      until_date: p.untilDate,
     }),
 }

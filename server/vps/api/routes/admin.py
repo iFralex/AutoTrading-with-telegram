@@ -20,8 +20,10 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
@@ -753,3 +755,55 @@ async def get_bot_messages(
         )).fetchall()
 
     return {"total": total_row["cnt"], "messages": [dict(r) for r in rows]}
+
+
+@router.get("/messages/telegram-history")
+async def get_telegram_history(
+    request: Request,
+    user_id: str = Query(...),
+    group_id: int = Query(...),
+    limit: int = Query(500, ge=1, le=5000),
+    from_date: str | None = Query(None),   # ISO 8601 date, es. "2024-01-01"
+    until_date: str | None = Query(None),  # ISO 8601 date, es. "2024-12-31"
+) -> dict[str, Any]:
+    """
+    Recupera messaggi storici da un gruppo Telegram usando la sessione dell'utente.
+    Richiede che l'utente sia attivo nel TelegramManager.
+    """
+    _check_auth(request)
+
+    tm = request.app.state.telegram_manager
+
+    def _parse_date(s: str) -> datetime:
+        # Accetta "YYYY-MM-DD" o ISO full
+        try:
+            return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, f"Data non valida: {s!r} — usa formato YYYY-MM-DD")
+
+    from_dt    = _parse_date(from_date)   if from_date   else None
+    until_dt   = _parse_date(until_date)  if until_date  else None
+
+    loop = asyncio.get_event_loop()
+    try:
+        messages: list[dict] = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: tm.get_history(
+                    user_id=user_id,
+                    group_id=group_id,
+                    limit=limit,
+                    from_date=from_dt,
+                    until_date=until_dt,
+                ),
+            ),
+            timeout=180.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Timeout: il recupero storico ha impiegato troppo. Riduci il limite o restringi il periodo.")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Errore Telegram: {exc}")
+
+    return {"total": len(messages), "messages": messages}
