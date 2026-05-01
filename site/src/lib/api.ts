@@ -154,6 +154,9 @@ async function call<T>(
   path: string,
   body?: unknown
 ): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
+
   let res: Response
   try {
     res = await fetch(`${BASE_URL}${path}`, {
@@ -161,12 +164,17 @@ async function call<T>(
       headers: { "Content-Type": "application/json" },
       credentials: "include",   // invia/riceve cookie httpOnly per JWT
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     })
-  } catch {
+  } catch (err) {
     throw new ApiError(
-      "Impossibile contattare il server. Controlla la connessione.",
+      (err instanceof Error && err.name === "AbortError")
+        ? "Request timed out. Check your connection."
+        : "Could not reach the server. Check your connection.",
       0
     )
+  } finally {
+    clearTimeout(timer)
   }
 
   if (!res.ok) {

@@ -42,7 +42,7 @@ const PAGE_TITLES: Record<string, string> = {
 function ShellInner({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
-  const { user, loading, error } = useDashboard()
+  const { user, loading, error, reload } = useDashboard()
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
@@ -197,7 +197,32 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
-          {children}
+          {loading && !user ? (
+            <div className="flex items-center justify-center h-full pb-16">
+              <div className="text-center space-y-3">
+                <Loader2 className="w-6 h-6 text-white/20 animate-spin mx-auto" />
+                <p className="text-sm text-white/30">Loading your account…</p>
+              </div>
+            </div>
+          ) : !user ? (
+            <div className="flex items-center justify-center h-full pb-16">
+              <div className="text-center space-y-4 max-w-xs px-4">
+                <AlertTriangle className="w-8 h-8 text-red-400/60 mx-auto" />
+                <div>
+                  <p className="text-sm font-medium text-white/70">Could not load your account</p>
+                  <p className="text-xs text-white/30 mt-1">{error ?? "Connection error — check your network."}</p>
+                </div>
+                <button
+                  onClick={reload}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-white/[0.06] hover:bg-white/[0.10] text-white/70 border border-white/[0.08] transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : (
+            children
+          )}
         </main>
       </div>
     </div>
