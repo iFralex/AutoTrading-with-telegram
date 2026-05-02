@@ -238,19 +238,19 @@ function HowItWorks() {
   const steps = [
     {
       num: "1", from: "from-emerald-400", to: "to-cyan-400",
-      title: "Chat with Nova to get set up",
+      title: "Set up with Nova",
       body: "Nova, our AI setup assistant, walks you through everything in a conversation — no forms, no manuals. Connect your Telegram account, choose your signal room, link your MT5 broker account. Then tell Nova how you trade, in your own words.",
       tags: [["Nova AI assistant","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Telegram + MT5","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"],["Plain language rules","text-emerald-400 bg-emerald-400/10 border-emerald-400/20"]],
     },
     {
       num: "2", from: "from-cyan-400", to: "to-violet-500",
-      title: "Preview on a real signal",
+      title: "Preview before going live",
       body: "Paste a message from your channel — or pick one directly from recent messages. Nova shows a chart with entry, SL, and TP, then simulates how your strategy would have played out. You see exactly what will happen before a single order goes live.",
       tags: [["Live signal preview","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Strategy simulation","text-violet-400 bg-violet-400/10 border-violet-400/20"],["Zero risk","text-violet-400 bg-violet-400/10 border-violet-400/20"]],
     },
     {
       num: "3", from: "from-violet-500", to: "to-red-500",
-      title: "Trades execute automatically",
+      title: "Trades run automatically",
       body: "From the moment you launch, every signal in your room is handled in under a second. The system reads, extracts, filters by your rules, and opens the order — 24/7, with no action needed on your part.",
       tags: [["Instant execution","text-red-400 bg-red-400/10 border-red-400/20"],["Zero emotion","text-red-400 bg-red-400/10 border-red-400/20"],["Always on","text-red-400 bg-red-400/10 border-red-400/20"]],
     },
@@ -262,7 +262,7 @@ function HowItWorks() {
         <Reveal className="text-center mb-16">
           <Badge>How It Works</Badge>
           <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">Three steps. Zero effort.</h2>
-          <p className="text-lg text-white/45 max-w-xl mx-auto">Chat with Nova, preview on a real signal, and go live — all in under 5 minutes.</p>
+          <p className="text-lg text-white/45 max-w-xl mx-auto">Connect your signals, preview the execution, and go live — all in under 5 minutes.</p>
         </Reveal>
         <div className="grid md:grid-cols-3 gap-6">
           {steps.map(({ num, from, to, title, body, tags }, i) => (
@@ -297,8 +297,8 @@ function Features() {
         <Reveal className="text-center mb-16">
           <Badge>Features</Badge>
           <h2 className="text-4xl md:text-5xl font-black mt-4 mb-4 text-white">
-            Everything you need.<br />
-            <GradientText>Nothing you don&apos;t.</GradientText>
+            Everything runs automatically.<br />
+            <GradientText>You stay in control.</GradientText>
           </h2>
           <p className="text-lg text-white/45 max-w-xl mx-auto">Every feature is designed for traders who are tired of missing opportunities and watching screens all day.</p>
         </Reveal>
@@ -312,8 +312,8 @@ function Features() {
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 text-emerald-400 bg-emerald-400/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 </div>
-                <h3 className="text-2xl font-black text-white mb-2">Instant Signal Execution</h3>
-                <p className="text-white/50 text-sm leading-relaxed max-w-sm">Your trade opens before you even see the message. No delays, no hesitation, no missed entries — ever.</p>
+                <h3 className="text-2xl font-black text-white mb-2">Instant signal execution</h3>
+                <p className="text-white/50 text-sm leading-relaxed max-w-sm">Trades execute before you even see the signal. No delays, no missed entries.</p>
               </div>
               <div className="mt-8 pt-6 border-t border-white/5 flex items-baseline gap-4">
                 <span className="text-6xl font-black text-emerald-400">&lt;1s</span>
@@ -328,8 +328,8 @@ function Features() {
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 text-violet-400 bg-violet-400/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                 </div>
-                <h3 className="text-xl font-black text-white mb-2">Zero Emotion Trading</h3>
-                <p className="text-white/50 text-sm leading-relaxed">Rules execute perfectly every time. No second-guessing, no panic, no greed.</p>
+                <h3 className="text-xl font-black text-white mb-2">Rule-based execution</h3>
+                <p className="text-white/50 text-sm leading-relaxed">Every trade follows your rules exactly. No manual decisions, no mistakes.</p>
               </div>
               <div className="mt-6 pt-4 border-t border-white/5 space-y-2.5">
                 {["No hesitation", "No FOMO", "No fear", "No missed entries"].map(item => (
@@ -347,8 +347,8 @@ function Features() {
               <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 text-violet-400 bg-violet-400/10">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
               </div>
-              <h3 className="font-black text-base text-white mb-1.5">Performance Analytics</h3>
-              <p className="text-white/45 text-sm mb-4 leading-relaxed">Know exactly which providers make you money and which don&apos;t.</p>
+              <h3 className="font-black text-base text-white mb-1.5">See what actually works</h3>
+              <p className="text-white/45 text-sm mb-4 leading-relaxed">Track performance and understand which signals are truly profitable.</p>
               <div className="grid grid-cols-2 gap-2">
                 {[["Win Rate","71.3%","text-emerald-400"],["Profit Factor","2.1×","text-white"],["Max Drawdown","−8.2%","text-red-400"],["Sharpe Ratio","1.84","text-white"]].map(([l,v,c]) => (
                   <div key={l} className="bg-white/[0.04] rounded-xl p-3">
@@ -388,8 +388,8 @@ function Features() {
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 2a10 10 0 100 20A10 10 0 0012 2zM12 8v4l3 3" /></svg>
                 </div>
                 <div>
-                  <h3 className="font-black text-base text-white mb-1.5">Automatic Position Management</h3>
-                  <p className="text-white/45 text-sm leading-relaxed">Set your rules once. The system moves your stop loss, closes partials, and reacts to any event — without you lifting a finger.</p>
+                  <h3 className="font-black text-base text-white mb-1.5">Manage trades automatically</h3>
+                  <p className="text-white/45 text-sm leading-relaxed">Stops, partials, and exits are handled for you — based on your rules.</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -405,8 +405,8 @@ function Features() {
               <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 text-red-400 bg-red-400/10">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" /></svg>
               </div>
-              <h3 className="font-black text-base text-white mb-1.5">Automatic Risk Protection</h3>
-              <p className="text-white/45 text-sm leading-relaxed">Signal deleted by the analyst? The system reacts instantly — close, reduce, or move to break-even based on your rules.</p>
+              <h3 className="font-black text-base text-white mb-1.5">Protect your capital automatically</h3>
+              <p className="text-white/45 text-sm leading-relaxed">The system reacts instantly to changes — closing or adjusting trades based on your rules.</p>
             </div>
           </Reveal>
 
@@ -539,8 +539,8 @@ type Plan = { name: string; price: string; tagline: string; popular?: boolean; e
 
 const PLANS: Plan[] = [
   {
-    name: "Core", price: "€79", tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
-    ctaLabel: "Launch Metis",
+    name: "Core", price: "€39", tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
+    ctaLabel: "Start with Core",
     features: [
       { label: "1 Telegram signal room" },
       { label: "Automatic signal detection" },
@@ -561,8 +561,8 @@ const PLANS: Plan[] = [
     notIncluded: ["Advanced signal analysis", "Backtesting & PDF reports", "AI position management"],
   },
   {
-    name: "Pro", price: "€149", tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
-    popular: true, ctaLabel: "Launch Metis", prevPlan: "Core",
+    name: "Pro", price: "€89", tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
+    popular: true, ctaLabel: "Start automating", prevPlan: "Core",
     features: [
       { label: "Up to 5 Telegram signal rooms", bold: true },
       { label: "Advanced signal analysis (zero false positives)" },
@@ -578,8 +578,8 @@ const PLANS: Plan[] = [
     notIncluded: ["AI position management", "Signal deletion handling", "Trading hours & calendar filters"],
   },
   {
-    name: "Elite", price: "€299", tagline: "Unlimited rooms, AI-managed positions, smart filters, and community sharing.",
-    elite: true, ctaLabel: "Contact the team", prevPlan: "Pro",
+    name: "Elite", price: "€149", tagline: "Unlimited rooms, AI-managed positions, smart filters, and community sharing.",
+    elite: true, ctaLabel: "Go Elite", prevPlan: "Pro",
     features: [
       { label: "Unlimited signal rooms", bold: true },
       { label: "AI position management (approve / modify / close)", bold: true },
@@ -603,7 +603,7 @@ function PricingCard({ plan }: { plan: Plan }) {
       style={isPopular ? { background: "linear-gradient(160deg,rgba(0,232,135,0.07) 0%,rgba(0,195,255,0.04) 100%)" } : undefined}>
       {isPopular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="px-4 py-1 rounded-full text-xs font-bold text-black bg-gradient-to-r from-emerald-400 to-cyan-400">Most Popular</span>
+          <span className="px-4 py-1 rounded-full text-xs font-bold text-black bg-gradient-to-r from-emerald-400 to-cyan-400">Most traders choose this</span>
         </div>
       )}
       <div className="mb-6">
