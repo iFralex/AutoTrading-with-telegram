@@ -7,9 +7,12 @@ import {
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+  ComposedChart, Bar, Line, ReferenceLine, ReferenceDot,
 } from "recharts"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
 import { api, type BacktestRun, type BacktestTrade } from "@/src/lib/api"
+
+const TZ = "Europe/Rome"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -391,9 +394,235 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
   )
 }
 
+// ── Trade chart modal ─────────────────────────────────────────────────────────
+
+type OhlcBar = { time: number; open: number; high: number; low: number; close: number }
+
+function makeCandlestick(domainMin: number, domainMax: number) {
+  const range = domainMax - domainMin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function CandlestickShape(props: any) {
+    const { x = 0, width = 0, background, payload } = props as {
+      x?: number; width?: number
+      background?: { y: number | null; height: number | null }
+      payload?: OhlcBar
+    }
+    if (!payload || !background || !background.height || background.height <= 0 || width <= 0 || range <= 0) return null
+    const { open, high, low, close } = payload
+    const bullish = close >= open
+    const color   = bullish ? "#10b981" : "#ef4444"
+    const chartTop = background.y ?? 0
+    const chartH   = background.height ?? 0
+    const toY = (v: number) => chartTop + chartH * (1 - (v - domainMin) / range)
+    const yHigh  = toY(high)
+    const yLow   = toY(low)
+    const yOpen  = toY(open)
+    const yClose = toY(close)
+    const bodyTop    = Math.min(yOpen, yClose)
+    const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1)
+    const wickX      = x + width / 2
+    const bodyW      = Math.max(width - 2, 1)
+    return (
+      <g>
+        <line x1={wickX} y1={yHigh} x2={wickX} y2={yLow} stroke={color} strokeWidth={1} />
+        <rect x={x + 1} y={bodyTop} width={bodyW} height={bodyHeight} fill={color} opacity={0.9} />
+      </g>
+    )
+  }
+}
+
+function OhlcTooltip({ active, payload, label }: {
+  active?: boolean
+  payload?: { payload?: OhlcBar }[]
+  label?: string
+}) {
+  if (!active || !payload?.[0]?.payload) return null
+  const b = payload[0].payload
+  const bull = b.close >= b.open
+  return (
+    <div style={{ background: "#0a0a14", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11, padding: "8px 12px" }}>
+      <p className="text-white/40 mb-1 text-[10px]">{label}</p>
+      {[
+        { k: "O", v: b.open },
+        { k: "H", v: b.high },
+        { k: "L", v: b.low  },
+        { k: "C", v: b.close },
+      ].map(({ k, v }) => (
+        <p key={k} className={`font-mono text-[11px] ${k === "C" ? (bull ? "text-emerald-400" : "text-red-400") : "text-white/70"}`}>
+          {k}: <strong>{v.toFixed(5)}</strong>
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: () => void }) {
+  const bars  = trade.chart_bars_json
+  const isBuy = trade.order_type === "BUY"
+  const [chartType, setChartType] = useState<"candle" | "line">("candle")
+
+  const entryUnix = trade.actual_entry_ts ? new Date(trade.actual_entry_ts).getTime() / 1000 : null
+  const exitUnix  = trade.exit_ts         ? new Date(trade.exit_ts).getTime()         / 1000 : null
+
+  const chartData = (bars ?? []).map((b: OhlcBar) => ({
+    ...b,
+    label: new Date(b.time * 1000).toLocaleString("it-IT", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+      timeZone: TZ,
+    }),
+  }))
+
+  const entryIdx = entryUnix != null ? chartData.findIndex(d => d.time >= entryUnix) : -1
+  const exitIdx  = exitUnix  != null ? chartData.findIndex(d => d.time >= exitUnix)  : -1
+
+  const levels = [trade.stop_loss, trade.take_profit, trade.actual_entry].filter((v): v is number => v != null)
+  const priceMin = bars ? Math.min(...bars.map((b: OhlcBar) => b.low),  ...levels) * 0.9999 : 0
+  const priceMax = bars ? Math.max(...bars.map((b: OhlcBar) => b.high), ...levels) * 1.0001 : 1
+
+  const candlestickShape = makeCandlestick(priceMin, priceMax)
+  const pnlPos = (trade.pnl_pips ?? 0) >= 0
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-[#0a0a14] border border-white/[0.08] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${isBuy ? "bg-emerald-600/10 text-emerald-400" : "bg-red-600/10 text-red-400"}`}>
+              {trade.order_type ?? "—"}
+            </span>
+            <span className="font-mono font-semibold text-white">{trade.symbol ?? "—"}</span>
+            <OutcomeBadge outcome={trade.outcome} />
+            <span className={`text-sm font-mono font-bold ${pnlPos ? "text-emerald-400" : "text-red-400"}`}>
+              {trade.pnl_pips !== null ? fmtPips(trade.pnl_pips) : ""}
+              {trade.pnl_usd  !== null ? ` · ${fmtUsd(trade.pnl_usd)}` : ""}
+            </span>
+          </div>
+          <button onClick={onClose} className="text-white/40 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Levels legend */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1 px-5 pt-3 text-[11px]">
+          {trade.actual_entry != null && (
+            <span className="flex items-center gap-1.5 text-amber-400">
+              <span className="w-5 h-0.5 bg-amber-400 inline-block" />
+              Entry {trade.actual_entry.toFixed(5)}
+            </span>
+          )}
+          {trade.stop_loss != null && (
+            <span className="flex items-center gap-1.5 text-red-400">
+              <span className="w-5 border-t border-dashed border-red-400 inline-block" />
+              SL {trade.stop_loss.toFixed(5)}
+            </span>
+          )}
+          {trade.take_profit != null && (
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <span className="w-5 border-t border-dashed border-emerald-400 inline-block" />
+              TP {trade.take_profit.toFixed(5)}
+            </span>
+          )}
+          {trade.exit_price != null && (
+            <span className="flex items-center gap-1.5 text-violet-400">
+              <span className="w-5 h-0.5 bg-violet-400 inline-block" />
+              Exit {trade.exit_price.toFixed(5)}
+            </span>
+          )}
+        </div>
+
+        {/* Chart */}
+        <div className="px-5 pt-2 pb-4">
+          {!bars || bars.length === 0 ? (
+            <div className="flex items-center justify-center h-48 text-white/40 text-sm">
+              Dati grafico non disponibili (backtest eseguito prima di questo aggiornamento)
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-end mb-2 gap-1">
+                {(["candle", "line"] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setChartType(t)}
+                    className={`px-2.5 py-1 text-[11px] rounded font-medium transition-colors ${
+                      chartType === t
+                        ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
+                        : "text-white/40 hover:text-white border border-transparent"
+                    }`}
+                  >
+                    {t === "candle" ? "Candele" : "Linea"}
+                  </button>
+                ))}
+              </div>
+              <ResponsiveContainer width="100%" height={320}>
+                <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 9, fill: "#6b7280" }}
+                    interval={Math.max(1, Math.floor(chartData.length / 6))}
+                  />
+                  <YAxis
+                    domain={[priceMin, priceMax]}
+                    tick={{ fontSize: 9, fill: "#6b7280" }}
+                    tickFormatter={(v: number) => v.toFixed(4)}
+                    width={72}
+                  />
+                  <Tooltip content={chartType === "candle" ? <OhlcTooltip /> : undefined} />
+                  {chartType === "candle" ? (
+                    <Bar dataKey="high" isAnimationActive={false} background={{ fill: "transparent" }} shape={candlestickShape} />
+                  ) : (
+                    <Line dataKey="close" dot={false} isAnimationActive={false} stroke={isBuy ? "#10b981" : "#ef4444"} strokeWidth={1.5} />
+                  )}
+                  {trade.actual_entry != null && <ReferenceLine y={trade.actual_entry} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />}
+                  {trade.stop_loss != null && <ReferenceLine y={trade.stop_loss} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" />}
+                  {trade.take_profit != null && <ReferenceLine y={trade.take_profit} stroke="#10b981" strokeWidth={1.5} strokeDasharray="4 2" />}
+                  {entryIdx >= 0 && trade.actual_entry != null && (
+                    <ReferenceDot x={chartData[entryIdx]?.label} y={trade.actual_entry} r={5} fill="#f59e0b" stroke="#0a0a14" strokeWidth={2} />
+                  )}
+                  {exitIdx >= 0 && trade.exit_price != null && (
+                    <ReferenceDot x={chartData[exitIdx]?.label} y={trade.exit_price} r={5} fill={pnlPos ? "#10b981" : "#ef4444"} stroke="#0a0a14" strokeWidth={2} />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </>
+          )}
+        </div>
+
+        {/* Trade details */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 pb-5 text-xs">
+          {[
+            { label: "Entry time", v: fmtTs(trade.actual_entry_ts) },
+            { label: "Exit time",  v: fmtTs(trade.exit_ts) },
+            { label: "Durata",     v: fmtDur(trade.duration_min) },
+            { label: "Lot size",   v: trade.lot_size?.toFixed(2) ?? "—" },
+            { label: "Mittente",   v: trade.sender_name ?? "—" },
+            { label: "Modalità",   v: trade.order_mode ?? "—" },
+          ].map(({ label, v }) => (
+            <div key={label} className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/[0.05]">
+              <p className="text-white/40 mb-0.5">{label}</p>
+              <p className="font-mono font-semibold truncate text-white/80">{v}</p>
+            </div>
+          ))}
+        </div>
+
+        {trade.message_text && (
+          <div className="mx-5 mb-5 p-3 bg-white/[0.02] rounded-lg border border-white/[0.05] text-xs text-white/40 whitespace-pre-wrap max-h-32 overflow-y-auto">
+            {trade.message_text}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Run results ───────────────────────────────────────────────────────────────
 
-function RunResults({ run }: { run: BacktestRun }) {
+function RunResults({ run, onSelectTrade }: { run: BacktestRun; onSelectTrade: (t: BacktestTrade) => void }) {
   const [trades, setTrades]         = useState<BacktestTrade[] | null>(null)
   const [loadingTrades, setLT]      = useState(false)
   const [showTrades, setShowTrades] = useState(false)
@@ -563,7 +792,7 @@ function RunResults({ run }: { run: BacktestRun }) {
               </thead>
               <tbody>
                 {trades.map((t, i) => (
-                  <tr key={t.id ?? i} className={`border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors ${i === trades.length - 1 ? "border-b-0" : ""}`}>
+                  <tr key={t.id ?? i} onClick={() => onSelectTrade(t)} className={`border-b border-white/[0.04] hover:bg-white/[0.04] transition-colors cursor-pointer ${i === trades.length - 1 ? "border-b-0" : ""}`}>
                     <td className="px-3 py-2 font-bold text-xs text-white">{t.symbol}</td>
                     <td className="px-3 py-2">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
@@ -606,6 +835,7 @@ export default function BacktestPage() {
   const [polling, setPolling]   = useState(false)
   const [history, setHistory]   = useState<BacktestRun[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  const [selectedTrade, setSelectedTrade] = useState<BacktestTrade | null>(null)
   const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const isRunning = run ? run.status.startsWith("running") : false
@@ -718,7 +948,7 @@ export default function BacktestPage() {
           )}
 
           {run && run.status === "done" && (
-            <RunResults run={run} />
+            <RunResults run={run} onSelectTrade={setSelectedTrade} />
           )}
 
           {run && (run.status === "error" || run.status === "cancelled") && (
@@ -726,6 +956,9 @@ export default function BacktestPage() {
           )}
         </div>
       </div>
+      {selectedTrade && (
+        <TradeChartModal trade={selectedTrade} onClose={() => setSelectedTrade(null)} />
+      )}
     </div>
   )
 }
