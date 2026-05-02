@@ -52,9 +52,10 @@ def _make_access(phone: str) -> str:
     )
 
 
-def _make_refresh(phone: str) -> tuple[str, str]:
-    """Ritorna (token_str, jti)."""
-    jti = str(uuid.uuid4())
+def _make_refresh(phone: str, jti: str | None = None) -> tuple[str, str]:
+    """Ritorna (token_str, jti). Se jti è fornito lo riusa (refresh senza rotation)."""
+    if jti is None:
+        jti = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     token = jwt.encode(
         {"sub": phone, "jti": jti, "type": "refresh", "iat": now, "exp": now + REFRESH_TTL},
@@ -179,10 +180,13 @@ async def refresh_token(
     if stored != jti:
         raise HTTPException(401, "Refresh token revocato")
 
-    # Sliding window: emetti nuovi token e ruota il refresh JTI
+    # Sliding window: emetti nuovi token RIUSANDO lo stesso JTI.
+    # Non ruotiamo il JTI ad ogni refresh per evitare race condition con
+    # più tab/dispositivi aperti contemporaneamente: se due tab refreshano
+    # quasi in parallelo, uno dei due riceverebbe 401 perché l'altro ha
+    # già scritto il nuovo JTI nel DB. Il JTI cambia solo su login/logout.
     access = _make_access(phone)
-    new_refresh, new_jti = _make_refresh(phone)
-    await auth.store_refresh_jti(phone, new_jti)
+    new_refresh, _ = _make_refresh(phone, jti=jti)
     _set_auth_cookies(response, access, new_refresh)
     return {"status": "ok"}
 
