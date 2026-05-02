@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { api, type DashboardUserResponse, type UserGroup, type Group, type TrustScore } from "@/src/lib/api"
+import { PLAN_PRICES } from "@/src/lib/plans"
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
   Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw, Copy,
@@ -200,7 +201,7 @@ function DrawdownProtectionSection({
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setSaveErr(e instanceof Error ? e.message : "Errore")
+      setSaveErr(e instanceof Error ? e.message : "Error")
     }
   }
 
@@ -257,7 +258,7 @@ function DrawdownProtectionSection({
               )}
             </div>
             <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
-              {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+              {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
             </button>
           </div>
         ) : (
@@ -328,10 +329,10 @@ function DrawdownProtectionSection({
             {saveErr && <p className="text-xs text-red-400">{saveErr}</p>}
             <div className="flex items-center gap-2">
               <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-                <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+                <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
               </button>
               <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-                <X className="w-3 h-3" />Annulla
+                <X className="w-3 h-3" />Cancel
               </button>
             </div>
           </div>
@@ -378,7 +379,7 @@ function GroupCard({
       await api.removeUserGroup(userId, group.group_id)
       onRemove()
     } catch (e: unknown) {
-      setRemoveErr(e instanceof Error ? e.message : "Errore")
+      setRemoveErr(e instanceof Error ? e.message : "Error")
       setRemoving(false)
     }
   }
@@ -585,7 +586,7 @@ function GroupCard({
             <RadioField
               value={group.entry_if_favorable ?? false}
               options={[
-                { val: true,  label: "Attivo",    desc: "Entra subito se prezzo già favorevole" },
+                { val: true,  label: "Active",    desc: "Enter immediately if price is already favorable" },
                 { val: false, label: "Disattivo", desc: "Piazza sempre l'ordine pendente al target" },
               ]}
               onSave={async v => {
@@ -633,7 +634,7 @@ function GroupCard({
           </GroupSettingRow>
 
           <GroupSettingRow title="Calendario economico" badge="filtro"
-            description="Sospende o modifica l'estrazione nelle N minuti prima/dopo eventi macroeconomici ad alto impatto (ForexFactory)">
+            description="Pauses or adjusts execution N minutes before/after high-impact macro events (ForexFactory)">
             <EcoCalendarField
               value={{
                 enabled:  group.eco_calendar_enabled  ?? false,
@@ -689,7 +690,7 @@ function AddGroupCard({
       const res = await api.getAvailableGroups(userId)
       setGroups(res.groups)
     } catch (e: unknown) {
-      setFetchErr(e instanceof Error ? e.message : "Errore caricamento")
+      setFetchErr(e instanceof Error ? e.message : "Loading error")
     } finally {
       setFL(false)
     }
@@ -705,7 +706,7 @@ function AddGroupCard({
       if (newGroup) onAdded(newGroup)
       setOpen(false)
     } catch (e: unknown) {
-      setAddErr(e instanceof Error ? e.message : "Errore")
+      setAddErr(e instanceof Error ? e.message : "Error")
     } finally {
       setAddL(false)
     }
@@ -838,7 +839,7 @@ function AddGroupCard({
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50"
         >
           <X className="w-3 h-3" />
-          Annulla
+          Cancel
         </button>
       </div>
     </div>
@@ -871,7 +872,7 @@ function GroupNameField({
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setLoading(false)
     }
@@ -889,8 +890,8 @@ function GroupNameField({
           className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1"
         >
           {saved
-            ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></>
-            : <><Pencil className="w-3 h-3" />Modifica</>}
+            ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></>
+            : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -908,10 +909,10 @@ function GroupNameField({
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -973,7 +974,7 @@ function TextareaField({
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+      setError(e instanceof Error ? e.message : "Error saving")
     } finally {
       setLoading(false)
     }
@@ -989,7 +990,7 @@ function TextareaField({
           {value ?? "Non configurata"}
         </p>
         <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1019,10 +1020,10 @@ function TextareaField({
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={cancel} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1052,7 +1053,7 @@ function RangeField({ value, onSave }: { value: number; onSave: (v: number) => P
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setLoading(false)
     }
@@ -1063,7 +1064,7 @@ function RangeField({ value, onSave }: { value: number; onSave: (v: number) => P
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-mono text-foreground/80 bg-black/15 border border-white/[0.07] rounded-lg px-3 py-2.5 flex-1">{label(value)}</p>
         <button onClick={() => { setDraft(value); setEditing(true) }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1083,10 +1084,10 @@ function RangeField({ value, onSave }: { value: number; onSave: (v: number) => P
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1128,7 +1129,7 @@ function TradingHoursField({
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore nel salvataggio")
+      setError(e instanceof Error ? e.message : "Error saving")
     } finally {
       setLoading(false)
     }
@@ -1154,7 +1155,7 @@ function TradingHoursField({
           </p>
         </div>
         <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1166,7 +1167,7 @@ function TradingHoursField({
       <div className="space-y-2">
         {[
           { val: false, label: "Disattivo", desc: "Accetta segnali 24/7 senza restrizioni" },
-          { val: true,  label: "Attivo",    desc: "Blocca i segnali fuori dalla fascia configurata" },
+          { val: true,  label: "Active",    desc: "Block signals outside the configured range" },
         ].map(opt => (
           <button key={String(opt.val)} type="button" onClick={() => setEnabled(opt.val)}
             className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
@@ -1235,10 +1236,10 @@ function TradingHoursField({
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1300,7 +1301,7 @@ function ConfidenceField({ value, onSave }: { value: number; onSave: (v: number)
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setLoading(false)
     }
@@ -1315,7 +1316,7 @@ function ConfidenceField({ value, onSave }: { value: number; onSave: (v: number)
             : "bg-black/10 border-white/[0.05] text-muted-foreground/50 italic"
         }`}>{label(value)}</p>
         <button onClick={() => { setDraft(value); setEditing(true) }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1335,10 +1336,10 @@ function ConfidenceField({ value, onSave }: { value: number; onSave: (v: number)
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1374,7 +1375,7 @@ function EcoCalendarField({
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setLoading(false)
     }
@@ -1382,7 +1383,7 @@ function EcoCalendarField({
 
   const summaryLabel = () => {
     if (!value.enabled) return "Disabilitato"
-    const base = `Attivo — finestra ±${value.window} minuti`
+    const base = `Active — window ±${value.window} minutes`
     return value.strategy ? `${base} · con strategia AI` : base
   }
 
@@ -1398,7 +1399,7 @@ function EcoCalendarField({
           )}
         </div>
         <button onClick={startEdit} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1409,7 +1410,7 @@ function EcoCalendarField({
       <div className="space-y-2">
         {[
           { val: false, label: "Disabilitato", desc: "Non controlla il calendario economico" },
-          { val: true,  label: "Attivo",       desc: "Agisce sui segnali vicino a eventi high-impact" },
+          { val: true,  label: "Active",       desc: "Acts on signals near high-impact events" },
         ].map(opt => (
           <button key={String(opt.val)} type="button" onClick={() => setEnabled(opt.val)}
             className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
@@ -1429,7 +1430,7 @@ function EcoCalendarField({
       {enabled && (
         <>
           <div>
-            <p className="text-xs text-muted-foreground mb-1.5">Finestra (minuti prima/dopo l&apos;evento)</p>
+            <p className="text-xs text-muted-foreground mb-1.5">Window (minutes before/after the event)</p>
             <div className="flex items-center gap-2">
               <input
                 type="number" min={5} max={120} value={window_}
@@ -1459,10 +1460,10 @@ function EcoCalendarField({
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1493,7 +1494,7 @@ function RadioField({
       setEditing(false); setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setLoading(false)
     }
@@ -1507,7 +1508,7 @@ function RadioField({
           <p className="text-xs text-muted-foreground mt-0.5">{current.desc}</p>
         </div>
         <button onClick={() => { setDraft(value); setEditing(true) }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:border-white/[0.15] hover:text-foreground bg-white/[0.02] hover:bg-white/[0.05] transition-all mt-1">
-          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Salvato</span></> : <><Pencil className="w-3 h-3" />Modifica</>}
+          {saved ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Saved</span></> : <><Pencil className="w-3 h-3" />Edit</>}
         </button>
       </div>
     )
@@ -1534,10 +1535,10 @@ function RadioField({
       {error && <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={loading} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors">
-          <Check className="w-3 h-3" />{loading ? "Salvataggio…" : "Salva"}
+          <Check className="w-3 h-3" />{loading ? "Saving…" : "Save"}
         </button>
         <button onClick={() => setEditing(false)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-foreground transition-all disabled:opacity-50">
-          <X className="w-3 h-3" />Annulla
+          <X className="w-3 h-3" />Cancel
         </button>
       </div>
     </div>
@@ -1551,9 +1552,9 @@ const PLAN_META: Record<string, {
   Icon: React.ComponentType<{ className?: string }>
   color: string; border: string; bg: string
 }> = {
-  core:  { label: "Core",  price: "€79/mese",  Icon: Zap,   color: "text-blue-400",   border: "border-blue-500/20",   bg: "bg-blue-600/10"   },
-  pro:   { label: "Pro",   price: "€149/mese", Icon: Star,  color: "text-indigo-400", border: "border-indigo-500/20", bg: "bg-indigo-600/10" },
-  elite: { label: "Elite", price: "€299/mese", Icon: Crown, color: "text-amber-400",  border: "border-amber-500/20",  bg: "bg-amber-600/10"  },
+  core:  { label: "Core",  price: `${PLAN_PRICES.core}/month`,  Icon: Zap,   color: "text-blue-400",   border: "border-blue-500/20",   bg: "bg-blue-600/10"   },
+  pro:   { label: "Pro",   price: `${PLAN_PRICES.pro}/month`,  Icon: Star,  color: "text-indigo-400", border: "border-indigo-500/20", bg: "bg-indigo-600/10" },
+  elite: { label: "Elite", price: `${PLAN_PRICES.elite}/month`, Icon: Crown, color: "text-amber-400",  border: "border-amber-500/20",  bg: "bg-amber-600/10"  },
 }
 
 function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) {
@@ -1590,7 +1591,7 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
       const { portal_url } = await api.createCustomerPortal()
       window.location.href = portal_url
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
       setPortalLoading(false)
     }
   }
@@ -1606,7 +1607,7 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
       )
       setCancelConfirm(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Errore")
+      setError(e instanceof Error ? e.message : "Error")
     } finally {
       setCancelLoading(false)
     }
@@ -1622,7 +1623,7 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
     <div className="rounded-xl border border-white/[0.07] bg-card/30 p-5 space-y-4">
       <div className="flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold text-foreground">Piano e abbonamento</h2>
+        <h2 className="text-sm font-semibold text-foreground">Plan & subscription</h2>
       </div>
 
       {!plan || !meta ? (
@@ -1637,18 +1638,18 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
               <span className="text-sm font-semibold text-foreground">{meta.label}</span>
               {sub?.cancel_at_period_end && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-600/10 border border-amber-500/20 text-amber-400 font-medium">
-                  Cancellazione schedulata
+                  Cancellation scheduled
                 </span>
               )}
               {sub?.status === "active" && !sub.cancel_at_period_end && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 font-medium">
-                  Attivo
+                  Active
                 </span>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
               {meta.price}
-              {sub?.cancel_at_period_end && periodEnd ? ` · Scade il ${periodEnd}` : ""}
+              {sub?.cancel_at_period_end && periodEnd ? ` · Expires on ${periodEnd}` : ""}
             </p>
           </div>
         </div>
@@ -1666,21 +1667,21 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
           >
             {portalLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />}
-            Gestisci abbonamento
+            Manage subscription
           </button>
         )}
 
         {hasSubId && !sub?.cancel_at_period_end && (
           cancelConfirm ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground">Confermi la cancellazione?</span>
+              <span className="text-xs text-muted-foreground">Confirm cancellation?</span>
               <button
                 onClick={handleCancel}
                 disabled={cancelLoading || portalLoading}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white transition-colors"
               >
                 {cancelLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                Sì, cancella
+                Yes, cancel
               </button>
               <button
                 onClick={() => setCancelConfirm(false)}
@@ -1697,7 +1698,7 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-white/[0.08] hover:text-red-400 hover:border-red-500/20 transition-all disabled:opacity-50"
             >
               <AlertTriangle className="w-3 h-3" />
-              Cancella abbonamento
+              Cancel subscription
             </button>
           )
         )}
@@ -1705,7 +1706,7 @@ function PlanSection({ user }: { user: import("@/src/lib/api").DashboardUser }) 
         {sub?.cancel_at_period_end && periodEnd && (
           <p className="w-full text-xs text-amber-400/80 flex items-center gap-1.5 mt-1">
             <AlertTriangle className="w-3 h-3 shrink-0" />
-            L&apos;abbonamento si concluderà il {periodEnd}. Usa &ldquo;Gestisci abbonamento&rdquo; per ripristinarlo.
+            Subscription ends on {periodEnd}. Use &ldquo;Manage subscription&rdquo; to reactivate it.
           </p>
         )}
       </div>

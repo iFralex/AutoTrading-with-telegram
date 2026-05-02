@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { MetisLogo } from "@/src/components/MetisLogo"
+import { PLAN_PRICES } from "@/src/lib/plans"
 
 // ─── Scroll-reveal wrapper ─────────────────────────────────────────────────
 function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -539,7 +540,7 @@ type Plan = { name: string; price: string; tagline: string; popular?: boolean; e
 
 const PLANS: Plan[] = [
   {
-    name: "Core", price: "€39", tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
+    name: "Core", price: PLAN_PRICES.core, tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
     ctaLabel: "Start with Core",
     features: [
       { label: "1 Telegram signal room" },
@@ -561,7 +562,7 @@ const PLANS: Plan[] = [
     notIncluded: ["Advanced signal analysis", "Backtesting & PDF reports", "AI position management"],
   },
   {
-    name: "Pro", price: "€89", tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
+    name: "Pro", price: PLAN_PRICES.pro, tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
     popular: true, ctaLabel: "Start automating", prevPlan: "Core",
     features: [
       { label: "Up to 5 Telegram signal rooms", bold: true },
@@ -578,7 +579,7 @@ const PLANS: Plan[] = [
     notIncluded: ["AI position management", "Signal deletion handling", "Trading hours & calendar filters"],
   },
   {
-    name: "Elite", price: "€149", tagline: "Unlimited rooms, AI-managed positions, smart filters, and community sharing.",
+    name: "Elite", price: PLAN_PRICES.elite, tagline: "Unlimited rooms, AI-managed positions, smart filters, and community sharing.",
     elite: true, ctaLabel: "Go Elite", prevPlan: "Pro",
     features: [
       { label: "Unlimited signal rooms", bold: true },

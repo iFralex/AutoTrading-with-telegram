@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react"
 import {
   ShieldAlert, Pencil, Check, Play, Pause, Trash2,
-  Loader2, AlertTriangle, Server,
+  Loader2, AlertTriangle, Server, CreditCard, Zap, Star, Crown,
 } from "lucide-react"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
-import { api } from "@/src/lib/api"
+import { api, type DashboardUser } from "@/src/lib/api"
+import { PLAN_PRICES, type PlanKey } from "@/src/lib/plans"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -254,6 +255,165 @@ function DrawdownSection({ userId }: { userId: string }) {
   )
 }
 
+// ── Plan & subscription ───────────────────────────────────────────────────────
+
+const PLAN_VISUAL: Record<PlanKey, {
+  Icon: React.ComponentType<{ className?: string }>
+  color: string; border: string; bg: string
+}> = {
+  core:  { Icon: Zap,   color: "text-emerald-400", border: "border-emerald-500/20", bg: "bg-emerald-500/10" },
+  pro:   { Icon: Star,  color: "text-indigo-400",  border: "border-indigo-500/20",  bg: "bg-indigo-600/10"  },
+  elite: { Icon: Crown, color: "text-amber-400",   border: "border-amber-500/20",   bg: "bg-amber-600/10"   },
+}
+
+function PlanSection({ user }: { user: DashboardUser }) {
+  const planKey = (user.plan?.toLowerCase() ?? null) as PlanKey | null
+  const visual  = planKey ? PLAN_VISUAL[planKey] : null
+  const price   = planKey ? PLAN_PRICES[planKey] : null
+
+  const [sub, setSub] = useState<{
+    cancel_at_period_end: boolean
+    current_period_end: number | null
+    status: string | null
+  } | null>(null)
+  const [portalLoading,  setPortalLoading]  = useState(false)
+  const [cancelLoading,  setCancelLoading]  = useState(false)
+  const [cancelConfirm,  setCancelConfirm]  = useState(false)
+  const [error,          setError]          = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!planKey) return
+    api.getSubscription()
+      .then(res => setSub({
+        cancel_at_period_end: res.cancel_at_period_end,
+        current_period_end:   res.current_period_end,
+        status:               res.status,
+      }))
+      .catch(() => {})
+  }, [planKey])
+
+  async function handlePortal() {
+    setPortalLoading(true); setError(null)
+    try {
+      const { portal_url } = await api.createCustomerPortal()
+      window.location.href = portal_url
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error")
+      setPortalLoading(false)
+    }
+  }
+
+  async function handleCancel() {
+    setCancelLoading(true); setError(null)
+    try {
+      const res = await api.cancelSubscription()
+      setSub(prev => prev
+        ? { ...prev, cancel_at_period_end: true, current_period_end: res.current_period_end }
+        : null)
+      setCancelConfirm(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error")
+    } finally { setCancelLoading(false) }
+  }
+
+  const periodEnd = sub?.current_period_end
+    ? new Date(sub.current_period_end * 1000).toLocaleDateString("en-GB", {
+        day: "numeric", month: "long", year: "numeric",
+      })
+    : null
+
+  return (
+    <Section title="Plan & Subscription" description="Manage your current plan and billing" icon={CreditCard}>
+      {!planKey || !visual ? (
+        <p className="text-sm text-white/30">No active plan.</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg ${visual.bg} border ${visual.border} flex items-center justify-center shrink-0`}>
+              <visual.Icon className={`w-4 h-4 ${visual.color}`} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold text-white capitalize">{planKey}</span>
+                {sub?.cancel_at_period_end && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-600/10 border border-amber-500/20 text-amber-400 font-medium">
+                    Cancellation scheduled
+                  </span>
+                )}
+                {sub?.status === "active" && !sub.cancel_at_period_end && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                    Active
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-white/35">
+                {price}/month
+                {sub?.cancel_at_period_end && periodEnd ? ` · Expires on ${periodEnd}` : ""}
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 bg-red-600/8 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+          )}
+
+          <div className="flex flex-wrap gap-2 items-center">
+            {!!user.stripe_customer_id && (
+              <button
+                onClick={handlePortal}
+                disabled={portalLoading || cancelLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+              >
+                {portalLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />}
+                Manage subscription
+              </button>
+            )}
+
+            {!!user.stripe_subscription_id && !sub?.cancel_at_period_end && (
+              cancelConfirm ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-white/40">Confirm cancellation?</span>
+                  <button
+                    onClick={handleCancel}
+                    disabled={cancelLoading || portalLoading}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white transition-colors"
+                  >
+                    {cancelLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                    Yes, cancel
+                  </button>
+                  <button
+                    onClick={() => setCancelConfirm(false)}
+                    disabled={cancelLoading}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-white/35 border border-white/[0.08] hover:text-white/60 transition-all"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setCancelConfirm(true)}
+                  disabled={portalLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white/35 border border-white/[0.08] hover:text-red-400 hover:border-red-500/20 transition-all disabled:opacity-50"
+                >
+                  <AlertTriangle className="w-3 h-3" />
+                  Cancel subscription
+                </button>
+              )
+            )}
+
+            {sub?.cancel_at_period_end && periodEnd && (
+              <p className="w-full text-xs text-amber-400/80 flex items-center gap-1.5 mt-1">
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                Subscription ends on {periodEnd}. Use &ldquo;Manage subscription&rdquo; to reactivate it.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 // ── Danger zone ───────────────────────────────────────────────────────────────
 
 function DangerZone({ userId, phone, onDeleted }: {
@@ -429,6 +589,9 @@ export default function SettingsPage() {
       >
         <DrawdownSection userId={user.user_id} />
       </Section>
+
+      {/* Plan & subscription */}
+      <PlanSection user={user} />
 
       {/* Danger zone */}
       <Section
