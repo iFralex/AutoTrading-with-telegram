@@ -475,13 +475,12 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
 
 // ── Full results ──────────────────────────────────────────────────────────────
 
-function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
+function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: string; onSelectTrade: (t: BacktestTrade) => void }) {
   const [trades, setTrades]           = useState<BacktestTrade[] | null>(null)
   const [loadingTrades, setLT]        = useState(false)
   const [showTrades, setShowTrades]   = useState(false)
   const hasUsdEquity = run.equity_curve_json?.some((p: any) => p.cumul_usd !== undefined)
   const [equityMode, setEquityMode]   = useState<"pips" | "usd">(hasUsdEquity ? "usd" : "pips")
-  const [selectedTrade, setSelected]  = useState<BacktestTrade | null>(null)
   const [sortKey, setSortKey]         = useState<keyof BacktestTrade | null>(null)
   const [sortDir, setSortDir]         = useState<"asc" | "desc">("asc")
 
@@ -514,11 +513,6 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
 
   return (
     <div className="space-y-5">
-
-      {/* Trade chart modal */}
-      {selectedTrade && (
-        <TradeChartModal trade={selectedTrade} onClose={() => setSelected(null)} />
-      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -895,7 +889,7 @@ function RunResults({ run, userId }: { run: BacktestRun; userId: string }) {
                 {(sortedTrades ?? trades).map(t => (
                   <tr
                     key={t.id}
-                    onClick={() => setSelected(t)}
+                    onClick={() => onSelectTrade(t)}
                     className="border-t border-white/[0.04] hover:bg-indigo-600/5 cursor-pointer transition-colors"
                   >
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTs(t.actual_entry_ts ?? t.msg_ts)}</td>
@@ -1260,11 +1254,12 @@ function RunHistoryRow({ run, onSelect, onDelete, isActive }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function BacktestPage({ userId, user }: { userId: string; user: DashboardUser }) {
-  const [runs, setRuns]           = useState<BacktestRun[]>([])
-  const [activeRunId, setActiveId] = useState<string | null>(null)
-  const [activeRun, setActiveRun] = useState<BacktestRun | null>(null)
-  const [loadingRuns, setLR]      = useState(true)
-  const pollRef                   = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [runs, setRuns]             = useState<BacktestRun[]>([])
+  const [activeRunId, setActiveId]  = useState<string | null>(null)
+  const [activeRun, setActiveRun]   = useState<BacktestRun | null>(null)
+  const [loadingRuns, setLR]        = useState(true)
+  const [selectedTrade, setSelected] = useState<BacktestTrade | null>(null)
+  const pollRef                     = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadRuns = useCallback(async () => {
     try {
@@ -1378,10 +1373,15 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
           ) : activeRun.status.startsWith("running") || activeRun.status === "error" || activeRun.status === "cancelled" ? (
             <RunProgress run={activeRun} onRefresh={() => refreshActiveRun(activeRunId)} userId={userId} />
           ) : (
-            <RunResults key={activeRun.id} run={activeRun} userId={userId} />
+            <RunResults key={activeRun.id} run={activeRun} userId={userId} onSelectTrade={setSelected} />
           )}
         </div>
       </div>
+
+      {/* Trade chart modal — rendered at top level to avoid stacking-context issues */}
+      {selectedTrade && (
+        <TradeChartModal trade={selectedTrade} onClose={() => setSelected(null)} />
+      )}
     </div>
   )
 }
