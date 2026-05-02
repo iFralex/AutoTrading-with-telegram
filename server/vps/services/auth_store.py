@@ -59,23 +59,23 @@ class AuthStore:
             )
             await db.commit()
 
-    async def verify_password(self, phone: str, password: str) -> bool:
+    async def verify_password(self, phone: str, password: str) -> str | None:
+        """Returns the canonical phone stored in DB on success, None on failure."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            # Exact match first; fall back to suffix match for numbers entered
-            # without the country code prefix (e.g. "3331234567" → "+393331234567").
             digits_only = "".join(c for c in phone if c.isdigit())
             cur = await db.execute(
-                "SELECT password_hash FROM auth WHERE phone = ? OR phone LIKE ?",
+                "SELECT phone, password_hash FROM auth WHERE phone = ? OR phone LIKE ?",
                 (phone, "%" + digits_only),
             )
             row = await cur.fetchone()
         if row is None:
-            return False
+            return None
         try:
-            return _ph.verify(row["password_hash"], password)
+            ok = _ph.verify(row["password_hash"], password)
+            return str(row["phone"]) if ok else None
         except (VerifyMismatchError, InvalidHashError):
-            return False
+            return None
 
     async def has_password(self, phone: str) -> bool:
         async with aiosqlite.connect(self._db_path) as db:

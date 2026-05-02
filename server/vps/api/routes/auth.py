@@ -143,12 +143,12 @@ async def login(
     response: Response,
     auth: AuthStore = Depends(_get_auth),
 ) -> dict:
-    ok = await auth.verify_password(body.phone, body.password)
-    if not ok:
+    canonical = await auth.verify_password(body.phone, body.password)
+    if not canonical:
         raise HTTPException(401, "Numero di telefono o password errati")
-    access = _make_access(body.phone)
-    refresh, jti = _make_refresh(body.phone)
-    await auth.store_refresh_jti(body.phone, jti)
+    access = _make_access(canonical)
+    refresh, jti = _make_refresh(canonical)
+    await auth.store_refresh_jti(canonical, jti)
     _set_auth_cookies(response, access, refresh)
     return {"status": "ok"}
 
