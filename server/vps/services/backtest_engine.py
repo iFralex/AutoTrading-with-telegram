@@ -24,6 +24,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+from vps.services.sim_state import _SimState, fire_ai_event
+
 if TYPE_CHECKING:
     from vps.services.backtest_store import BacktestStore
     from vps.services.mt5_trader import MT5Trader
@@ -916,6 +918,21 @@ class BacktestEngine:
 
         trade_rows: list[dict] = []
 
+        # Determine whether to use AI post-trade management
+        use_management_ai = (
+            use_ai and self._se is not None and
+            management_strategy and management_strategy.strip()
+        )
+
+        # Initialize shared state once per run (shared across all trades for realistic account)
+        shared_state = _SimState({
+            "balance":     starting_balance_usd,
+            "equity":      starting_balance_usd,
+            "free_margin": starting_balance_usd,
+            "currency":    "USD",
+            "leverage":    100,
+        })
+
         for entry in extracted:
             msg     = entry["msg"]
             msg_dt  = _parse_dt(msg["date_iso"])
@@ -924,14 +941,37 @@ class BacktestEngine:
             for sig, ai_meta in approved_pairs:
                 bars  = bars_cache.get(sig.symbol, [])
                 point = point_cache.get(sig.symbol)
-                result = _simulate_trade(sig, msg_dt or datetime.now(timezone.utc), bars, point)
+                pv    = pip_value_cache.get(sig.symbol)
 
-                pv = pip_value_cache.get(sig.symbol)
+                if use_management_ai:
+                    try:
+                        result, ai_events = await self._simulate_trade_with_ai(
+                            sig, ai_meta,
+                            msg_dt or datetime.now(timezone.utc),
+                            bars, point, pv,
+                            management_strategy,
+                            user_id,
+                            shared_state,
+                        )
+                    except Exception as exc:
+                        ulog.warning("[%s] simulate_trade_with_ai failed, fallback: %s", run_id, exc)
+                        result    = _simulate_trade(sig, msg_dt or datetime.now(timezone.utc), bars, point)
+                        ai_events = []
+                else:
+                    result    = _simulate_trade(sig, msg_dt or datetime.now(timezone.utc), bars, point)
+                    ai_events = []
+
                 pnl_usd = (
                     round(result.pnl_pips * sig.lot_size * pv, 2)
                     if result.pnl_pips is not None and sig.lot_size and pv
                     else None
                 )
+
+                # Update shared state balance after trade closes (for non-AI path too)
+                if not use_management_ai and pnl_usd is not None:
+                    shared_state.balance     += pnl_usd
+                    shared_state.equity       = shared_state.balance
+                    shared_state.free_margin  = shared_state.balance
 
                 trade_rows.append({
                     "run_id":          run_id,
@@ -960,6 +1000,7 @@ class BacktestEngine:
                     "chart_bars_json": _extract_chart_bars(
                         bars, msg_dt or datetime.now(timezone.utc), result.exit_ts
                     ),
+                    "ai_events_json":  ai_events if ai_events else None,
                 })
 
             # Segnali rifiutati: teniamoli come trade "rejected" per statistiche
@@ -1010,6 +1051,301 @@ class BacktestEngine:
             stats["total_trades"], stats["win_rate"],
             stats["total_pnl_pips"], total_ai_cost,
         )
+
+    # ── AI-managed trade simulation ───────────────────────────────────────────
+
+    async def _simulate_trade_with_ai(
+        self,
+        sig,                       # TradeSignal
+        ai_meta: dict,             # {ai_approved, ai_reason} from pre-trade
+        signal_ts: datetime,
+        bars: list[dict],
+        point: float | None,
+        pip_value: float | None,
+        management_strategy: str,
+        user_id: str,
+        shared_state: _SimState,   # shared across all trades for realistic account state
+    ) -> tuple[SimResult, list[dict]]:
+        """
+        Simulate a single trade with full AI post-trade management.
+        Fires position_opened, price_level_reached, and position_closed events.
+        Returns (SimResult, ai_events list).
+        """
+        _not_filled = SimResult("not_filled", None, None, None, None, None, None)
+
+        if not bars:
+            return _not_filled, []
+
+        ai_events: list[dict] = []
+        sig_unix  = int(signal_ts.timestamp())
+        start_idx = _bars_bisect(bars, sig_unix)
+
+        # ── Determine entry ───────────────────────────────────────────────────
+        raw_entry = sig.entry_price
+        if isinstance(raw_entry, list) and len(raw_entry) == 2:
+            target_entry = (raw_entry[0] + raw_entry[1]) / 2.0
+            order_mode   = "LIMIT"
+        elif isinstance(raw_entry, (int, float)):
+            target_entry = float(raw_entry)
+            order_mode   = sig.order_mode or "LIMIT"
+        else:
+            target_entry = None
+            order_mode   = "MARKET"
+
+        entry_price: float | None     = None
+        entry_bar_idx: int | None     = None
+        horizon_unix = sig_unix + _MAX_TRADE_HORIZON_DAYS * 86400
+
+        if order_mode == "MARKET" or target_entry is None:
+            if start_idx < len(bars):
+                entry_bar_idx = start_idx
+                entry_price   = bars[start_idx]["open"]
+        else:
+            _pre_sl = sig.stop_loss
+            _pre_tp = sig.take_profit
+            for i in range(start_idx, len(bars)):
+                b = bars[i]
+                if b["time"] > horizon_unix:
+                    break
+                ot   = sig.order_type
+                mode = order_mode
+                if mode == "LIMIT":
+                    triggered = (ot == "BUY"  and b["low"]  <= target_entry) or \
+                                (ot == "SELL" and b["high"] >= target_entry)
+                else:
+                    triggered = (ot == "BUY"  and b["high"] >= target_entry) or \
+                                (ot == "SELL" and b["low"]  <= target_entry)
+                if triggered:
+                    entry_bar_idx = i
+                    entry_price   = target_entry
+                    break
+                if _pre_sl is not None and (
+                    (ot == "BUY"  and b["low"]  <= _pre_sl) or
+                    (ot == "SELL" and b["high"] >= _pre_sl)
+                ):
+                    return SimResult("expired", None, None, None, None, None, None), []
+                if _pre_tp is not None and (
+                    (ot == "BUY"  and b["high"] >= _pre_tp) or
+                    (ot == "SELL" and b["low"]  <= _pre_tp)
+                ):
+                    return SimResult("expired", None, None, None, None, None, None), []
+
+        if entry_bar_idx is None or entry_price is None:
+            return _not_filled, []
+
+        sl          = sig.stop_loss
+        tp          = sig.take_profit
+        pip         = point or _pip_size(sig.symbol, entry_price)
+        entry_ts    = _ts_to_dt(bars[entry_bar_idx]["time"]).isoformat()
+
+        # Validate entry is between SL and TP
+        if sl is not None and tp is not None:
+            lo, hi = min(sl, tp), max(sl, tp)
+            if not (lo < entry_price < hi):
+                return SimResult("invalid_signal", None, None, None, None, None, None), []
+
+        # ── Open position in shared state ─────────────────────────────────────
+        ticket = shared_state.alloc_ticket()
+        shared_state.update_price(sig.symbol, entry_price)
+        shared_state.add_position(ticket, sig.symbol, sig.order_type,
+                                   sig.lot_size or 0.01, entry_price, sl, tp)
+
+        # ── Fire position_opened ──────────────────────────────────────────────
+        po_event_data = {
+            "ticket":          ticket,
+            "symbol":          sig.symbol,
+            "order_type":      sig.order_type,
+            "entry_price":     entry_price,
+            "lots":            sig.lot_size,
+            "sl":              sl,
+            "tp":              tp,
+            "signal_group_id": None,
+        }
+        try:
+            ai_result = await fire_ai_event(
+                self._se._client, self._se, shared_state,
+                "position_opened", po_event_data, management_strategy, "",
+            )
+        except Exception as exc:
+            logger.warning("fire_ai_event position_opened failed: %s", exc)
+            ai_result = {"tool_calls": [], "actions": [], "final_response": f"Error: {exc}"}
+        ai_events.append({
+            "type":        "position_opened",
+            "bar_ts":      entry_ts,
+            "entry_price": entry_price,
+            "ai_result":   ai_result,
+        })
+
+        # Re-read SL/TP after AI may have modified them
+        pos = shared_state.get_position(ticket)
+        if pos is None:
+            # AI closed it immediately at open — treat as open_at_end with entry price
+            entry_dt = _ts_to_dt(bars[entry_bar_idx]["time"])
+            return SimResult(
+                outcome="open_at_end",
+                actual_entry=entry_price,
+                actual_entry_ts=entry_ts,
+                exit_price=entry_price,
+                exit_ts=entry_ts,
+                pnl_pips=0.0,
+                duration_min=0.0,
+            ), ai_events
+        live_sl = pos["sl"]
+        live_tp = pos["tp"]
+        fired_levels: set[float] = set()
+
+        # ── Walk-forward ──────────────────────────────────────────────────────
+        outcome:    str | None   = None
+        exit_price: float | None = None
+        exit_ts:    str | None   = None
+
+        for i in range(entry_bar_idx + 1, len(bars)):
+            bar    = bars[i]
+            bar_ts = _ts_to_dt(bar["time"]).isoformat()
+            if bar["time"] > horizon_unix:
+                break
+
+            # Update price so AI read tools see current market price
+            shared_state.update_price(sig.symbol, bar["close"])
+
+            # Re-read live SL/TP (AI may have modified them)
+            pos = shared_state.get_position(ticket)
+            if pos is None:
+                # AI closed the position outside of our loop (e.g. via a prior event)
+                outcome    = "ai_closed"
+                exit_price = bar["close"]
+                exit_ts    = bar_ts
+                break
+            live_sl = pos["sl"]
+            live_tp = pos["tp"]
+
+            # ── Price level events ────────────────────────────────────────────
+            prices_list: list[float] = sig.prices or []  # type: ignore[attr-defined]
+            for pl in prices_list:
+                if pl not in fired_levels:
+                    hit = (sig.order_type == "BUY"  and bar["high"] >= pl) or \
+                          (sig.order_type == "SELL" and bar["low"]  <= pl)
+                    if hit:
+                        fired_levels.add(pl)
+                        pl_event_data = {
+                            "ticket":          ticket,
+                            "symbol":          sig.symbol,
+                            "order_type":      sig.order_type,
+                            "trigger_price":   pl,
+                            "signal_group_id": None,
+                        }
+                        try:
+                            ai_result = await fire_ai_event(
+                                self._se._client, self._se, shared_state,
+                                "price_level_reached", pl_event_data, management_strategy, "",
+                            )
+                        except Exception as exc:
+                            logger.warning("fire_ai_event price_level_reached failed: %s", exc)
+                            ai_result = {"tool_calls": [], "actions": [], "final_response": f"Error: {exc}"}
+                        ai_events.append({
+                            "type":          "price_level_reached",
+                            "bar_ts":        bar_ts,
+                            "trigger_price": pl,
+                            "ai_result":     ai_result,
+                        })
+                        # Check if AI closed the position during this event
+                        pos = shared_state.get_position(ticket)
+                        if pos is None:
+                            outcome    = "ai_closed"
+                            exit_price = bar["close"]
+                            exit_ts    = bar_ts
+                            break
+                        # Re-read live SL/TP after AI may have modified them
+                        live_sl = pos["sl"]
+                        live_tp = pos["tp"]
+
+            if outcome is not None:
+                break
+
+            # ── SL/TP check ───────────────────────────────────────────────────
+            ot     = sig.order_type
+            sl_hit = (live_sl is not None) and (
+                (ot == "BUY"  and bar["low"]  <= live_sl) or
+                (ot == "SELL" and bar["high"] >= live_sl)
+            )
+            tp_hit = (live_tp is not None) and (
+                (ot == "BUY"  and bar["high"] >= live_tp) or
+                (ot == "SELL" and bar["low"]  <= live_tp)
+            )
+
+            if sl_hit or tp_hit:
+                outcome    = "SL" if sl_hit else "TP"
+                exit_price = live_sl if sl_hit else live_tp
+                assert exit_price is not None
+                exit_ts    = bar_ts
+                shared_state.remove_position(ticket)
+                break
+
+        # ── Handle open_at_end (no SL/TP hit and no AI close) ────────────────
+        if outcome is None:
+            outcome    = "open_at_end"
+            exit_price = bars[-1]["close"]
+            exit_ts    = _ts_to_dt(bars[-1]["time"]).isoformat()
+            shared_state.remove_position(ticket)
+
+        entry_dt_obj = _ts_to_dt(bars[entry_bar_idx]["time"])
+        exit_dt_obj  = None
+        if exit_ts:
+            try:
+                exit_dt_obj = datetime.fromisoformat(exit_ts)
+            except Exception:
+                pass
+        duration = (
+            (exit_dt_obj - entry_dt_obj).total_seconds() / 60.0
+            if exit_dt_obj else 0.0
+        )
+        assert exit_price is not None
+        pnl_pips = _pnl_pips(sig.order_type, entry_price, exit_price, pip)
+
+        # ── Fire position_closed ──────────────────────────────────────────────
+        if management_strategy.strip():
+            pnl_usd_approx = (
+                round(pnl_pips * (sig.lot_size or 0.01) * pip_value, 2)
+                if pip_value else 0.0
+            )
+            pc_event_data = {
+                "ticket":          ticket,
+                "symbol":          sig.symbol,
+                "order_type":      sig.order_type,
+                "entry_price":     entry_price,
+                "close_price":     exit_price,
+                "lots":            sig.lot_size,
+                "profit":          pnl_usd_approx,
+                "reason":          outcome,
+                "signal_group_id": None,
+                "close_time":      exit_ts,
+            }
+            try:
+                ai_result = await fire_ai_event(
+                    self._se._client, self._se, shared_state,
+                    "position_closed", pc_event_data, management_strategy, "",
+                )
+            except Exception as exc:
+                logger.warning("fire_ai_event position_closed failed: %s", exc)
+                ai_result = {"tool_calls": [], "actions": [], "final_response": f"Error: {exc}"}
+            ai_events.append({
+                "type":        "position_closed",
+                "bar_ts":      exit_ts,
+                "exit_price":  exit_price,
+                "outcome":     outcome,
+                "profit_pips": pnl_pips,
+                "ai_result":   ai_result,
+            })
+
+        return SimResult(
+            outcome=outcome,
+            actual_entry=entry_price,
+            actual_entry_ts=entry_ts,
+            exit_price=exit_price,
+            exit_ts=exit_ts,
+            pnl_pips=pnl_pips,
+            duration_min=round(duration, 1),
+        ), ai_events
 
     # ── Batch detection (Flash parallelo) ─────────────────────────────────────
 

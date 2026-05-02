@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
     pnl_usd          REAL,
     duration_min     REAL,
     ai_approved      INTEGER,
-    ai_reason        TEXT
+    ai_reason        TEXT,
+    ai_events_json   TEXT
 )
 """
 
@@ -139,6 +140,7 @@ _MIGRATIONS = [
     "ALTER TABLE backtest_runs ADD COLUMN final_balance_usd REAL",
     "ALTER TABLE backtest_trades ADD COLUMN pnl_usd REAL",
     "ALTER TABLE backtest_trades ADD COLUMN chart_bars_json TEXT",
+    "ALTER TABLE backtest_trades ADD COLUMN ai_events_json TEXT",
 ]
 
 
@@ -233,6 +235,8 @@ class BacktestStore:
                 t.get("ai_reason"),
                 json.dumps(t["chart_bars_json"], ensure_ascii=False)
                     if t.get("chart_bars_json") else None,
+                json.dumps(t["ai_events_json"], ensure_ascii=False)
+                    if t.get("ai_events_json") is not None else None,
             )
             for t in trades
         ]
@@ -245,8 +249,8 @@ class BacktestStore:
                      stop_loss, take_profit, lot_size,
                      actual_entry, actual_entry_ts, exit_price, exit_ts,
                      outcome, pnl_pips, pnl_usd, duration_min, ai_approved, ai_reason,
-                     chart_bars_json)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     chart_bars_json, ai_events_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 rows,
             )
@@ -287,6 +291,11 @@ class BacktestStore:
                     d["chart_bars_json"] = json.loads(d["chart_bars_json"])
                 except Exception:
                     d["chart_bars_json"] = None
+            if d.get("ai_events_json"):
+                try:
+                    d["ai_events_json"] = json.loads(d["ai_events_json"])
+                except Exception:
+                    d["ai_events_json"] = None
             result.append(d)
         return result
 

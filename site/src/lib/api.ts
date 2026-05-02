@@ -1499,6 +1499,24 @@ export interface BacktestRun {
   equity_curve_json:       BacktestEquityPoint[] | null
 }
 
+export interface AiToolCall { name: string; args: Record<string, unknown>; result: unknown }
+export interface AiAction { tool: string; [key: string]: unknown }
+export interface AiEventResult {
+  tool_calls: AiToolCall[]
+  actions: AiAction[]
+  final_response: string
+}
+export interface AiEvent {
+  type: "position_opened" | "price_level_reached" | "position_closed"
+  bar_ts?: string
+  entry_price?: number
+  trigger_price?: number
+  exit_price?: number
+  outcome?: string
+  profit_pips?: number
+  ai_result?: AiEventResult
+}
+
 export interface BacktestTrade {
   id:               number
   run_id:           string
@@ -1524,4 +1542,5 @@ export interface BacktestTrade {
   ai_approved:      number | null
   ai_reason:        string | null
   chart_bars_json:  { time: number; open: number; high: number; low: number; close: number }[] | null
+  ai_events_json?:  AiEvent[] | null
 }

@@ -10,7 +10,7 @@ import {
   ComposedChart, Bar, Line, ReferenceLine, ReferenceDot,
 } from "recharts"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
-import { api, type BacktestRun, type BacktestTrade } from "@/src/lib/api"
+import { api, type BacktestRun, type BacktestTrade, type AiEvent } from "@/src/lib/api"
 
 const TZ = "Europe/Rome"
 
@@ -642,6 +642,51 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
               AI Reasoning
             </p>
             <p className="text-white/55 leading-relaxed">{trade.ai_reason}</p>
+          </div>
+        )}
+
+        {/* AI Event Log */}
+        {trade.ai_events_json && trade.ai_events_json.length > 0 && (
+          <div className="mx-5 mb-5 mt-4 space-y-3">
+            <h4 className="text-xs font-semibold text-white/40 uppercase tracking-wider">
+              AI Event Log
+            </h4>
+            {trade.ai_events_json.map((ev: AiEvent, i: number) => (
+              <div key={i} className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-xs">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    ev.type === "position_opened" ? "bg-cyan-500/20 text-cyan-300" :
+                    ev.type === "price_level_reached" ? "bg-violet-500/20 text-violet-300" :
+                    "bg-white/10 text-white/50"
+                  }`}>
+                    {ev.type === "position_opened" ? "Opened" :
+                     ev.type === "price_level_reached" ? `Level @ ${ev.trigger_price}` :
+                     `Closed (${ev.outcome})`}
+                  </span>
+                  {ev.bar_ts && (
+                    <span className="text-white/30">
+                      {new Date(ev.bar_ts).toLocaleString("it-IT", {
+                        timeZone: "Europe/Rome",
+                        hour: "2-digit", minute: "2-digit",
+                        day: "2-digit", month: "2-digit",
+                      })}
+                    </span>
+                  )}
+                </div>
+                {ev.ai_result?.actions && ev.ai_result.actions.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {ev.ai_result.actions.map((a, j) => (
+                      <div key={j} className="text-violet-300/70 font-mono">
+                        {a.tool}({Object.entries(a).filter(([k]) => k !== "tool").map(([k, v]) => `${k}=${v}`).join(", ")})
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ev.ai_result?.final_response && (
+                  <p className="text-white/50 mt-1 italic">{ev.ai_result.final_response}</p>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
