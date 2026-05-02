@@ -1477,20 +1477,20 @@ async def complete_setup(
         # Messaggio di benvenuto via Telegram
         plan_label = {"core": "Core", "pro": "Pro", "elite": "Elite"}.get(body.plan or "", "")
         welcome_lines = [
-            "🎉 *Benvenuto su AutoTrading!*",
+            "🎉 *Welcome to Metis!*",
             "",
-            "Il tuo bot è ora attivo e in ascolto sul canale segnali.",
+            "Your bot is now live and listening on your signal channel.",
             "",
         ]
         if body.mt5_login:
-            welcome_lines += [f"🔗 Account MT5: `{body.mt5_login}` su {body.mt5_server or 'server configurato'}"]
+            welcome_lines += [f"🔗 MT5 account: `{body.mt5_login}` on {body.mt5_server or 'configured server'}"]
         if plan_label:
-            welcome_lines += [f"📦 Piano: *{plan_label}*"]
+            welcome_lines += [f"📦 Plan: *{plan_label}*"]
         welcome_lines += [
             "",
-            "Quando ricevi un segnale dal canale, il bot lo elaborerà automaticamente e ti notificherà qui.",
+            "When a signal arrives in your channel, it will be processed automatically and you'll be notified here.",
             "",
-            "Puoi gestire tutto dal dashboard. Buon trading! 📈",
+            "Manage everything from your dashboard. Happy trading! 📈",
         ]
         try:
             tm.notify_user(body.user_id, "\n".join(welcome_lines))

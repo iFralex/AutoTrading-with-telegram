@@ -365,9 +365,9 @@ async def lifespan(app: FastAPI):
                                         if dd_strategy and strategy_executor:
                                             # Esegui la strategia di drawdown invece di bloccare
                                             _dd_text = (
-                                                f"⚠️ Drawdown {period_label} {loss_pct:.1f}% ≥ soglia {threshold_pct}%\n"
-                                                f"📊 Balance: {balance:.2f} | Perdita periodo: {period_pnl:.2f}\n"
-                                                f"🤖 Esecuzione strategia drawdown in corso…"
+                                                f"⚠️ Drawdown {period_label} {loss_pct:.1f}% ≥ threshold {threshold_pct}%\n"
+                                                f"📊 Balance: {balance:.2f} | Period loss: {period_pnl:.2f}\n"
+                                                f"🤖 Executing drawdown strategy…"
                                             )
                                             await tm.send_to_user(user_id, _dd_text)
                                             asyncio.get_event_loop().create_task(
@@ -406,10 +406,10 @@ async def lifespan(app: FastAPI):
                                             app.state.drawdown_paused_users.add(user_id)
                                             app.state.drawdown_paused_periods[user_id] = dd_period
                                             _pause_text = (
-                                                f"⛔ Trading sospeso\n\n"
+                                                f"⛔ Trading paused\n\n"
                                                 f"📉 Drawdown {period_label}: {loss_pct:.1f}%\n"
-                                                f"🔴 Soglia: {threshold_pct}%\n\n"
-                                                f"Riprendi manualmente dal dashboard quando sei pronto."
+                                                f"🔴 Threshold: {threshold_pct}%\n\n"
+                                                f"Resume manually from the dashboard when you're ready."
                                             )
                                             await tm.send_to_user(user_id, _pause_text)
                                             asyncio.get_event_loop().create_task(
@@ -888,10 +888,10 @@ async def lifespan(app: FastAPI):
                     else f"{sig.entry_price:.5f}"
                 ) if sig.entry_price is not None else "market"
                 lines = [
-                    "🔔 Ordine eseguito",
+                    "🔔 Order executed",
                     "",
                     f"📍 {sig.order_type} {sig.symbol}"
-                    + (f" | Lotto: {sig.lot_size}" if sig.lot_size else ""),
+                    + (f" | Lot: {sig.lot_size}" if sig.lot_size else ""),
                     f"🎯 Entry: {entry_str}",
                 ]
                 if sig.stop_loss or sig.take_profit:
@@ -902,10 +902,10 @@ async def lifespan(app: FastAPI):
                     lines.append(f"🆔 Ticket: #{res.order_id}")
             else:
                 lines = [
-                    "⚠️ Ordine fallito",
+                    "⚠️ Order failed",
                     "",
                     f"📍 {sig.order_type} {sig.symbol}",
-                    f"❌ {res.error or 'Errore sconosciuto'}",
+                    f"❌ {res.error or 'Unknown error'}",
                 ]
             _trade_text = "\n".join(lines)
             try:
@@ -1136,8 +1136,8 @@ async def lifespan(app: FastAPI):
                 week_start = (now_utc - timedelta(days=7)).strftime("%d/%m")
                 week_end   = (now_utc - timedelta(days=1)).strftime("%d/%m")
                 text = (
-                    f"📊 Report settimanale ({week_start}–{week_end})\n\n"
-                    f"📈 Operazioni: {summary['total_trades']} "
+                    f"📊 Weekly report ({week_start}–{week_end})\n\n"
+                    f"📈 Trades: {summary['total_trades']} "
                     f"({summary['wins']} win / {summary['losses']} loss)\n"
                     f"🎯 Win rate: {summary['win_rate']}%\n"
                     f"💰 P&L: {pnl_str}"
@@ -1231,9 +1231,9 @@ async def lifespan(app: FastAPI):
                 pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
 
                 lines = [
-                    f"📅 Report mensile — {month_name} {year_m}",
+                    f"📅 Monthly report — {month_name} {year_m}",
                     "",
-                    f"📈 Operazioni: {stats['total_trades']} "
+                    f"📈 Trades: {stats['total_trades']} "
                     f"({stats['wins']} win / {stats['losses']} loss)",
                     f"🎯 Win rate: {stats['win_rate']}%",
                     f"💰 P&L: {pnl_str}",
@@ -1244,7 +1244,7 @@ async def lifespan(app: FastAPI):
                 if len(last_6) >= 2:
                     prev_pnl = last_6[-2].get("total_profit", 0)
                     prev_str = f"+{prev_pnl:.2f}" if prev_pnl >= 0 else f"{prev_pnl:.2f}"
-                    lines.append(f"📆 Mese prec.: {prev_str}")
+                    lines.append(f"📆 Prev. month: {prev_str}")
 
                 # Generate PDF
                 pdf_bytes: bytes | None = None
@@ -1268,7 +1268,7 @@ async def lifespan(app: FastAPI):
 
                 if pdf_bytes:
                     lines.append("")
-                    lines.append("📎 Report PDF completo allegato.")
+                    lines.append("📎 Full PDF report attached.")
 
                 text = "\n".join(lines)
 
