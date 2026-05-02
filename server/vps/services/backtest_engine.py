@@ -1165,6 +1165,7 @@ class BacktestEngine:
             ai_result = await fire_ai_event(
                 self._se._client, self._se, shared_state,
                 "position_opened", po_event_data, management_strategy, "",
+                flex=True,
             )
         except Exception as exc:
             logger.warning("fire_ai_event position_opened failed: %s", exc)
@@ -1238,6 +1239,7 @@ class BacktestEngine:
                             ai_result = await fire_ai_event(
                                 self._se._client, self._se, shared_state,
                                 "price_level_reached", pl_event_data, management_strategy, "",
+                                flex=True,
                             )
                         except Exception as exc:
                             logger.warning("fire_ai_event price_level_reached failed: %s", exc)
@@ -1324,6 +1326,7 @@ class BacktestEngine:
                 ai_result = await fire_ai_event(
                     self._se._client, self._se, shared_state,
                     "position_closed", pc_event_data, management_strategy, "",
+                    flex=True,
                 )
             except Exception as exc:
                 logger.warning("fire_ai_event position_closed failed: %s", exc)

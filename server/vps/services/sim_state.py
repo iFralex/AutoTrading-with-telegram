@@ -337,6 +337,7 @@ async def fire_ai_event(
     event_data: dict,
     management_strategy: str,
     deletion_strategy: str = "",
+    flex: bool = False,
 ) -> dict:
     """
     Fire a single AI event against the current _SimState.
@@ -371,16 +372,25 @@ async def fire_ai_event(
             f"  open_positions ({len(open_pos)}): " + " | ".join(pos_parts)
         )
 
+    from vps.services.signal_processor import flex_retry as _flex_retry
+
     system_prompt = _build_system_prompt(strategy)
     tools  = _make_tools(event_type)
+    flex_extra = {"service_tier": "flex", "http_options": {"timeout": 900_000}} if flex else {}
     config = _types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=tools,  # type: ignore[arg-type]
+        **flex_extra,
     )
     chat = gemini_client.aio.chats.create(model=_PRO_MODEL, config=config)
 
+    async def _send(msg):
+        async def _do():
+            return await chat.send_message(msg)
+        return await (_flex_retry(_do) if flex else _do())
+
     try:
-        response = await chat.send_message(event_prompt)
+        response = await _send(event_prompt)
     except Exception as exc:
         logger.warning("fire_ai_event (%s): %s", event_type, exc)
         return {"tool_calls": [], "actions": [], "final_response": f"Error: {exc}"}
@@ -404,7 +414,7 @@ async def fire_ai_event(
                 response={"result": json.dumps(_compact(result_data), separators=(",", ":"), default=str)},
             ))
         try:
-            response = await chat.send_message(fn_parts)
+            response = await _send(fn_parts)
         except Exception:
             break
 
