@@ -2,14 +2,15 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard, Radio, TrendingUp, FlaskConical,
   Users, Layers, Settings, ChevronLeft, ChevronRight,
-  AlertTriangle, Loader2, ShoppingCart, BarChart2,
+  AlertTriangle, Loader2, ShoppingCart, BarChart2, LogOut,
 } from "lucide-react"
 import { DashboardProvider, useDashboard } from "./DashboardContext"
 import { MetisLogo } from "@/src/components/MetisLogo"
+import { api } from "@/src/lib/api"
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,13 @@ const PAGE_TITLES: Record<string, string> = {
 function ShellInner({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
+  const router = useRouter()
   const { user, loading, error, reload } = useDashboard()
+
+  async function handleLogout() {
+    try { await api.logout() } catch {}
+    router.push("/login")
+  }
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
@@ -68,7 +75,9 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       >
         {/* Brand */}
         <div className={`flex items-center h-14 border-b border-white/[0.06] shrink-0 ${collapsed ? "justify-center px-0" : "gap-2.5 px-4"}`}>
-          <MetisLogo size="sm" hideText={collapsed} />
+          <Link href="/" title="Back to homepage">
+            <MetisLogo size="sm" hideText={collapsed} />
+          </Link>
         </div>
 
         {/* Main nav */}
@@ -173,9 +182,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             )}
             {user && (
               <div className="flex items-center gap-2">
-                <span
-                  className="text-xs font-mono text-white/40 hidden sm:block"
-                >
+                <span className="text-xs font-mono text-white/40 hidden sm:block">
                   {user.phone}
                 </span>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
@@ -187,6 +194,14 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 </span>
               </div>
             )}
+            <button
+              onClick={handleLogout}
+              title="Log out"
+              className="flex items-center gap-1.5 text-xs text-white/30 hover:text-white/70 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:block">Log out</span>
+            </button>
           </div>
         </header>
 

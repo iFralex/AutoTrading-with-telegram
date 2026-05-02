@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { api, ApiError } from "@/src/lib/api"
@@ -16,6 +16,12 @@ function LoginForm() {
   const [password, setPassword] = useState("")
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
+
+  useEffect(() => {
+    if (document.cookie.includes("sf_logged_in=1")) {
+      router.replace("/dashboard")
+    }
+  }, [router])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

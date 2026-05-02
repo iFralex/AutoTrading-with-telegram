@@ -1,8 +1,12 @@
 import Link from "next/link"
+import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
 import { SetupWizard } from "@/src/components/setup/SetupWizard"
 import { MetisLogo } from "@/src/components/MetisLogo"
 
-export default function SetupPage() {
+export default async function SetupPage() {
+  const jar = await cookies()
+  if (jar.get("sf_logged_in")?.value === "1") redirect("/dashboard")
   return (
     <div className="min-h-screen bg-[#07090f] text-white overflow-x-hidden">
       {/* Background orbs */}
