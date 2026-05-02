@@ -81,14 +81,9 @@ export default function RecoverPage() {
 
       <div className="relative z-10 w-full max-w-sm">
         {/* Logo */}
-        <Link href="/" className="flex items-center justify-center gap-2.5 font-bold text-lg mb-10">
-          <span className="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-emerald-400 to-cyan-400">
-            <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" />
-            </svg>
-          </span>
-          <span className="bg-gradient-to-br from-emerald-400 via-cyan-400 to-violet-500 bg-clip-text text-transparent">SignalFlow</span>
-          <span className="text-white/30 font-light text-sm -ml-1">AI</span>
+        <Link href="/" className="flex items-center justify-center gap-2.5 mb-10">
+          <img src="/logo.svg" alt="METIS" className="w-9 h-9" />
+          <span className="font-bold text-xl text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
         </Link>
 
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-md rounded-2xl p-8">

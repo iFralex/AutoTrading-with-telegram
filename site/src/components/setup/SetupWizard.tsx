@@ -2318,7 +2318,7 @@ function LaunchStep({ data, onBack }: StepProps) {
         </div>
         <h2 className="text-2xl font-black text-white mb-2"><GradientText>Bot is live!</GradientText></h2>
         <p className="text-sm text-white/45 leading-relaxed max-w-xs mx-auto mb-8">
-          SignalFlow AI is now listening on <strong className="text-white">{data.groupName}</strong> and will execute every signal automatically — 24/7.
+          METIS is now listening on <strong className="text-white">{data.groupName}</strong> and will execute every signal automatically — 24/7.
         </p>
         <div className="rounded-xl bg-emerald-500/8 border border-emerald-500/18 px-4 py-3 text-xs text-white/40 leading-relaxed mb-6">
           You can close this page. The bot runs independently on our servers.

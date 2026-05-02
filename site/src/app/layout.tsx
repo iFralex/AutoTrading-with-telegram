@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SignalFlow AI — Automate Your Telegram Trading Signals",
-  description: "SignalFlow AI automatically executes every signal from your Telegram rooms on your trading account — in under a second, no emotion, 24/7. Setup in 3 minutes, no technical skills required.",
+  title: "METIS — Automate Your Telegram Trading Signals",
+  description: "METIS automatically executes every signal from your Telegram rooms on your trading account — in under a second, no emotion, 24/7. Setup in 3 minutes, no technical skills required.",
 };
 
 export default function RootLayout({

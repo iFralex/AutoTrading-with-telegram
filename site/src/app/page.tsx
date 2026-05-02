@@ -91,14 +91,9 @@ function Nav() {
   return (
     <nav className="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-[#07090f]/85 border-b border-white/5">
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
-        <Link href="/" className="flex items-center gap-2.5 font-bold text-lg">
-          <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-emerald-400 to-cyan-400">
-            <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" />
-            </svg>
-          </span>
-          <GradientText>SignalFlow</GradientText>
-          <span className="text-white/30 font-light text-sm -ml-1">AI</span>
+        <Link href="/" className="flex items-center gap-2.5">
+          <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
+          <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-8 text-sm text-white/55">
@@ -183,7 +178,7 @@ function Hero() {
         <div className="bg-white/[0.03] border border-emerald-400/15 backdrop-blur-md rounded-2xl overflow-hidden shadow-[0_40px_120px_rgba(0,232,135,0.1)]">
           <div className="flex items-center gap-2 px-5 py-3 border-b border-white/5 bg-white/[0.02]">
             {["#ff5f57","#febc2e","#28c840"].map(c => <span key={c} className="w-3 h-3 rounded-full" style={{ background: c }} />)}
-            <span className="text-xs text-white/30 ml-3 font-mono">SignalFlow AI · Dashboard</span>
+            <span className="text-xs text-white/30 ml-3 font-mono">METIS · Dashboard</span>
           </div>
           <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
@@ -747,14 +742,14 @@ function ComparisonTable() {
 
 // ─── FAQ ───────────────────────────────────────────────────────────────────
 const FAQ_ITEMS = [
-  { q: "Do I need to be at my computer to execute signals?", a: "No. SignalFlow AI runs fully automatically, 24/7. As soon as a signal arrives from your Telegram room, the system recognizes it and opens the order on your account — even while you sleep, work, or travel. You don't have to do a thing." },
+  { q: "Do I need to be at my computer to execute signals?", a: "No. METIS runs fully automatically, 24/7. As soon as a signal arrives from your Telegram room, the system recognizes it and opens the order on your account — even while you sleep, work, or travel. You don't have to do a thing." },
   { q: "What happens if a signal comes in at night?", a: "The system is always on. No downtime, no pauses. Every signal — day or night, weekends or holidays — is processed and the trade is opened automatically in under a second." },
-  { q: "Which brokers does it work with?", a: "SignalFlow AI works with any broker that offers a MetaTrader 5 account: IC Markets, Pepperstone, Exness, XM, Tickmill, FP Markets and hundreds more. During setup, just enter your account credentials — the system verifies everything automatically." },
+  { q: "Which brokers does it work with?", a: "METIS works with any broker that offers a MetaTrader 5 account: IC Markets, Pepperstone, Exness, XM, Tickmill, FP Markets and hundreds more. During setup, just enter your account credentials — the system verifies everything automatically." },
   { q: "Is my Telegram account safe?", a: "Yes. The system reads signal room messages in read-only mode — it never sends messages, modifies your account, or accesses your private chats. It only sees the groups you choose. Your credentials never leave your systems." },
   { q: "What is signal backtesting?", a: "Backtesting lets you test a provider's past signals against real historical market data, without risking real money. You can see how many trades would have won, total profit, max drawdown, and the equity curve. Great for evaluating a new analyst before following them." },
   { q: "How do custom trading rules work?", a: "You write your rules in plain language. Core includes position sizing rules (e.g. \"risk 1% per trade\"), signal extraction hints (e.g. \"ignore signals without a stop loss\"), and entry filters. Pro adds an AI confidence threshold to filter uncertain signals. Elite adds full position management rules (e.g. \"move to break-even at 50% of TP\"), trading hours, and economic calendar filters. No code required at any level." },
   { q: "Does the plan include everything, or are there hidden costs?", a: "The subscription includes everything: the automation engine, dashboard, analytics, and all infrastructure required to run the system. No surprise charges. The price you see is what you pay every month." },
-  { q: "Can I use SignalFlow AI without technical knowledge?", a: "Absolutely. Setup is handled by Nova, our AI chat assistant — you just answer its questions in plain language. No forms, no manuals, nothing to install or code. Nova connects your Telegram, links your MT5 account, and even lets you preview a real signal before going live. Most users are up and running in under 5 minutes." },
+  { q: "Can I use METIS without technical knowledge?", a: "Absolutely. Setup is handled by Nova, our AI chat assistant — you just answer its questions in plain language. No forms, no manuals, nothing to install or code. Nova connects your Telegram, links your MT5 account, and even lets you preview a real signal before going live. Most users are up and running in under 5 minutes." },
 ]
 
 function FaqItem({ q, a }: { q: string; a: string }) {
@@ -818,13 +813,9 @@ function Footer() {
       <div className="max-w-6xl mx-auto">
         <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8 mb-10">
           <div className="md:col-span-2">
-            <Link href="/" className="flex items-center gap-2.5 font-bold text-lg mb-3">
-              <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-emerald-400 to-cyan-400">
-                <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                  <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" />
-                </svg>
-              </span>
-              <GradientText>SignalFlow</GradientText><span className="text-white/30 font-light text-sm -ml-1">AI</span>
+            <Link href="/" className="flex items-center gap-2.5 mb-3">
+              <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
+              <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
             </Link>
             <p className="text-sm text-white/40 max-w-xs leading-relaxed">Trading automation for Telegram signal room followers. Your trades, executed automatically.</p>
           </div>
@@ -846,7 +837,7 @@ function Footer() {
           </div>
         </div>
         <div className="border-t border-white/5 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/28">
-          <p>© 2024 SignalFlow AI. All rights reserved.</p>
+          <p>© 2024 METIS. All rights reserved.</p>
           <p className="text-center">Trading involves risk. Past performance is not indicative of future results. This software is a tool, not financial advice.</p>
         </div>
       </div>

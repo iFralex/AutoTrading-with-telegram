@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Radio, TrendingUp, FlaskConical,
   Users, Layers, Settings, ChevronLeft, ChevronRight,
-  Zap, AlertTriangle, Loader2, ShoppingCart, BarChart2,
+  AlertTriangle, Loader2, ShoppingCart, BarChart2,
 } from "lucide-react"
 import { DashboardProvider, useDashboard } from "./DashboardContext"
 
@@ -67,13 +67,10 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       >
         {/* Brand */}
         <div className={`flex items-center h-14 border-b border-white/[0.06] shrink-0 ${collapsed ? "justify-center px-0" : "gap-2.5 px-4"}`}>
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: "linear-gradient(135deg, #10b981, #06b6d4)" }}>
-            <Zap className="w-3.5 h-3.5 text-black" strokeWidth={2.5} />
-          </div>
+          <img src="/logo.svg" alt="METIS" className="w-7 h-7 shrink-0" />
           {!collapsed && (
-            <span className="text-sm font-bold tracking-tight text-white select-none">
-              SignalFlow
+            <span className="text-sm font-bold text-white select-none" style={{ fontFamily: "Inter, sans-serif" }}>
+              METIS
             </span>
           )}
         </div>
