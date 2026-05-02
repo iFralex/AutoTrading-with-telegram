@@ -1319,6 +1319,66 @@ async def lifespan(app: FastAPI):
     monthly_report_task = asyncio.create_task(_monthly_report_loop())
     app.state.monthly_report_task = monthly_report_task
 
+    # ── Cancellazione account con abbonamento scaduto da >30 giorni ──────────
+
+    async def _delete_expired_user(user_id: str, phone: str) -> None:
+        try:
+            tm.notify_user(
+                user_id,
+                "🗑️ Your account has been permanently deleted after 30 days without an active subscription.\n"
+                "Visit the website to create a new account.",
+            )
+        except Exception:
+            pass
+        try:
+            tm.remove_user(user_id)
+        except Exception:
+            pass
+        session_file = _sessions_dir / f"{user_id}.session"
+        try:
+            if session_file.exists():
+                session_file.unlink()
+        except Exception:
+            pass
+        await signal_log_store.delete_by_user_id(user_id)
+        await ai_log_store.delete_by_user_id(user_id)
+        await closed_trade_store.delete_by_user_id(user_id)
+        await backtest_store.delete_all_runs_for_user(user_id)
+        await monthly_report_store.delete_by_user_id(user_id)
+        await group_follow_store.delete_by_follower(user_id)
+        await group_follow_store.delete_by_source_user(user_id)
+        await store.delete_all_links_for_user(user_id)
+        await store.delete_all_user_groups(user_id)
+        await store.delete(user_id)
+        try:
+            await session_store.delete(phone)
+        except Exception:
+            pass
+        logger.info("Expired subscription: account %s permanently deleted", user_id)
+
+    async def _expired_subscription_loop() -> None:
+        while True:
+            try:
+                now      = datetime.now(timezone.utc)
+                tomorrow = (now + timedelta(days=1)).replace(
+                    hour=2, minute=0, second=0, microsecond=0,
+                )
+                await asyncio.sleep((tomorrow - now).total_seconds())
+                expired = await store.get_expired_subscription_users(days=30)
+                for u in expired:
+                    try:
+                        await _delete_expired_user(u["user_id"], u.get("phone", ""))
+                    except Exception as _exc:
+                        logger.error("Error deleting expired user %s: %s", u["user_id"], _exc, exc_info=True)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("Expired subscription loop error: %s", exc, exc_info=True)
+                await asyncio.sleep(3600)
+
+    expired_subscription_task = asyncio.create_task(_expired_subscription_loop())
+    app.state.expired_subscription_task = expired_subscription_task
+
     logger.info("Trading Bot API pronta")
     yield
 
@@ -1327,6 +1387,7 @@ async def lifespan(app: FastAPI):
     weekly_report_task.cancel()
     midnight_reset_task.cancel()
     monthly_report_task.cancel()
+    expired_subscription_task.cancel()
     await vps_monitor.stop()
     await range_watcher.stop()
     await price_level_watcher.stop()

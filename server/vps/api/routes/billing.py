@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,7 @@ from pydantic import BaseModel
 
 from vps.api.deps import get_current_user
 from vps.services.setup_session_store import SetupSessionStore
+from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,9 @@ def _get_session_store(request: Request) -> SetupSessionStore:
 
 def _get_store(request: Request) -> UserStore:
     return request.app.state.user_store
+
+def _get_tm(request: Request) -> TelegramManager:
+    return request.app.state.telegram_manager
 
 
 # ── GET /validate-coupon ──────────────────────────────────────────────────────
@@ -353,7 +358,31 @@ async def stripe_webhook(request: Request) -> dict:
         if customer_id:
             user = await store.get_user_by_stripe_customer(customer_id)
             if user:
-                await store.update_billing_info(user["user_id"], stripe_subscription_id=None)
-                logger.info("subscription.deleted: user %s", user["user_id"])
+                user_id  = user["user_id"]
+                now_iso  = datetime.now(timezone.utc).isoformat()
+                tm       = _get_tm(request)
+
+                # 1. Notify the user while the session is still open
+                _pause_msg = (
+                    "⛔ Your subscription has ended.\n\n"
+                    "Your bot has been paused. Resubscribe within 30 days to reactivate it — "
+                    "after that your account and all data will be permanently deleted."
+                )
+                try:
+                    await tm.send_to_user(user_id, _pause_msg)
+                except Exception as _exc:
+                    logger.warning("subscription.deleted notify %s: %s", user_id, _exc)
+
+                # 2. Stop the Telegram listener
+                try:
+                    tm.remove_user(user_id)
+                except Exception as _exc:
+                    logger.warning("subscription.deleted remove_user %s: %s", user_id, _exc)
+
+                # 3. Mark as inactive and record end timestamp
+                await store.set_active(user_id, False)
+                await store.set_subscription_ended(user_id, now_iso)
+                await store.update_billing_info(user_id, stripe_subscription_id=None)
+                logger.info("subscription.deleted: user %s paused, ended_at=%s", user_id, now_iso)
 
     return {"received": True}

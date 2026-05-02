@@ -77,6 +77,7 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN plan TEXT",
     "ALTER TABLE users ADD COLUMN stripe_customer_id TEXT",
     "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT",
+    "ALTER TABLE users ADD COLUMN subscription_ended_at TEXT",
 ]
 
 # ── Tabella multi-gruppo ──────────────────────────────────────────────────────
@@ -635,6 +636,29 @@ class UserStore:
                 (1 if active else 0, user_id),
             )
             await db.commit()
+
+    async def set_subscription_ended(self, user_id: str, ended_at: str | None) -> None:
+        """Record when a subscription ended (ISO timestamp) or clear it (None)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE users SET subscription_ended_at = ? WHERE user_id = ?",
+                (ended_at, user_id),
+            )
+            await db.commit()
+
+    async def get_expired_subscription_users(self, days: int = 30) -> list[dict]:
+        """Return inactive users whose subscription ended more than `days` ago."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT user_id, phone FROM users
+                   WHERE active = 0
+                     AND subscription_ended_at IS NOT NULL
+                     AND subscription_ended_at <= datetime('now', ?)""",
+                (f"-{days} days",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
     async def delete(self, user_id: str) -> None:
         async with aiosqlite.connect(self._db_path) as db:
