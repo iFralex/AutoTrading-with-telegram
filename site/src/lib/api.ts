@@ -285,6 +285,7 @@ export interface DashboardUser {
   plan:                     string | null
   stripe_subscription_id:   string | null
   stripe_customer_id:       string | null
+  subscription_ended_at:    string | null
   groups: UserGroup[]
 }
 
@@ -627,6 +628,14 @@ export const api = {
     return callAuth<{ status: string; current_period_end: number | null }>(
       "POST",
       "/api/billing/cancel-subscription"
+    )
+  },
+
+  /** Crea una sessione Stripe Checkout per riattivare un abbonamento scaduto. */
+  reactivateCheckout() {
+    return callAuth<{ checkout_url: string }>(
+      "POST",
+      "/api/billing/reactivate-checkout"
     )
   },
 

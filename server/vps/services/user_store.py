@@ -755,6 +755,7 @@ class UserStore:
             "plan":                 row["plan"]                 if "plan"                 in row.keys() else None,
             "stripe_customer_id":   row["stripe_customer_id"]   if "stripe_customer_id"   in row.keys() else None,
             "stripe_subscription_id": row["stripe_subscription_id"] if "stripe_subscription_id" in row.keys() else None,
+            "subscription_ended_at":  row["subscription_ended_at"]  if "subscription_ended_at"  in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -804,6 +805,7 @@ class UserStore:
             "plan":                 row["plan"]                 if "plan"                 in row.keys() else None,
             "stripe_customer_id":   row["stripe_customer_id"]   if "stripe_customer_id"   in row.keys() else None,
             "stripe_subscription_id": row["stripe_subscription_id"] if "stripe_subscription_id" in row.keys() else None,
+            "subscription_ended_at":  row["subscription_ended_at"]  if "subscription_ended_at"  in row.keys() else None,
             "groups":    groups,
             # Backward-compat: primo gruppo
             "group_id":              first.get("group_id"),
@@ -815,6 +817,15 @@ class UserStore:
             "range_entry_pct":       first.get("range_entry_pct", 0),
             "entry_if_favorable":    first.get("entry_if_favorable", False),
         }
+
+    async def get_user_for_restore(self, user_id: str) -> dict | None:
+        """Returns user dict in the format expected by TelegramManager.restore_users()."""
+        user = await self.get_user(user_id)
+        if user is None:
+            return None
+        active_groups = [g for g in user.get("groups", []) if g.get("active")]
+        user["group_ids"] = [g["group_id"] for g in active_groups]
+        return user
 
     async def update_billing_info(
         self,

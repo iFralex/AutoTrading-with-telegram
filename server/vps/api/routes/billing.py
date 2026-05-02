@@ -287,6 +287,47 @@ async def cancel_subscription(
     }
 
 
+# ── POST /reactivate-checkout ─────────────────────────────────────────────────
+
+@router.post("/reactivate-checkout")
+async def reactivate_checkout(
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,  # type: ignore[assignment]
+) -> dict:
+    """Create a new Stripe Checkout session to reactivate a paused subscription."""
+    plan = current_user.get("plan")
+    if not plan or plan not in PLAN_PRICES:
+        raise HTTPException(400, "No valid plan found on your account.")
+
+    price_id = PLAN_PRICES[plan]
+    if not price_id:
+        raise HTTPException(503, f"Plan price not configured.")
+
+    user_id     = current_user["user_id"]
+    customer_id = current_user.get("stripe_customer_id")
+
+    client = _stripe_client()
+    base   = _base_url()
+
+    session_params: dict = {
+        "mode":       "subscription",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": f"{base}/dashboard?reactivated=1",
+        "cancel_url":  f"{base}/dashboard",
+        "metadata":    {"user_id": user_id, "plan": plan},
+    }
+    if customer_id:
+        session_params["customer"] = customer_id
+
+    try:
+        session = client.checkout.sessions.create(params=session_params)
+    except stripe.StripeError as exc:
+        logger.error("Stripe reactivate_checkout: %s", exc)
+        raise HTTPException(502, f"Stripe error: {getattr(exc, 'user_message', None) or str(exc)}")
+
+    return {"checkout_url": session.url}
+
+
 # ── POST /webhook ─────────────────────────────────────────────────────────────
 
 @router.post("/webhook")
@@ -310,12 +351,36 @@ async def stripe_webhook(request: Request) -> dict:
 
     if event_type == "checkout.session.completed":
         sess = event["data"]["object"]
-        phone = (sess.get("metadata") or {}).get("phone")
-        plan  = (sess.get("metadata") or {}).get("plan")
+        metadata        = sess.get("metadata") or {}
+        phone           = metadata.get("phone")
+        plan            = metadata.get("plan")
+        reactivation_uid = metadata.get("user_id")
         customer_id     = sess.get("customer")
         subscription_id = sess.get("subscription")
 
-        if phone and plan:
+        if reactivation_uid and plan:
+            # Reactivation path — user_id in metadata
+            await store.update_billing_info(
+                reactivation_uid,
+                plan=plan,
+                stripe_customer_id=customer_id or None,
+                stripe_subscription_id=subscription_id or None,
+            )
+            await store.set_active(reactivation_uid, True)
+            await store.set_subscription_ended(reactivation_uid, None)
+            user_data = await store.get_user_for_restore(reactivation_uid)
+            if user_data:
+                tm = _get_tm(request)
+                try:
+                    tm.restore_users([user_data])
+                except Exception as _exc:
+                    logger.warning("reactivation restore_users %s: %s", reactivation_uid, _exc)
+            logger.info(
+                "checkout.completed (reactivation): user %s plan=%s customer=%s sub=%s",
+                reactivation_uid, plan, customer_id, subscription_id,
+            )
+        elif phone and plan:
+            # Initial setup path — phone in metadata
             user = await store.get_user_by_phone(phone)
             if user:
                 await store.update_billing_info(

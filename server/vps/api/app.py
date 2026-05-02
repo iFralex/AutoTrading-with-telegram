@@ -1383,16 +1383,39 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
-    logger.info("Arresto in corso...")
-    weekly_report_task.cancel()
-    midnight_reset_task.cancel()
-    monthly_report_task.cancel()
-    expired_subscription_task.cancel()
-    await vps_monitor.stop()
-    await range_watcher.stop()
-    await price_level_watcher.stop()
-    await position_watcher.stop()
-    tm.stop()
+    logger.info("Shutting down...")
+
+    # 1. Cancel all background loops and wait for them to acknowledge cancellation.
+    #    task.cancel() only schedules the CancelledError — the tasks must be awaited
+    #    for it to actually propagate and the coroutines to exit cleanly.
+    _bg_tasks = [
+        weekly_report_task,
+        midnight_reset_task,
+        monthly_report_task,
+        expired_subscription_task,
+    ]
+    for _t in _bg_tasks:
+        _t.cancel()
+    await asyncio.gather(*_bg_tasks, return_exceptions=True)
+
+    # 2. Stop internal async watchers (each already awaits its own task cancellation).
+    await asyncio.gather(
+        vps_monitor.stop(),
+        range_watcher.stop(),
+        price_level_watcher.stop(),
+        position_watcher.stop(),
+        return_exceptions=True,
+    )
+
+    # 3. Stop TelegramManager last.
+    #    tm.stop() is synchronous and calls future.result(timeout=15) — it blocks
+    #    the calling thread.  Running it in a thread-pool executor keeps the event
+    #    loop free so that any remaining coroutines can finish while we wait.
+    try:
+        await asyncio.wait_for(asyncio.to_thread(tm.stop), timeout=18)
+    except asyncio.TimeoutError:
+        logger.warning("TelegramManager stop timed out — forcing shutdown")
+
     logger.info("Trading Bot API fermata")
 
 

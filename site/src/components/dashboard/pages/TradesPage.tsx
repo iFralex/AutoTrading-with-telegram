@@ -89,8 +89,9 @@ export function TradesPage({ userId }: { userId: string }) {
   const [reportDays, setReportDays]     = useState(30)
   const [genLoading, setGenLoading]     = useState(false)
   const [genMsg, setGenMsg]             = useState<{ ok: boolean; text: string } | null>(null)
-  const [savedReports, setSavedReports] = useState<SavedReport[]>([])
-  const [dlLoading, setDlLoading]       = useState<number | null>(null)
+  const [savedReports, setSavedReports]       = useState<SavedReport[]>([])
+  const [reportsLoading, setReportsLoading]   = useState(true)
+  const [dlLoading, setDlLoading]             = useState<number | null>(null)
 
   const load = useCallback(async (n: number) => {
     setLoading(true)
@@ -106,11 +107,14 @@ export function TradesPage({ userId }: { userId: string }) {
   }, [userId])
 
   const loadSavedReports = useCallback(async () => {
+    setReportsLoading(true)
     try {
       const res = await api.listReports(userId)
       setSavedReports(res.reports)
     } catch {
       // non-critical: silently ignore
+    } finally {
+      setReportsLoading(false)
     }
   }, [userId])
 
@@ -119,9 +123,9 @@ export function TradesPage({ userId }: { userId: string }) {
     setGenMsg(null)
     try {
       await api.generateReport(userId, reportDays, true)
-      setGenMsg({ ok: true, text: `Report ${reportDays}g scaricato e inviato su Telegram.` })
+      setGenMsg({ ok: true, text: `${reportDays}-day report downloaded and sent to Telegram.` })
     } catch (e: unknown) {
-      setGenMsg({ ok: false, text: e instanceof Error ? e.message : "Generazione fallita" })
+      setGenMsg({ ok: false, text: e instanceof Error ? e.message : "Generation failed" })
     } finally {
       setGenLoading(false)
     }
@@ -147,9 +151,9 @@ export function TradesPage({ userId }: { userId: string }) {
     <div className="p-6 max-w-6xl mx-auto space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Posizioni Chiuse Recenti</h1>
+          <h1 className="text-xl font-semibold text-foreground">Recent Closed Positions</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Dati grezzi salvati nel DB — mostra close price e profit come arrivano da MT5
+            Raw data from MT5 — close price and profit as received
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -159,7 +163,7 @@ export function TradesPage({ userId }: { userId: string }) {
             className="text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-foreground"
           >
             {[5, 10, 20, 50].map(n => (
-              <option key={n} value={n}>{n} trade</option>
+              <option key={n} value={n}>{n} trades</option>
             ))}
           </select>
           <button
@@ -168,7 +172,7 @@ export function TradesPage({ userId }: { userId: string }) {
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition-colors"
           >
             <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-            Aggiorna
+            Refresh
           </button>
         </div>
       </div>
@@ -177,7 +181,7 @@ export function TradesPage({ userId }: { userId: string }) {
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 px-4 py-3.5 rounded-xl border border-white/[0.07] bg-white/[0.02]">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground shrink-0">
           <FileText className="w-4 h-4 text-indigo-400" />
-          Genera Report PDF
+          Generate PDF Report
         </div>
         <div className="flex flex-wrap items-center gap-2 flex-1">
           <select
@@ -186,7 +190,7 @@ export function TradesPage({ userId }: { userId: string }) {
             className="text-xs bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-foreground"
           >
             {[7, 14, 30, 60, 90].map(d => (
-              <option key={d} value={d}>Ultimi {d} giorni</option>
+              <option key={d} value={d}>Last {d} days</option>
             ))}
           </select>
           <button
@@ -195,7 +199,7 @@ export function TradesPage({ userId }: { userId: string }) {
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 transition-colors"
           >
             <FileText className={`w-3 h-3 ${genLoading ? "animate-pulse" : ""}`} />
-            {genLoading ? "Generazione…" : "Genera & Scarica"}
+            {genLoading ? "Generating…" : "Generate & Download"}
           </button>
           {genMsg && (
             <span className={`text-xs ${genMsg.ok ? "text-emerald-400" : "text-red-400"}`}>
@@ -205,14 +209,29 @@ export function TradesPage({ userId }: { userId: string }) {
         </div>
       </div>
 
-      {/* Saved monthly reports */}
-      {savedReports.length > 0 && (
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.07]">
-            <History className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span className="text-sm font-medium text-foreground">Saved Monthly Reports</span>
-            <span className="ml-auto text-xs text-muted-foreground">{savedReports.length} report{savedReports.length !== 1 ? "s" : ""}</span>
+      {/* Saved monthly reports — always visible */}
+      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.07]">
+          <History className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span className="text-sm font-medium text-foreground">Monthly Reports</span>
+          {!reportsLoading && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {savedReports.length} report{savedReports.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        {reportsLoading ? (
+          <div className="flex items-center justify-center py-8 text-xs text-muted-foreground gap-2">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            Loading…
           </div>
+        ) : savedReports.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+            <History className="w-8 h-8 opacity-20" />
+            <p className="text-sm">No monthly reports yet</p>
+            <p className="text-xs opacity-60">Reports are generated automatically at the end of each month and sent to your Telegram.</p>
+          </div>
+        ) : (
           <div className="divide-y divide-white/[0.04]">
             {savedReports.map(r => (
               <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors">
@@ -229,7 +248,7 @@ export function TradesPage({ userId }: { userId: string }) {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground hidden sm:block">
-                    {new Date(r.generated_at).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(r.generated_at).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
                   </span>
                   <button
                     onClick={() => handleDownloadSaved(r)}
@@ -243,16 +262,16 @@ export function TradesPage({ userId }: { userId: string }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {hasMissingData && (
         <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl border border-amber-500/20 bg-amber-600/5 text-sm text-amber-400">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
-            <span className="font-semibold">Dati incompleti rilevati</span>
+            <span className="font-semibold">Incomplete data detected</span>
             <span className="text-amber-400/80 ml-1">
-              — alcune posizioni hanno close_price o profit = N/A. Il deal MT5 non era ancora disponibile nella history al momento della chiusura (race condition).
+              — some positions have close_price or profit = N/A. The MT5 deal was not yet in history at close time (race condition).
             </span>
           </div>
         </div>
@@ -267,7 +286,7 @@ export function TradesPage({ userId }: { userId: string }) {
 
       {!loading && !error && trades.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
-          Nessuna posizione chiusa trovata per questo utente.
+          No closed positions found.
         </div>
       )}
 
@@ -276,7 +295,7 @@ export function TradesPage({ userId }: { userId: string }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/[0.07] bg-white/[0.02]">
-                {["Ticket", "Simbolo", "Dir", "Lotti", "Entry", "Close", "SL", "TP", "Profit", "Motivo", "Apertura", "Chiusura"].map(h => (
+                {["Ticket", "Symbol", "Dir", "Lots", "Entry", "Close", "SL", "TP", "Profit", "Reason", "Opened", "Closed"].map(h => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
                     {h}
                   </th>

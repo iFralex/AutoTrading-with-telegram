@@ -21,7 +21,7 @@ const TZ = "Europe/Rome"
 function fmtTs(iso: string | null): string {
   if (!iso) return "—"
   try {
-    return new Date(iso).toLocaleString("it-IT", {
+    return new Date(iso).toLocaleString("en-GB", {
       day: "2-digit", month: "2-digit", year: "2-digit",
       hour: "2-digit", minute: "2-digit",
       timeZone: TZ,
@@ -58,16 +58,16 @@ function fmtDur(min: number | null): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  "running":                    "In avvio…",
-  "running:telegram_fetch":     "📡 Scaricamento messaggi Telegram…",
-  "running:signal_detection":   "🔍 Rilevamento segnali (Flash)…",
-  "running:signal_extraction":  "🧠 Estrazione segnali (Pro)…",
-  "running:ai_pretrade":        "🤖 Decisioni AI pre-trade…",
-  "running:mt5_bars":           "📊 Download barre MT5…",
-  "running:simulation":         "⚡ Simulazione trade…",
-  "done":                       "✅ Completato",
-  "error":                      "❌ Errore",
-  "cancelled":                  "⛔ Interrotto",
+  "running":                    "Starting…",
+  "running:telegram_fetch":     "📡 Fetching Telegram messages…",
+  "running:signal_detection":   "🔍 Detecting signals (Flash)…",
+  "running:signal_extraction":  "🧠 Extracting signals (Pro)…",
+  "running:ai_pretrade":        "🤖 AI pre-trade decisions…",
+  "running:mt5_bars":           "📊 Fetching MT5 bars…",
+  "running:simulation":         "⚡ Simulating trades…",
+  "done":                       "✅ Done",
+  "error":                      "❌ Error",
+  "cancelled":                  "⛔ Cancelled",
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -147,10 +147,10 @@ function RunForm({ user, onStarted, disabled }: {
   async function submit() {
     setErr(null)
     const limitValue = mode === "date_limit" ? `${dateFrom}/${dateTo}` : countVal
-    if (mode === "date_limit" && (!dateFrom || !dateTo)) { setErr("Inserisci entrambe le date"); return }
-    if (mode === "date_limit" && dateFrom > dateTo) { setErr("La data iniziale deve essere prima di quella finale"); return }
-    if (mode === "message_count" && !countVal) { setErr("Inserisci un valore"); return }
-    if (!selectedGroup) { setErr("Seleziona un gruppo"); return }
+    if (mode === "date_limit" && (!dateFrom || !dateTo)) { setErr("Please enter both dates"); return }
+    if (mode === "date_limit" && dateFrom > dateTo) { setErr("Start date must be before end date"); return }
+    if (mode === "message_count" && !countVal) { setErr("Please enter a value"); return }
+    if (!selectedGroup) { setErr("Please select a group"); return }
     setLoading(true)
     try {
       const res = await api.startBacktest({
@@ -164,7 +164,7 @@ function RunForm({ user, onStarted, disabled }: {
       })
       onStarted(res.run_id)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Errore avvio backtest")
+      setErr(e instanceof Error ? e.message : "Failed to start backtest")
     } finally {
       setLoading(false)
     }
@@ -172,19 +172,19 @@ function RunForm({ user, onStarted, disabled }: {
 
   return (
     <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-4">
-      <h3 className="text-sm font-semibold text-foreground">Nuovo backtest</h3>
+      <h3 className="text-sm font-semibold text-foreground">New backtest</h3>
 
       {disabled && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-600/8 border border-amber-500/20 text-xs text-amber-400">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          Un backtest è già in esecuzione. Attendi il completamento prima di avviarne un altro.
+          A backtest is already running. Wait for it to complete before starting a new one.
         </div>
       )}
 
       {/* Group selector */}
       {groups.length > 1 && (
         <div>
-          <label className="text-xs text-muted-foreground">Gruppo / canale</label>
+          <label className="text-xs text-muted-foreground">Group / channel</label>
           <select
             value={selectedGroupId}
             onChange={e => setSelectedGroupId(Number(e.target.value))}
@@ -200,7 +200,7 @@ function RunForm({ user, onStarted, disabled }: {
       )}
       {groups.length === 1 && (
         <p className="text-xs text-muted-foreground">
-          Gruppo: <span className="font-medium text-foreground">{groups[0].group_name}</span>
+          Group: <span className="font-medium text-foreground">{groups[0].group_name}</span>
         </p>
       )}
 
@@ -216,7 +216,7 @@ function RunForm({ user, onStarted, disabled }: {
                 : "bg-transparent text-muted-foreground border-white/[0.08] hover:bg-white/[0.04]"
             }`}
           >
-            {m === "message_count" ? "Numero messaggi" : "Fino a data"}
+            {m === "message_count" ? "Message count" : "Date range"}
           </button>
         ))}
       </div>
@@ -224,7 +224,7 @@ function RunForm({ user, onStarted, disabled }: {
       {/* Input */}
       {mode === "message_count" ? (
         <div>
-          <label className="text-xs text-muted-foreground">Ultimi N messaggi</label>
+          <label className="text-xs text-muted-foreground">Last N messages</label>
           <input
             type="number"
             min={10}
@@ -233,12 +233,12 @@ function RunForm({ user, onStarted, disabled }: {
             onChange={e => setCountVal(e.target.value)}
             className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
           />
-          <p className="text-[11px] text-muted-foreground mt-1">Scarica gli ultimi N messaggi dal gruppo</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Fetches the last N messages from the group</p>
         </div>
       ) : (
         <div className="space-y-2">
           <div>
-            <label className="text-xs text-muted-foreground">Dal (incluso)</label>
+            <label className="text-xs text-muted-foreground">From (inclusive)</label>
             <input
               type="date"
               value={dateFrom}
@@ -248,7 +248,7 @@ function RunForm({ user, onStarted, disabled }: {
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Al (incluso)</label>
+            <label className="text-xs text-muted-foreground">To (inclusive)</label>
             <input
               type="date"
               value={dateTo}
@@ -275,16 +275,16 @@ function RunForm({ user, onStarted, disabled }: {
           }`} />
         </button>
         <div>
-          <p className="text-xs font-medium text-foreground">Modalità AI agentica</p>
+          <p className="text-xs font-medium text-foreground">Agentic AI mode</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Usa Gemini Pro per decidere se approvare/modificare ogni segnale secondo la management strategy (più preciso, più lento).
+            Uses Gemini Pro to approve/modify each signal based on the management strategy (more accurate, slower).
           </p>
         </div>
       </div>
 
-      {/* Saldo iniziale */}
+      {/* Starting balance */}
       <div>
-        <label className="text-xs text-muted-foreground">Saldo iniziale simulato (USD)</label>
+        <label className="text-xs text-muted-foreground">Simulated starting balance (USD)</label>
         <input
           type="number"
           min={100}
@@ -294,7 +294,7 @@ function RunForm({ user, onStarted, disabled }: {
           onChange={e => setBalance(e.target.value)}
           className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white/[0.04] border border-white/[0.08] rounded-lg focus:outline-none focus:border-indigo-500/40 transition-all"
         />
-        <p className="text-[11px] text-muted-foreground mt-1">Usato per il sizing e per convertire i pip in valore monetario</p>
+        <p className="text-[11px] text-muted-foreground mt-1">Used for sizing and to convert pips to monetary value</p>
       </div>
 
       {err && (
@@ -309,8 +309,8 @@ function RunForm({ user, onStarted, disabled }: {
         className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
       >
         {loading
-          ? <><RefreshCw className="w-4 h-4 animate-spin" /> Avvio…</>
-          : <><Play className="w-4 h-4" /> Avvia backtest</>
+          ? <><RefreshCw className="w-4 h-4 animate-spin" /> Starting…</>
+          : <><Play className="w-4 h-4" /> Start backtest</>
         }
       </button>
     </div>
@@ -329,19 +329,17 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
     finally { setCancelling(false); setTimeout(onRefresh, 800) }
   }
 
-  // Ordine delle fasi e loro status string
   const PHASES: { key: string; label: string; aiOnly?: boolean }[] = [
-    { key: "running:telegram_fetch",    label: "Scaricamento messaggi Telegram" },
-    { key: "running:signal_detection",  label: "Rilevamento segnali (Flash AI)" },
-    { key: "running:signal_extraction", label: "Estrazione segnali (Pro AI)" },
-    { key: "running:ai_pretrade",       label: "Decisioni AI pre-trade", aiOnly: true },
-    { key: "running:mt5_bars",          label: "Download barre MT5" },
-    { key: "running:simulation",        label: "Simulazione trade" },
+    { key: "running:telegram_fetch",    label: "Fetching Telegram messages" },
+    { key: "running:signal_detection",  label: "Detecting signals (Flash AI)" },
+    { key: "running:signal_extraction", label: "Extracting signals (Pro AI)" },
+    { key: "running:ai_pretrade",       label: "AI pre-trade decisions", aiOnly: true },
+    { key: "running:mt5_bars",          label: "Fetching MT5 bars" },
+    { key: "running:simulation",        label: "Simulating trades" },
   ]
 
   const phases = PHASES.filter(p => !p.aiOnly || run.use_ai)
   const currentIdx = phases.findIndex(p => p.key === run.status)
-  // Se status non è una fase nota (es. "running" iniziale), -1 = nessuna attiva
   const activeIdx = currentIdx
 
   function phaseState(idx: number): "done" | "active" | "pending" {
@@ -351,30 +349,29 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
     return "pending"
   }
 
-  // Sub-info per fase completata
   function phaseDetail(key: string): string | null {
     switch (key) {
       case "running:telegram_fetch":
         return run.total_messages != null
-          ? `${run.total_messages} messaggi${run.period_from ? ` · ${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}`
+          ? `${run.total_messages} messages${run.period_from ? ` · ${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}`
           : null
       case "running:signal_detection":
         return run.signals_detected != null
-          ? `${run.signals_detected} segnali rilevati (${run.signal_detection_rate?.toFixed(1) ?? "—"}%)`
+          ? `${run.signals_detected} signals detected (${run.signal_detection_rate?.toFixed(1) ?? "—"}%)`
           : null
       case "running:signal_extraction":
         return run.signals_extracted != null
-          ? `${run.signals_extracted} segnali estratti`
+          ? `${run.signals_extracted} signals extracted`
           : null
       case "running:ai_pretrade":
         return run.ai_approved != null
-          ? `${run.ai_approved} approvati · ${run.ai_rejected} rifiutati · ${run.ai_modified} modificati`
+          ? `${run.ai_approved} approved · ${run.ai_rejected} rejected · ${run.ai_modified} modified`
           : null
       case "running:mt5_bars":
         return null
       case "running:simulation":
         return run.total_trades != null
-          ? `${run.total_trades} trade · ${run.winning_trades}W / ${run.losing_trades}L`
+          ? `${run.total_trades} trades · ${run.winning_trades}W / ${run.losing_trades}L`
           : null
       default:
         return null
@@ -398,10 +395,10 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-red-600/10 text-red-400 border border-red-500/20 hover:bg-red-600/20 transition-colors disabled:opacity-50"
             >
               {cancelling ? <RefreshCw className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
-              Interrompi
+              Stop
             </button>
           )}
-          <button onClick={onRefresh} className="text-muted-foreground hover:text-foreground transition-colors" title="Aggiorna">
+          <button onClick={onRefresh} className="text-muted-foreground hover:text-foreground transition-colors" title="Refresh">
             <RefreshCw className={`w-4 h-4 ${isRunning ? "animate-spin" : ""}`} />
           </button>
         </div>
@@ -458,10 +455,10 @@ function RunProgress({ run, onRefresh, userId }: { run: BacktestRun; onRefresh: 
       {/* Live stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/[0.05] text-xs">
         {[
-          { label: "Messaggi",         v: run.total_messages },
-          { label: "Segnali rilevati", v: run.signals_detected },
-          { label: "Segnali estratti", v: run.signals_extracted },
-          { label: "Trade simulati",   v: run.total_trades },
+          { label: "Messages",          v: run.total_messages },
+          { label: "Signals detected",  v: run.signals_detected },
+          { label: "Signals extracted", v: run.signals_extracted },
+          { label: "Trades simulated",  v: run.total_trades },
         ].map(({ label, v }) => (
           <div key={label} className="bg-white/[0.02] rounded-lg p-2.5 border border-white/[0.05]">
             <p className="text-muted-foreground mb-0.5">{label}</p>
@@ -521,24 +518,24 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
             <p className="text-sm font-semibold text-foreground mb-0.5">{run.group_name}</p>
           )}
           <p className="text-xs text-muted-foreground">
-            {fmtTs(run.started_at)} · {run.total_messages ?? 0} messaggi · {run.period_from ? `${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}
+            {fmtTs(run.started_at)} · {run.total_messages ?? 0} messages · {run.period_from ? `${fmtTs(run.period_from)} → ${fmtTs(run.period_to)}` : ""}
           </p>
         </div>
         <div />
       </div>
 
-      {/* KPIs principali */}
+      {/* Main KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <KpiCard
-          label="P&L Totale"
+          label="Total P&L"
           value={fmtPips(run.total_pnl_pips)}
-          sub={run.total_pnl_usd !== null ? fmtUsd(run.total_pnl_usd) : `${run.trades_filled ?? 0} trade`}
+          sub={run.total_pnl_usd !== null ? fmtUsd(run.total_pnl_usd) : `${run.trades_filled ?? 0} trades`}
           positive={pnlPositive ? true : pnlPositive === false ? false : null}
         />
         <KpiCard
-          label="Saldo Finale"
+          label="Final Balance"
           value={run.final_balance_usd !== null ? `$${run.final_balance_usd?.toFixed(2)}` : "—"}
-          sub={`da $${run.starting_balance_usd?.toFixed(0) ?? 1000}`}
+          sub={`from $${run.starting_balance_usd?.toFixed(0) ?? 1000}`}
           positive={run.final_balance_usd !== null ? run.final_balance_usd > (run.starting_balance_usd ?? 1000) : null}
         />
         <KpiCard
@@ -567,7 +564,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
         <KpiCard
           label="Avg Trade"
           value={fmtPips(run.avg_pnl_pips)}
-          sub={run.avg_pnl_usd !== null ? fmtUsd(run.avg_pnl_usd) : `durata ${fmtDur(run.avg_trade_duration_min)}`}
+          sub={run.avg_pnl_usd !== null ? fmtUsd(run.avg_pnl_usd) : `duration ${fmtDur(run.avg_trade_duration_min)}`}
         />
         <KpiCard
           label="Best / Worst"
@@ -579,7 +576,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
           <KpiCard
             label="Avg R/R"
             value={fmtNum(run.avg_rr_ratio)}
-            sub="rischio / rendimento medio"
+            sub="avg risk/reward"
             positive={run.avg_rr_ratio > 1 ? true : run.avg_rr_ratio < 1 ? false : null}
           />
         )}
@@ -588,10 +585,10 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
       {/* Trade counts */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Segnali rilevati",    v: run.signals_detected,   icon: Target },
-          { label: "Segnali estratti",    v: run.signals_extracted,  icon: BarChart2 },
-          { label: "Non entrati",         v: run.trades_not_filled,  icon: Minus },
-          { label: "Aperti a fine",       v: run.trades_open_at_end, icon: Clock },
+          { label: "Signals detected",  v: run.signals_detected,   icon: Target },
+          { label: "Signals extracted", v: run.signals_extracted,  icon: BarChart2 },
+          { label: "Not filled",        v: run.trades_not_filled,  icon: Minus },
+          { label: "Open at end",       v: run.trades_open_at_end, icon: Clock },
         ].map(({ label, v, icon: Icon }) => (
           <div key={label} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center shrink-0">
@@ -611,15 +608,15 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
           {/* Header */}
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Andamento balance</h4>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Balance curve</h4>
               {hasUsdEquity && (
                 <div className="flex items-center gap-3 mt-1.5 text-xs">
                   <span className="text-muted-foreground">
-                    Inizio: <span className="font-mono text-foreground">${(run.starting_balance_usd ?? 1000).toFixed(2)}</span>
+                    Start: <span className="font-mono text-foreground">${(run.starting_balance_usd ?? 1000).toFixed(2)}</span>
                   </span>
                   <span className="text-muted-foreground">→</span>
                   <span className="text-muted-foreground">
-                    Fine: <span className={`font-mono font-semibold ${pnlPositive ? "text-emerald-400" : "text-red-400"}`}>
+                    End: <span className={`font-mono font-semibold ${pnlPositive ? "text-emerald-400" : "text-red-400"}`}>
                       ${run.final_balance_usd?.toFixed(2) ?? "—"}
                     </span>
                   </span>
@@ -660,7 +657,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                 tick={{ fontSize: 9, fill: "#6b7280" }}
                 tickFormatter={(v: string) => {
                   try {
-                    return new Date(v).toLocaleDateString("it-IT", {
+                    return new Date(v).toLocaleDateString("en-GB", {
                       day: "2-digit", month: "2-digit", timeZone: TZ,
                     })
                   } catch { return "" }
@@ -679,7 +676,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                 contentStyle={{ background: "#0f0f1e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }}
                 labelFormatter={(v: unknown) => {
                   try {
-                    return new Date(String(v)).toLocaleString("it-IT", {
+                    return new Date(String(v)).toLocaleString("en-GB", {
                       day: "2-digit", month: "2-digit", year: "2-digit",
                       hour: "2-digit", minute: "2-digit", timeZone: TZ,
                     })
@@ -687,11 +684,10 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                 }}
                 formatter={(v: unknown, name: unknown) => {
                   const n = typeof v === "number" ? v : parseFloat(String(v))
-                  if (name === "cumul_usd") return [`$${n.toFixed(2)}`, "Saldo"] as [string, string]
-                  return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "P&L cumulativo"] as [string, string]
+                  if (name === "cumul_usd") return [`$${n.toFixed(2)}`, "Balance"] as [string, string]
+                  return [`${n > 0 ? "+" : ""}${n.toFixed(1)} pip`, "Cumulative P&L"] as [string, string]
                 }}
               />
-              {/* Reference line at starting balance (break-even) */}
               {equityMode === "usd" && run.starting_balance_usd != null && (
                 <ReferenceLine
                   y={run.starting_balance_usd}
@@ -721,7 +717,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
         {/* Per symbol */}
         {run.symbol_stats_json && run.symbol_stats_json.length > 0 && (
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Per simbolo</h4>
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">By symbol</h4>
             <div className="space-y-2">
               {run.symbol_stats_json.map(s => (
                 <div key={s.symbol} className="space-y-0.5">
@@ -752,7 +748,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
         {run.sender_stats_json && run.sender_stats_json.length > 0 && (
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-              <Users className="w-3.5 h-3.5" /> Per mittente
+              <Users className="w-3.5 h-3.5" /> By sender
             </h4>
             <div className="space-y-2">
               {run.sender_stats_json.slice(0, 10).map(s => (
@@ -760,7 +756,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                   <div className="flex items-center gap-3">
                     <span className="w-28 truncate font-medium text-foreground shrink-0">{s.sender_name}</span>
                     <span className="text-muted-foreground shrink-0">{s.messages}msg</span>
-                    <span className="text-muted-foreground shrink-0">{s.signals}sg</span>
+                    <span className="text-muted-foreground shrink-0">{s.signals}sig</span>
                     <span className="text-muted-foreground shrink-0">{s.trades}t</span>
                     <span className={`w-12 text-right font-mono shrink-0 ${s.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>
                       {fmtPct(s.win_rate)}
@@ -776,12 +772,12 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
         )}
       </div>
 
-      {/* Distribuzione per ora e giorno */}
+      {/* Time distribution */}
       {run.time_stats_json && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {run.time_stats_json.by_hour && Object.keys(run.time_stats_json.by_hour).length > 0 && (
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trade per ora del giorno</h4>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trades by hour of day</h4>
               <ResponsiveContainer width="100%" height={120}>
                 <BarChart data={
                   Array.from({ length: 24 }, (_, h) => {
@@ -793,17 +789,17 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                   <XAxis dataKey="h" tick={{ fontSize: 9, fill: "#6b7280" }} />
                   <YAxis hide />
                   <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }} />
-                  <Bar dataKey="trades" name="Trade" fill="#6366f1" radius={[3, 3, 0, 0]} opacity={0.7} />
+                  <Bar dataKey="trades" name="Trades" fill="#6366f1" radius={[3, 3, 0, 0]} opacity={0.7} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
           {run.time_stats_json.by_weekday && Object.keys(run.time_stats_json.by_weekday).length > 0 && (
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trade per giorno della settimana</h4>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Trades by day of week</h4>
               <ResponsiveContainer width="100%" height={120}>
                 <BarChart data={
-                  ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].map((day, idx) => {
+                  ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, idx) => {
                     const key = String(idx + 1)
                     const d = run.time_stats_json!.by_weekday[key]
                     return { day, trades: d?.trades ?? 0, pnl: d?.pnl_pips ?? 0 }
@@ -813,7 +809,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
                   <XAxis dataKey="day" tick={{ fontSize: 9, fill: "#6b7280" }} />
                   <YAxis hide />
                   <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, fontSize: 11 }} />
-                  <Bar dataKey="trades" name="Trade" fill="#10b981" radius={[3, 3, 0, 0]} opacity={0.7} />
+                  <Bar dataKey="trades" name="Trades" fill="#10b981" radius={[3, 3, 0, 0]} opacity={0.7} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -821,16 +817,16 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
         </div>
       )}
 
-      {/* Copertura barre MT5 */}
+      {/* MT5 bars coverage */}
       {run.bars_coverage_json && Object.keys(run.bars_coverage_json).length > 0 && (
         <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4">
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Barre MT5</h4>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">MT5 Bars</h4>
           <div className="space-y-1.5 text-xs">
             {Object.entries(run.bars_coverage_json).map(([sym, cov]) => (
               <div key={sym} className="flex items-center gap-3">
                 <span className="w-20 font-mono font-semibold text-foreground">{sym}</span>
                 <span className="px-1.5 py-0.5 bg-white/[0.04] rounded text-muted-foreground font-mono text-[10px]">{cov.timeframe ?? "N/A"}</span>
-                <span className="text-muted-foreground">{cov.count?.toLocaleString("it-IT")} barre</span>
+                <span className="text-muted-foreground">{cov.count?.toLocaleString("en-US")} bars</span>
                 <span className="text-muted-foreground ml-auto">{fmtTs(cov.period_from)} → {fmtTs(cov.period_to)}</span>
               </div>
             ))}
@@ -844,7 +840,7 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
           onClick={loadTrades}
           className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.02] transition-colors"
         >
-          <span>Trade simulati ({run.total_trades ?? 0})</span>
+          <span>Simulated trades ({run.total_trades ?? 0})</span>
           {loadingTrades
             ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             : showTrades ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />
@@ -856,17 +852,17 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
               <thead>
                 <tr className="border-t border-white/[0.05] bg-white/[0.02]">
                   {([
-                    ["Data",      "actual_entry_ts"],
-                    ["Mittente",  "sender_name"],
-                    ["Simbolo",   "symbol"],
-                    ["Tipo",      "order_type"],
+                    ["Date",      "actual_entry_ts"],
+                    ["Sender",    "sender_name"],
+                    ["Symbol",    "symbol"],
+                    ["Type",      "order_type"],
                     ["Entry",     "actual_entry"],
                     ["SL",        "stop_loss"],
                     ["TP",        "take_profit"],
-                    ["Esito",     "outcome"],
+                    ["Outcome",   "outcome"],
                     ["P&L (pip)", "pnl_pips"],
                     ["P&L (USD)", "pnl_usd"],
-                    ["Durata",    "duration_min"],
+                    ["Duration",  "duration_min"],
                   ] as [string, keyof BacktestTrade][]).map(([label, key]) => (
                     <th
                       key={key}
@@ -926,9 +922,6 @@ function RunResults({ run, userId, onSelectTrade }: { run: BacktestRun; userId: 
 
 type OhlcBar = { time: number; open: number; high: number; low: number; close: number }
 
-// Custom candlestick shape for recharts Bar.
-// Uses the `background` prop (chart area rect passed by recharts) + the known
-// domain to compute pixel positions independently of recharts' baseline logic.
 function makeCandlestick(domainMin: number, domainMax: number) {
   const range = domainMax - domainMin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -944,7 +937,6 @@ function makeCandlestick(domainMin: number, domainMax: number) {
     const bullish = close >= open
     const color   = bullish ? "#10b981" : "#ef4444"
 
-    // Map a price → pixel y (SVG: 0 = top, increases downward)
     const chartTop = background.y ?? 0
     const chartH   = background.height ?? 0
     const toY = (v: number) => chartTop + chartH * (1 - (v - domainMin) / range)
@@ -1003,7 +995,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
 
   const chartData = (bars ?? []).map((b: OhlcBar) => ({
     ...b,
-    label: new Date(b.time * 1000).toLocaleString("it-IT", {
+    label: new Date(b.time * 1000).toLocaleString("en-GB", {
       day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
       timeZone: TZ,
     }),
@@ -1083,7 +1075,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
         <div className="px-5 pt-2 pb-4">
           {!bars || bars.length === 0 ? (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-              Dati grafico non disponibili (backtest eseguito prima di questo aggiornamento)
+              Chart data not available (backtest was run before this update)
             </div>
           ) : (
             <>
@@ -1099,7 +1091,7 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                         : "text-muted-foreground hover:text-foreground border border-transparent"
                     }`}
                   >
-                    {t === "candle" ? "Candele" : "Linea"}
+                    {t === "candle" ? "Candles" : "Line"}
                   </button>
                 ))}
               </div>
@@ -1121,7 +1113,6 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                 <Tooltip content={chartType === "candle" ? <OhlcTooltip /> : undefined} />
 
                 {chartType === "candle" ? (
-                  /* Candlestick bars — shape as function to get background prop */
                   <Bar
                     dataKey="high"
                     isAnimationActive={false}
@@ -1138,20 +1129,16 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                   />
                 )}
 
-                {/* Entry level */}
                 {trade.actual_entry != null && (
                   <ReferenceLine y={trade.actual_entry} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
-                {/* SL level */}
                 {trade.stop_loss != null && (
                   <ReferenceLine y={trade.stop_loss} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
-                {/* TP level */}
                 {trade.take_profit != null && (
                   <ReferenceLine y={trade.take_profit} stroke="#10b981" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
 
-                {/* Entry dot */}
                 {entryIdx >= 0 && trade.actual_entry != null && (
                   <ReferenceDot
                     x={chartData[entryIdx]?.label}
@@ -1159,7 +1146,6 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
                     r={5} fill="#f59e0b" stroke="#0a0a14" strokeWidth={2}
                   />
                 )}
-                {/* Exit dot */}
                 {exitIdx >= 0 && trade.exit_price != null && (
                   <ReferenceDot
                     x={chartData[exitIdx]?.label}
@@ -1178,10 +1164,10 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
           {[
             { label: "Entry time", v: fmtTs(trade.actual_entry_ts) },
             { label: "Exit time",  v: fmtTs(trade.exit_ts) },
-            { label: "Durata",     v: fmtDur(trade.duration_min) },
+            { label: "Duration",   v: fmtDur(trade.duration_min) },
             { label: "Lot size",   v: trade.lot_size?.toFixed(2) ?? "—" },
-            { label: "Mittente",   v: trade.sender_name ?? "—" },
-            { label: "Modalità",   v: trade.order_mode ?? "—" },
+            { label: "Sender",     v: trade.sender_name ?? "—" },
+            { label: "Mode",       v: trade.order_mode ?? "—" },
           ].map(({ label, v }) => (
             <div key={label} className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/[0.05]">
               <p className="text-muted-foreground mb-0.5">{label}</p>
@@ -1226,8 +1212,8 @@ function RunHistoryRow({ run, onSelect, onDelete, isActive }: {
           <p className="text-[11px] font-medium text-foreground/70 truncate">{run.group_name}</p>
         )}
         <p className="text-[11px] text-muted-foreground">
-          {fmtTs(run.started_at)} · {run.mode === "message_count" ? `${run.limit_value} msg` : `fino al ${run.limit_value}`}
-          {run.total_messages !== null && ` · ${run.total_messages} scaricati`}
+          {fmtTs(run.started_at)} · {run.mode === "message_count" ? `${run.limit_value} msg` : `up to ${run.limit_value}`}
+          {run.total_messages !== null && ` · ${run.total_messages} downloaded`}
         </p>
       </div>
       {run.status === "done" && (
@@ -1242,7 +1228,7 @@ function RunHistoryRow({ run, onSelect, onDelete, isActive }: {
         <button
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="shrink-0 text-muted-foreground/40 hover:text-red-400 transition-colors"
-          title="Elimina"
+          title="Delete"
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
@@ -1273,13 +1259,11 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
     try {
       const r = await api.getBacktest(runId)
       setActiveRun(r)
-      // Aggiorna anche la lista
       setRuns(prev => prev.map(x => x.id === runId ? { ...x, ...r } : x))
       return r
     } catch { return null }
   }, [])
 
-  // Polling automatico mentre il run è in esecuzione
   useEffect(() => {
     if (!activeRunId) return
     if (pollRef.current) clearInterval(pollRef.current)
@@ -1292,7 +1276,6 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [activeRunId, refreshActiveRun])
 
-  // Carica dettagli quando si seleziona un run
   useEffect(() => {
     if (!activeRunId) return
     refreshActiveRun(activeRunId)
@@ -1318,9 +1301,9 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
 
       {/* Title */}
       <div>
-        <h2 className="text-base font-semibold text-foreground">Backtest storico</h2>
+        <h2 className="text-base font-semibold text-foreground">Historical backtest</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Scarica messaggi Telegram storici dal gruppo e simula cosa sarebbe successo eseguendo i segnali.
+          Download historical Telegram messages from the group and simulate what would have happened by executing the signals.
         </p>
       </div>
 
@@ -1338,14 +1321,14 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.05] flex items-center justify-between">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Storico run ({runs.length})
+                Run history ({runs.length})
               </h3>
               <button onClick={loadRuns} className="text-muted-foreground hover:text-foreground transition-colors">
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingRuns ? "animate-spin" : ""}`} />
               </button>
             </div>
             {runs.length === 0 ? (
-              <p className="px-4 py-6 text-xs text-muted-foreground text-center">Nessun run ancora</p>
+              <p className="px-4 py-6 text-xs text-muted-foreground text-center">No runs yet</p>
             ) : (
               runs.map(r => (
                 <RunHistoryRow
@@ -1364,7 +1347,7 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
         <div>
           {!activeRunId ? (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-              Avvia un backtest o seleziona un run dalla lista
+              Start a backtest or select a run from the list
             </div>
           ) : !activeRun ? (
             <div className="flex items-center justify-center h-48">
@@ -1378,7 +1361,7 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
         </div>
       </div>
 
-      {/* Trade chart modal — rendered at top level to avoid stacking-context issues */}
+      {/* Trade chart modal */}
       {selectedTrade && (
         <TradeChartModal trade={selectedTrade} onClose={() => setSelected(null)} />
       )}

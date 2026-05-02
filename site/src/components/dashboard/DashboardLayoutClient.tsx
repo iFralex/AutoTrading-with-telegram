@@ -45,6 +45,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
+  const [reactivating, setReactivating] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { user, loading, error, reload } = useDashboard()
@@ -52,6 +53,16 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   async function handleLogout() {
     try { await api.logout() } catch {}
     router.push("/login")
+  }
+
+  async function handleReactivate() {
+    setReactivating(true)
+    try {
+      const { checkout_url } = await api.reactivateCheckout()
+      window.location.href = checkout_url
+    } catch {
+      setReactivating(false)
+    }
   }
 
   const isActive = (href: string) =>
@@ -204,6 +215,33 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </header>
+
+        {/* Reactivation banner */}
+        {user && !user.active && user.subscription_ended_at && (() => {
+          const ended = new Date(user.subscription_ended_at)
+          const daysElapsed = Math.floor((Date.now() - ended.getTime()) / 86_400_000)
+          const daysLeft = Math.max(0, 30 - daysElapsed)
+          return (
+            <div className="shrink-0 border-b border-red-500/30 bg-red-950/40 px-6 py-3 flex items-center gap-4">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <p className="text-sm text-red-300 flex-1">
+                Your subscription has ended.{" "}
+                {daysLeft > 0
+                  ? <>Your account will be permanently deleted in <span className="font-bold">{daysLeft} day{daysLeft === 1 ? "" : "s"}</span>.</>
+                  : "Your account is scheduled for deletion."
+                }{" "}
+                Resubscribe to reactivate your bot.
+              </p>
+              <button
+                onClick={handleReactivate}
+                disabled={reactivating}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white transition-colors"
+              >
+                {reactivating ? "Redirecting…" : "Resubscribe"}
+              </button>
+            </div>
+          )
+        })()}
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
