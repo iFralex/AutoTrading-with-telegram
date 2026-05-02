@@ -41,7 +41,7 @@ export default function LoginPage() {
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-2.5 mb-10">
           <img src="/logo.svg" alt="METIS" className="w-9 h-9" />
-          <span className="font-bold text-xl text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
+          <span className="font-bold text-xl text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
         </Link>
 
         {/* Card */}

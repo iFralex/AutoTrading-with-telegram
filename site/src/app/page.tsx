@@ -93,7 +93,7 @@ function Nav() {
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
         <Link href="/" className="flex items-center gap-2.5">
           <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
-          <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
+          <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-8 text-sm text-white/55">
@@ -815,7 +815,7 @@ function Footer() {
           <div className="md:col-span-2">
             <Link href="/" className="flex items-center gap-2.5 mb-3">
               <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
-              <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif" }}>METIS</span>
+              <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
             </Link>
             <p className="text-sm text-white/40 max-w-xs leading-relaxed">Trading automation for Telegram signal room followers. Your trades, executed automatically.</p>
           </div>

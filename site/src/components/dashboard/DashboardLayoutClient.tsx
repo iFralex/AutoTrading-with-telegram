@@ -69,7 +69,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         <div className={`flex items-center h-14 border-b border-white/[0.06] shrink-0 ${collapsed ? "justify-center px-0" : "gap-2.5 px-4"}`}>
           <img src="/logo.svg" alt="METIS" className="w-7 h-7 shrink-0" />
           {!collapsed && (
-            <span className="text-sm font-bold text-white select-none" style={{ fontFamily: "Inter, sans-serif" }}>
+            <span className="text-sm font-bold text-white select-none" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>
               METIS
             </span>
           )}
