@@ -15,12 +15,12 @@ export function MetisLogo({
 }) {
   const s = sizes[size]
   return (
-    <span className={`flex items-center gap-2.5 ${className}`}>
+    <span className={`flex items-center gap-2 ${className}`}>
       <img src="/logo.svg" alt="METIS" className={`${s.img} shrink-0`} />
       {!hideText && (
         <span
           className={`font-bold text-white ${s.text}`}
-          style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}
+          style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.3em" }}
         >
           METIS
         </span>
