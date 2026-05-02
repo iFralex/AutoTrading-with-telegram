@@ -794,7 +794,7 @@ class ClosedTradeStore:
         async with aiosqlite.connect(self._db_path) as db:
             return await self._build_groups_stats(
                 db,
-                "user_id = ? AND strftime('%Y', close_time) = ? AND strftime('%m', close_time) = ?",
+                "ct.user_id = ? AND strftime('%Y', ct.close_time) = ? AND strftime('%m', ct.close_time) = ?",
                 (user_id, str(year), f"{month:02d}"),
                 user_id,
             )
@@ -808,7 +808,7 @@ class ClosedTradeStore:
         async with aiosqlite.connect(self._db_path) as db:
             return await self._build_groups_stats(
                 db,
-                "user_id = ? AND strftime('%Y', close_time) = ? AND strftime('%m', close_time) = ?",
+                "ct.user_id = ? AND strftime('%Y', ct.close_time) = ? AND strftime('%m', ct.close_time) = ?",
                 (user_id, str(prev_year), f"{prev_month:02d}"),
                 user_id,
                 min_groups=1,
@@ -819,7 +819,7 @@ class ClosedTradeStore:
         async with aiosqlite.connect(self._db_path) as db:
             return await self._build_groups_stats(
                 db,
-                f"user_id = ? AND DATE(close_time) >= date('now', '-{max(0, days - 1)} days')",
+                f"ct.user_id = ? AND DATE(ct.close_time) >= date('now', '-{max(0, days - 1)} days')",
                 (user_id,),
                 user_id,
             )
@@ -830,8 +830,8 @@ class ClosedTradeStore:
         async with aiosqlite.connect(self._db_path) as db:
             return await self._build_groups_stats(
                 db,
-                f"user_id = ? AND DATE(close_time) >= date('now', '-{d * 2 + 1} days')"
-                f" AND DATE(close_time) < date('now', '-{d} days')",
+                f"ct.user_id = ? AND DATE(ct.close_time) >= date('now', '-{d * 2 + 1} days')"
+                f" AND DATE(ct.close_time) < date('now', '-{d} days')",
                 (user_id,),
                 user_id,
                 min_groups=1,
