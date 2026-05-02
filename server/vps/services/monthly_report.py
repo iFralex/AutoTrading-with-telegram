@@ -552,7 +552,31 @@ def _score_color(score: float) -> tuple:
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
 
+_UNICODE_SUBS = str.maketrans({
+    '—': '-',    # em dash
+    '–': '-',    # en dash
+    '‘': "'",    # left single quote
+    '’': "'",    # right single quote
+    '“': '"',    # left double quote
+    '”': '"',    # right double quote
+    '…': '...',  # ellipsis
+    '•': '*',    # bullet
+    '→': '->',   # right arrow
+    '←': '<-',   # left arrow
+    '×': 'x',    # multiplication sign
+    '÷': '/',    # division sign
+    '≈': '~',    # almost equal
+    '≥': '>=',   # greater-or-equal
+    '≤': '<=',   # less-or-equal
+})
+
+
 class _PDF(FPDF):
+
+    def normalize_text(self, text: str) -> str:
+        text = text.translate(_UNICODE_SUBS)
+        text = text.encode('latin-1', errors='replace').decode('latin-1')
+        return super().normalize_text(text)
 
     def _set_fill(self, rgb: tuple) -> None:
         self.set_fill_color(*rgb)
