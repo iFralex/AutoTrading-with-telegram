@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { api, ApiError } from "@/src/lib/api"
 import { normalizePhone } from "@/src/lib/utils"
+import { MetisLogo } from "@/src/components/MetisLogo"
 
 const inp = "w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-emerald-400/40 transition-all"
 
@@ -39,10 +40,7 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-sm">
         {/* Logo */}
-        <Link href="/" className="flex items-center justify-center gap-2.5 mb-10">
-          <img src="/logo.svg" alt="METIS" className="w-9 h-9" />
-          <span className="font-bold text-xl text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
-        </Link>
+        <Link href="/" className="flex justify-center mb-10"><MetisLogo size="lg" /></Link>
 
         {/* Card */}
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-md rounded-2xl p-8">

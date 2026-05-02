@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { SetupWizard } from "@/src/components/setup/SetupWizard"
+import { MetisLogo } from "@/src/components/MetisLogo"
 
 export default function SetupPage() {
   return (
@@ -11,10 +12,7 @@ export default function SetupPage() {
       {/* Nav */}
       <nav className="fixed top-0 inset-x-0 z-50 h-16 border-b border-white/5 bg-[#07090f]/85 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
-            <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
-          </Link>
+          <Link href="/"><MetisLogo /></Link>
           <Link href="/" className="text-sm text-white/35 hover:text-white transition-colors flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
             Back to home

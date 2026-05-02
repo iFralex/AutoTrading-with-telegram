@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { MetisLogo } from "@/src/components/MetisLogo"
 
 // ─── Scroll-reveal wrapper ─────────────────────────────────────────────────
 function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -91,10 +92,7 @@ function Nav() {
   return (
     <nav className="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-[#07090f]/85 border-b border-white/5">
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
-        <Link href="/" className="flex items-center gap-2.5">
-          <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
-          <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
-        </Link>
+        <Link href="/"><MetisLogo /></Link>
 
         <div className="hidden md:flex items-center gap-8 text-sm text-white/55">
           {[["#features", "Features"], ["#how-it-works", "How It Works"], ["#pricing", "Pricing"], ["#faq", "FAQ"]].map(([href, label]) => (
@@ -813,10 +811,7 @@ function Footer() {
       <div className="max-w-6xl mx-auto">
         <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8 mb-10">
           <div className="md:col-span-2">
-            <Link href="/" className="flex items-center gap-2.5 mb-3">
-              <img src="/logo.svg" alt="METIS" className="w-8 h-8" />
-              <span className="font-bold text-lg text-white" style={{ fontFamily: "Inter, sans-serif", letterSpacing: "0.15em" }}>METIS</span>
-            </Link>
+            <Link href="/" className="mb-3 inline-flex"><MetisLogo /></Link>
             <p className="text-sm text-white/40 max-w-xs leading-relaxed">Trading automation for Telegram signal room followers. Your trades, executed automatically.</p>
           </div>
           <div>
