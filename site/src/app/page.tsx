@@ -102,7 +102,7 @@ function Nav() {
 
         <div className="hidden md:flex items-center gap-3">
           <Link href="/dashboard" className="text-sm text-white/50 hover:text-white transition-colors px-4 py-2">Log In</Link>
-          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2">Get Started</PrimaryBtn>
+          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2">Launch Metis</PrimaryBtn>
         </div>
 
         <button className="md:hidden text-white/60 hover:text-white" onClick={() => setOpen(!open)}>
@@ -116,7 +116,7 @@ function Nav() {
           {[["#features", "Features"], ["#how-it-works", "How It Works"], ["#pricing", "Pricing"], ["#faq", "FAQ"]].map(([href, label]) => (
             <a key={href} href={href} className="hover:text-white py-1" onClick={() => setOpen(false)}>{label}</a>
           ))}
-          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2.5 mt-2 text-center w-full" onClick={() => setOpen(false)}>Get Started</PrimaryBtn>
+          <PrimaryBtn href="#pricing" className="text-sm px-5 py-2.5 mt-2 text-center w-full" onClick={() => setOpen(false)}>Launch Metis</PrimaryBtn>
         </div>
       )}
     </nav>
@@ -138,19 +138,18 @@ function Hero() {
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z" />
             </svg>
-            Zero Emotion · Instant Execution · Always On
+            Automated Execution · &lt;1s Latency · 24/7 Active
           </Badge>
         </div>
 
         <h1 className="text-5xl sm:text-6xl md:text-7xl font-black leading-tight tracking-tight mb-6 text-white">
-          Stop missing trades.<br />
-          <GradientText>Start profiting on autopilot.</GradientText>
+          Stop copying signals manually.<br />
+          <GradientText>Execute every trade automatically.</GradientText>
         </h1>
 
         <p className="text-lg sm:text-xl text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Follow your Telegram signal rooms and let our AI execute every trade for you —
-          in under a second, no hesitation, no emotion,{" "}
-          <strong className="text-white/75">24/7.</strong>
+          Connect your Telegram signal groups and let Metis execute trades instantly on MT5.{" "}
+          <strong className="text-white/75">No delays. No missed entries. Fully automated.</strong>
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
@@ -541,7 +540,7 @@ type Plan = { name: string; price: string; tagline: string; popular?: boolean; e
 const PLANS: Plan[] = [
   {
     name: "Core", price: "€79", tagline: "Automate your first signal room — with sizing rules, range entry, and Telegram alerts included.",
-    ctaLabel: "Get Started",
+    ctaLabel: "Launch Metis",
     features: [
       { label: "1 Telegram signal room" },
       { label: "Automatic signal detection" },
@@ -563,7 +562,7 @@ const PLANS: Plan[] = [
   },
   {
     name: "Pro", price: "€149", tagline: "Multiple rooms, full analytics, and smart signal filtering with AI confidence scoring.",
-    popular: true, ctaLabel: "Get Started →", prevPlan: "Core",
+    popular: true, ctaLabel: "Launch Metis", prevPlan: "Core",
     features: [
       { label: "Up to 5 Telegram signal rooms", bold: true },
       { label: "Advanced signal analysis (zero false positives)" },
