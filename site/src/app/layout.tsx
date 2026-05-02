@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "METIS — Automate Your Telegram Trading Signals",
+  title: {
+    default: "METIS — Automate Your Telegram Trading Signals",
+    template: "%s | METIS",
+  },
   description: "METIS automatically executes every signal from your Telegram rooms on your trading account — in under a second, no emotion, 24/7. Setup in 3 minutes, no technical skills required.",
+  icons: { icon: "/favicon.ico" },
 };
 
 export default function RootLayout({
@@ -24,7 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="it"
+      lang="en"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
       suppressHydrationWarning
     >
