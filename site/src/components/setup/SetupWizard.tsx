@@ -297,7 +297,7 @@ function TelegramStep({ data, update, onNext, onBack, jumpTo }: StepProps) {
       const res = await api.getSession(phone)
       if (res.exists) {
         if (res.setup_complete) {
-          router.push(`/dashboard?phone=${encodeURIComponent(phone)}`); return
+          router.push(`/login?phone=${encodeURIComponent(phone)}`); return
         }
         setFoundSession(res)
         update({

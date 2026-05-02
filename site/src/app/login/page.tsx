@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { api, ApiError } from "@/src/lib/api"
 import { normalizePhone } from "@/src/lib/utils"
 import { MetisLogo } from "@/src/components/MetisLogo"
@@ -10,8 +10,9 @@ import { MetisLogo } from "@/src/components/MetisLogo"
 const inp = "w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-emerald-400/40 transition-all"
 
 export default function LoginPage() {
-  const router  = useRouter()
-  const [phone,    setPhone]    = useState("")
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+  const [phone,    setPhone]    = useState(searchParams.get("phone") ?? "")
   const [password, setPassword] = useState("")
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
