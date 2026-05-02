@@ -190,6 +190,20 @@ async function call<T>(
   return res.json() as Promise<T>
 }
 
+// Lock condiviso: garantisce che un solo refresh sia in volo alla volta.
+// Senza questo, più callAuth che ricevono 401 contemporaneamente lancierebbero
+// refresh paralleli — il primo ruoterebbe il JTI, gli altri fallirebbero con 401.
+let refreshInFlight: Promise<void> | null = null
+
+function getOrStartRefresh(): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = call<{ status: string }>("POST", "/api/auth/refresh")
+      .then(() => undefined)
+      .finally(() => { refreshInFlight = null })
+  }
+  return refreshInFlight
+}
+
 // Chiama `callAuth` per endpoint che richiedono autenticazione:
 // prova automaticamente il refresh se il token è scaduto (401).
 async function callAuth<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -197,8 +211,7 @@ async function callAuth<T>(method: string, path: string, body?: unknown): Promis
     return await call<T>(method, path, body)
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
-      // Tenta il refresh silenzioso
-      await call<{ status: string }>("POST", "/api/auth/refresh")
+      await getOrStartRefresh()
       return call<T>(method, path, body)
     }
     throw e
@@ -799,9 +812,9 @@ export const api = {
     return call<{ status: string }>("POST", "/api/auth/set-password", { phone, password, user_id: userId })
   },
 
-  /** Refresh manuale del token (normalmente gestito da callAuth). */
+  /** Refresh manuale del token — usa lo stesso lock di callAuth per evitare rotazioni JTI parallele. */
   refreshToken() {
-    return call<{ status: string }>("POST", "/api/auth/refresh")
+    return getOrStartRefresh().then(() => ({ status: "ok" as const }))
   },
 
   /** Logout — cancella cookie e invalida refresh token. */

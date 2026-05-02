@@ -54,6 +54,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { loadUser() }, [loadUser])
 
+  // Refresh proattivo: rinnova il token prima che scada (TTL = 15 min) così
+  // al prossimo reload il token è già fresco e non serve il retry reattivo.
+  useEffect(() => {
+    const refresh = () => api.refreshToken().catch(() => {})
+    const interval = setInterval(refresh, 14 * 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === "visible") refresh() }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [])
+
   const reload = useCallback(async () => { await loadUser() }, [loadUser])
 
   const updateData = useCallback((data: DashboardUserResponse) => {
