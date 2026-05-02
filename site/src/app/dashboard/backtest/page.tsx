@@ -46,6 +46,14 @@ function fmtDur(min: number | null): string {
   if (min < 60) return `${Math.round(min)}m`
   return `${Math.floor(min / 60)}h ${Math.round(min % 60)}m`
 }
+function fmtDateShort(iso: string | null): string {
+  if (!iso) return "—"
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) +
+           " · " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+  } catch { return "—" }
+}
 
 const STATUS_STEPS: { key: string; label: string; aiOnly?: boolean }[] = [
   { key: "running:telegram_fetch",    label: "Downloading messages" },
@@ -497,6 +505,15 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
             </span>
             <span className="font-mono font-semibold text-white">{trade.symbol ?? "—"}</span>
             <OutcomeBadge outcome={trade.outcome} />
+            {trade.ai_approved !== null && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${
+                trade.ai_approved === 1
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  : "bg-red-500/10 text-red-400 border-red-500/20"
+              }`}>
+                {trade.ai_approved === 1 ? "AI ✓" : "AI ✗"}
+              </span>
+            )}
             <span className={`text-sm font-mono font-bold ${pnlPos ? "text-emerald-400" : "text-red-400"}`}>
               {trade.pnl_pips !== null ? fmtPips(trade.pnl_pips) : ""}
               {trade.pnl_usd  !== null ? ` · ${fmtUsd(trade.pnl_usd)}` : ""}
@@ -615,8 +632,40 @@ function TradeChartModal({ trade, onClose }: { trade: BacktestTrade; onClose: ()
             {trade.message_text}
           </div>
         )}
+
+        {/* AI reasoning */}
+        {trade.ai_reason && (
+          <div className="mx-5 mb-5 p-3 rounded-lg border border-violet-500/15 text-xs"
+            style={{ background: "rgba(139,92,246,0.05)" }}>
+            <p className="text-violet-400/60 mb-1.5 text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1.5">
+              <span className="w-1 h-1 rounded-full bg-violet-400 inline-block" />
+              AI Reasoning
+            </p>
+            <p className="text-white/55 leading-relaxed">{trade.ai_reason}</p>
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+// ── Sort header ───────────────────────────────────────────────────────────────
+
+type SortKey = "date" | "symbol" | "dir" | "pnl_pips" | "pnl_usd" | "entry" | "exit" | "outcome" | "duration" | "ai"
+
+function SortTh({ label, sortK, cur, dir, onSort }: {
+  label: string; sortK: SortKey
+  cur: SortKey | null; dir: "asc" | "desc"; onSort: (k: SortKey) => void
+}) {
+  const active = cur === sortK
+  return (
+    <th onClick={() => onSort(sortK)}
+      className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider cursor-pointer select-none">
+      <span className={`flex items-center gap-1 transition-colors ${active ? "text-white/70" : "text-white/25 hover:text-white/45"}`}>
+        {label}
+        <span className="text-[8px] leading-none">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </span>
+    </th>
   )
 }
 
@@ -626,6 +675,13 @@ function RunResults({ run, onSelectTrade }: { run: BacktestRun; onSelectTrade: (
   const [trades, setTrades]         = useState<BacktestTrade[] | null>(null)
   const [loadingTrades, setLT]      = useState(false)
   const [showTrades, setShowTrades] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc")
+    else { setSortKey(k); setSortDir("asc") }
+  }
 
   const pnlPos = (run.total_pnl_pips ?? 0) > 0
   const wrGood = (run.win_rate ?? 0) >= 50
@@ -640,6 +696,24 @@ function RunResults({ run, onSelectTrade }: { run: BacktestRun; onSelectTrade: (
     } catch { /* ignore */ }
     finally { setLT(false) }
   }
+
+  const sortedTrades = trades ? [...trades].sort((a, b) => {
+    if (!sortKey) return 0
+    const m = sortDir === "asc" ? 1 : -1
+    switch (sortKey) {
+      case "date":     return m * ((a.actual_entry_ts ?? "").localeCompare(b.actual_entry_ts ?? ""))
+      case "symbol":   return m * ((a.symbol ?? "").localeCompare(b.symbol ?? ""))
+      case "dir":      return m * ((a.order_type ?? "").localeCompare(b.order_type ?? ""))
+      case "pnl_pips": return m * ((a.pnl_pips ?? 0) - (b.pnl_pips ?? 0))
+      case "pnl_usd":  return m * ((a.pnl_usd ?? 0) - (b.pnl_usd ?? 0))
+      case "entry":    return m * ((a.actual_entry ?? 0) - (b.actual_entry ?? 0))
+      case "exit":     return m * ((a.exit_price ?? 0) - (b.exit_price ?? 0))
+      case "outcome":  return m * ((a.outcome ?? "").localeCompare(b.outcome ?? ""))
+      case "duration": return m * ((a.duration_min ?? 0) - (b.duration_min ?? 0))
+      case "ai":       return m * ((a.ai_approved ?? -1) - (b.ai_approved ?? -1))
+      default: return 0
+    }
+  }) : null
 
   const equityData = (run.equity_curve_json ?? []).map((p: { ts?: string; day?: string; cumul_usd?: number; cumul_pips?: number }) => ({
     time: p.ts ? new Date(p.ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) :
@@ -762,6 +836,32 @@ function RunResults({ run, onSelectTrade }: { run: BacktestRun; onSelectTrade: (
         </div>
       )}
 
+      {/* AI Management Decisions */}
+      {(run.ai_approved > 0 || run.ai_rejected > 0 || run.ai_modified > 0) && (
+        <div className="rounded-2xl border border-violet-500/15 overflow-hidden"
+          style={{ background: "rgba(139,92,246,0.03)" }}>
+          <div className="px-5 py-3 border-b border-violet-500/10 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+            <p className="text-xs font-semibold text-violet-300/70">AI Management Decisions</p>
+          </div>
+          <div className="grid grid-cols-3 divide-x divide-violet-500/10 py-1">
+            {[
+              { label: "Approved",  val: run.ai_approved, cls: "text-emerald-400" },
+              { label: "Rejected",  val: run.ai_rejected, cls: "text-red-400" },
+              { label: "Modified",  val: run.ai_modified,  cls: "text-amber-400" },
+            ].map(({ label, val, cls }) => (
+              <div key={label} className="text-center py-3">
+                <p className={`text-2xl font-black ${cls}`}>{val}</p>
+                <p className="text-[11px] text-white/30 mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+          <p className="px-5 py-3 border-t border-violet-500/10 text-[11px] text-white/30">
+            Click on any trade row to see the AI&apos;s full reasoning for that operation.
+          </p>
+        </div>
+      )}
+
       {/* Trades toggle */}
       <button
         onClick={loadTrades}
@@ -777,51 +877,72 @@ function RunResults({ run, onSelectTrade }: { run: BacktestRun; onSelectTrade: (
       </button>
 
       {/* Trades table */}
-      {showTrades && trades && trades.length > 0 && (
-        <div className="rounded-2xl border border-white/[0.07] overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
-              <thead>
-                <tr className="border-b border-white/[0.07]" style={{ background: "rgba(255,255,255,0.02)" }}>
-                  {["Symbol","Dir","P&L (pips)","P&L (USD)","Entry","Exit","Outcome","Duration"].map(h => (
-                    <th key={h} className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-white/25">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((t, i) => (
-                  <tr key={t.id ?? i} onClick={() => onSelectTrade(t)} className={`border-b border-white/[0.04] hover:bg-white/[0.04] transition-colors cursor-pointer ${i === trades.length - 1 ? "border-b-0" : ""}`}>
-                    <td className="px-3 py-2 font-bold text-xs text-white">{t.symbol}</td>
-                    <td className="px-3 py-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                        t.order_type === "BUY"
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                          : "bg-red-500/10 text-red-400 border-red-500/20"
-                      }`}>{t.order_type}</span>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <span className={t.pnl_pips !== null && t.pnl_pips > 0 ? "text-emerald-400" : t.pnl_pips !== null && t.pnl_pips < 0 ? "text-red-400" : "text-white/40"}>
-                        {fmtPips(t.pnl_pips)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <span className={t.pnl_usd !== null && t.pnl_usd > 0 ? "text-emerald-400" : t.pnl_usd !== null && t.pnl_usd < 0 ? "text-red-400" : "text-white/40"}>
-                        {fmtUsd(t.pnl_usd)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs text-white/50">{t.actual_entry?.toFixed(5) ?? "—"}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-white/50">{t.exit_price?.toFixed(5) ?? "—"}</td>
-                    <td className="px-3 py-2"><OutcomeBadge outcome={t.outcome} /></td>
-                    <td className="px-3 py-2 text-xs text-white/30">{fmtDur(t.duration_min)}</td>
+      {showTrades && sortedTrades && sortedTrades.length > 0 && (() => {
+        const hasAi = sortedTrades.some(t => t.ai_approved !== null)
+        return (
+          <div className="rounded-2xl border border-white/[0.07] overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[780px]">
+                <thead>
+                  <tr className="border-b border-white/[0.07]" style={{ background: "rgba(255,255,255,0.02)" }}>
+                    <SortTh label="Date"      sortK="date"     cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Symbol"    sortK="symbol"   cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Dir"       sortK="dir"      cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="P&L (pips)" sortK="pnl_pips" cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="P&L (USD)" sortK="pnl_usd"  cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Entry"     sortK="entry"    cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Exit"      sortK="exit"     cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Outcome"   sortK="outcome"  cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortTh label="Duration"  sortK="duration" cur={sortKey} dir={sortDir} onSort={toggleSort} />
+                    {hasAi && <SortTh label="AI" sortK="ai" cur={sortKey} dir={sortDir} onSort={toggleSort} />}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedTrades.map((t, i) => (
+                    <tr key={t.id ?? i} onClick={() => onSelectTrade(t)}
+                      className={`border-b border-white/[0.04] hover:bg-white/[0.04] transition-colors cursor-pointer ${i === sortedTrades.length - 1 ? "border-b-0" : ""}`}>
+                      <td className="px-3 py-2 text-xs text-white/40 whitespace-nowrap">{fmtDateShort(t.actual_entry_ts)}</td>
+                      <td className="px-3 py-2 font-bold text-xs text-white">{t.symbol}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          t.order_type === "BUY"
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            : "bg-red-500/10 text-red-400 border-red-500/20"
+                        }`}>{t.order_type}</span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        <span className={t.pnl_pips !== null && t.pnl_pips > 0 ? "text-emerald-400" : t.pnl_pips !== null && t.pnl_pips < 0 ? "text-red-400" : "text-white/40"}>
+                          {fmtPips(t.pnl_pips)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        <span className={t.pnl_usd !== null && t.pnl_usd > 0 ? "text-emerald-400" : t.pnl_usd !== null && t.pnl_usd < 0 ? "text-red-400" : "text-white/40"}>
+                          {fmtUsd(t.pnl_usd)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-white/50">{t.actual_entry?.toFixed(5) ?? "—"}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-white/50">{t.exit_price?.toFixed(5) ?? "—"}</td>
+                      <td className="px-3 py-2"><OutcomeBadge outcome={t.outcome} /></td>
+                      <td className="px-3 py-2 text-xs text-white/30">{fmtDur(t.duration_min)}</td>
+                      {hasAi && (
+                        <td className="px-3 py-2">
+                          {t.ai_approved === null ? (
+                            <span className="text-white/20 text-xs">—</span>
+                          ) : t.ai_approved === 1 ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-semibold">✓ OK</span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full border bg-red-500/10 text-red-400 border-red-500/20 font-semibold">✗ No</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
