@@ -36,7 +36,7 @@ def _tier(plan: str | None) -> int:
 
 def has_feature(plan: str | None, feature: str) -> bool:
     min_plan = FEATURE_MIN_PLAN.get(feature, "elite")
-    return _tier(plan) >= PLAN_TIER.get(min_plan, 2)
+    return _tier(plan) >= PLAN_TIER[min_plan]
 
 
 def require_feature(user: dict, feature: str) -> None:
