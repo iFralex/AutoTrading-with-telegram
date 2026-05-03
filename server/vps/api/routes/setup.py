@@ -28,6 +28,7 @@ from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
 from vps.services.mt5_trader import (
     MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS,
+    MT5_FIRST_BOOT_DELAY,
     _ensure_experts_enabled, _kill_mt5_for_dir, _configure_server_via_gui,
 )
 from vps.api.plan_features import has_feature
@@ -1297,7 +1298,6 @@ def _mt5_login_sync(
         # ── Flusso utente reale ───────────────────────────────────────────────
         user_dir = bot_dir / "mt5_users" / user_id
 
-        # STEP 2 (diagnostica): copia template → directory utente se non esiste
         if not (user_dir / "terminal64.exe").exists():
             logger.info("verify_mt5 — copia template → %s", user_dir)
             shutil.copytree(str(template_dir), str(user_dir), dirs_exist_ok=True)
@@ -1305,33 +1305,56 @@ def _mt5_login_sync(
         terminal_exe = user_dir / "terminal64.exe"
 
         with MT5_LOCK:
-            # Fix ExpertsEnabled=1 prima che MT5 parta
             _ensure_experts_enabled(user_dir)
-            # Kill eventuali residui dalla dir utente
             _kill_mt5_for_dir(user_dir)
 
-            # STEP 3 (diagnostica): avvia MT5 + invia server via SendKeys
-            logger.info(
-                "verify_mt5 — avvio MT5 utente %s + configurazione server '%s' via GUI...",
-                user_id, server,
-            )
-            _configure_server_via_gui(user_dir, server)
-            time.sleep(3.0)  # Breve attesa dopo SendKeys
+            init_ok = False
+            last_err = ""
+            for attempt in range(1, MT5_INIT_RETRIES + 1):
+                if attempt > 1:
+                    mt5.shutdown()
+                    _kill_mt5_for_dir(user_dir)
+                    _ensure_experts_enabled(user_dir)
+                    time.sleep(MT5_INIT_RETRY_DELAY)
 
-            # STEP 4 (diagnostica): mt5.initialize() si aggancia all'MT5 in esecuzione
-            init_ok = mt5.initialize(
-                path=str(terminal_exe),
-                portable=True,
-                login=login,
-                password=password,
-                server=server,
-                timeout=MT5_INIT_TIMEOUT_MS,
-            )
-            if not init_ok:
+                if attempt == 1:
+                    # Primo avvio: il server non è ancora nel profilo → GUI
+                    logger.info(
+                        "verify_mt5 — avvio MT5 utente %s + invio server '%s' via GUI...",
+                        user_id, server,
+                    )
+                    _configure_server_via_gui(user_dir, server)
+                    # Attesa lunga: MT5 deve connettersi al broker e mostrare il dialog
+                    time.sleep(MT5_FIRST_BOOT_DELAY)
+                else:
+                    # Retry: il server è già salvato nel profilo → initialize() diretto
+                    logger.info(
+                        "verify_mt5 utente %s — tentativo %d/%d (server nel profilo)",
+                        user_id, attempt, MT5_INIT_RETRIES,
+                    )
+
+                if mt5.initialize(
+                    path=str(terminal_exe),
+                    portable=True,
+                    login=login,
+                    password=password,
+                    server=server,
+                    timeout=MT5_INIT_TIMEOUT_MS,
+                ):
+                    init_ok = True
+                    break
+
                 code, msg = mt5.last_error()
                 mt5.shutdown()
                 _kill_mt5_for_dir(user_dir)
-                raise RuntimeError(f"MT5 non avviabile: {msg} (codice {code})")
+                last_err = f"MT5 non avviabile: {msg} (codice {code})"
+                logger.warning(
+                    "verify_mt5 utente %s tentativo %d/%d: %s",
+                    user_id, attempt, MT5_INIT_RETRIES, last_err,
+                )
+
+            if not init_ok:
+                raise RuntimeError(last_err)
 
             try:
                 info = mt5.account_info()
@@ -1350,8 +1373,6 @@ def _mt5_login_sync(
                 }
             finally:
                 mt5.shutdown()
-                # Termina MT5 dopo la verifica; la dir utente rimane configurata
-                # e sarà pronta per l'esecuzione degli ordini.
                 _kill_mt5_for_dir(user_dir)
 
     else:

@@ -152,10 +152,11 @@ export class ApiError extends Error {
 async function call<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  timeoutMs = 15_000,
 ): Promise<T> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15_000)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   let res: Response
   try {
@@ -534,7 +535,8 @@ export const api = {
     return call<{ valid: true; account: MT5Account }>(
       "POST",
       "/api/setup/mt5/verify",
-      { login, password, server, ...(phone ? { phone } : {}) }
+      { login, password, server, ...(phone ? { phone } : {}) },
+      180_000,  // MT5 GUI init può richiedere fino a ~100s sul primo avvio
     )
   },
 
