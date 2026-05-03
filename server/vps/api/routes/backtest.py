@@ -17,6 +17,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from vps.api.deps import get_current_user
+from vps.api.plan_features import (
+    require_feature, backtest_credit_limit,
+    BACKTEST_AI_WEIGHT, BACKTEST_STD_WEIGHT,
+)
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -54,6 +58,21 @@ async def start_backtest(body: RunRequest, current_user: dict = Depends(get_curr
 
     if bt_engine is None or bt_store is None:
         raise HTTPException(503, "BacktestEngine non disponibile")
+
+    # Plan + credit gate
+    require_feature(current_user, "backtesting")
+    plan         = (current_user.get("plan") or "").lower()
+    limit        = backtest_credit_limit(plan)
+    credits_used = await bt_store.count_credits_this_month(body.user_id)
+    cost         = BACKTEST_AI_WEIGHT if body.use_ai else BACKTEST_STD_WEIGHT
+    if credits_used + cost > limit:
+        raise HTTPException(
+            403,
+            detail=(
+                f"Monthly backtest credits exhausted "
+                f"({credits_used}/{limit} used). Resets at the start of next month."
+            ),
+        )
 
     # Recupera credenziali MT5 dell'utente dal DB
     user = await user_store.get_user(body.user_id)
@@ -129,17 +148,21 @@ async def start_backtest(body: RunRequest, current_user: dict = Depends(get_curr
 @router.get("/list")
 async def list_backtests(current_user: dict = Depends(get_current_user), request: Request = None):
     """Lista di tutti i run per l'utente, dal più recente al più vecchio."""
-    user_id = current_user["user_id"]
+    require_feature(current_user, "backtesting")
+    user_id  = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")
-    runs = await bt_store.list_runs(user_id)
-    return {"runs": runs, "total": len(runs)}
+    runs         = await bt_store.list_runs(user_id)
+    credits_used = await bt_store.count_credits_this_month(user_id)
+    limit        = backtest_credit_limit(current_user.get("plan"))
+    return {"runs": runs, "total": len(runs), "credits_used": credits_used, "credits_limit": limit}
 
 
 @router.get("/{run_id}")
 async def get_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Ritorna lo stato e tutti i risultati aggregati di un run."""
+    require_feature(current_user, "backtesting")
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")
@@ -154,6 +177,7 @@ async def get_backtest(run_id: str, current_user: dict = Depends(get_current_use
 @router.get("/{run_id}/trades")
 async def get_backtest_trades(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Ritorna tutti i trade simulati del run con dettagli completi."""
+    require_feature(current_user, "backtesting")
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
         raise HTTPException(503, "BacktestStore non disponibile")
@@ -169,6 +193,7 @@ async def get_backtest_trades(run_id: str, current_user: dict = Depends(get_curr
 @router.post("/{run_id}/cancel")
 async def cancel_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Interrompe un backtest in corso."""
+    require_feature(current_user, "backtesting")
     user_id = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
@@ -194,6 +219,7 @@ async def cancel_backtest(run_id: str, current_user: dict = Depends(get_current_
 @router.delete("/{run_id}")
 async def delete_backtest(run_id: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """Elimina un run e tutti i suoi trade. Richiede user_id per sicurezza."""
+    require_feature(current_user, "backtesting")
     user_id = current_user["user_id"]
     bt_store = getattr(request.app.state, "backtest_store", None)
     if bt_store is None:
