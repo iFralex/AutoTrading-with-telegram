@@ -5,7 +5,7 @@ import {
   Play, RefreshCw, Trash2, ChevronDown, ChevronUp,
   Minus, AlertTriangle,
   Clock, BarChart2, Users, Target,
-  CheckCircle, X,
+  CheckCircle, X, Lock,
 } from "lucide-react"
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -13,6 +13,7 @@ import {
   ReferenceLine, ReferenceDot, ComposedChart, Area, AreaChart,
 } from "recharts"
 import { api, type BacktestRun, type BacktestTrade, type DashboardUser } from "@/src/lib/api"
+import { hasPlanFeature, backtestCreditLimit, BACKTEST_AI_WEIGHT, BACKTEST_STD_WEIGHT } from "@/src/lib/planFeatures"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -124,10 +125,12 @@ function KpiCard({ label, value, sub, positive }: {
 
 // ── Run form ──────────────────────────────────────────────────────────────────
 
-function RunForm({ user, onStarted, disabled }: {
+function RunForm({ user, onStarted, disabled, creditsUsed, creditsLimit }: {
   user: DashboardUser
   onStarted: (runId: string) => void
   disabled?: boolean
+  creditsUsed: number
+  creditsLimit: number
 }) {
   const groups = user.groups ?? []
   const [selectedGroupId, setSelectedGroupId] = useState<number>(
@@ -141,6 +144,10 @@ function RunForm({ user, onStarted, disabled }: {
   const [balance, setBalance]     = useState("1000")
   const [loading, setLoading]     = useState(false)
   const [err, setErr]             = useState<string | null>(null)
+
+  const cannotAfford =
+    creditsLimit > 0 &&
+    creditsUsed + (useAi ? BACKTEST_AI_WEIGHT : BACKTEST_STD_WEIGHT) > creditsLimit
 
   const selectedGroup = groups.find(g => g.group_id === selectedGroupId) ?? groups[0]
 
@@ -282,6 +289,23 @@ function RunForm({ user, onStarted, disabled }: {
         </div>
       </div>
 
+      {/* Credit cost hint */}
+      {creditsLimit > 0 && (
+        <div className={`text-xs px-3 py-2 rounded-lg border ${
+          cannotAfford
+            ? "bg-red-600/8 border-red-500/20 text-red-400"
+            : "bg-white/[0.03] border-white/[0.06] text-muted-foreground"
+        }`}>
+          This run costs{" "}
+          <span className="font-medium text-foreground">
+            {useAi ? BACKTEST_AI_WEIGHT : BACKTEST_STD_WEIGHT} credit{useAi ? "s" : ""}
+          </span>{" "}
+          ({cannotAfford
+            ? "not enough credits — upgrade or wait for monthly reset"
+            : `${creditsLimit - creditsUsed} remaining`})
+        </div>
+      )}
+
       {/* Starting balance */}
       <div>
         <label className="text-xs text-muted-foreground">Simulated starting balance (USD)</label>
@@ -305,7 +329,7 @@ function RunForm({ user, onStarted, disabled }: {
 
       <button
         onClick={submit}
-        disabled={loading || disabled}
+        disabled={loading || disabled || cannotAfford}
         className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
       >
         {loading
@@ -1246,14 +1270,18 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
   const [loadingRuns, setLR]        = useState(true)
   const [selectedTrade, setSelected] = useState<BacktestTrade | null>(null)
   const pollRef                     = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [creditsUsed,  setCreditsUsed]  = useState<number>(0)
+  const [creditsLimit, setCreditsLimit] = useState<number>(backtestCreditLimit(user.plan))
 
   const loadRuns = useCallback(async () => {
     try {
       const r = await api.listBacktests(userId)
       setRuns(r.runs)
+      setCreditsUsed(r.credits_used ?? 0)
+      setCreditsLimit(r.credits_limit ?? backtestCreditLimit(user.plan))
     } catch { /* ignore */ }
     finally { setLR(false) }
-  }, [userId])
+  }, [userId, user.plan])
 
   const refreshActiveRun = useCallback(async (runId: string) => {
     try {
@@ -1296,6 +1324,29 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
     } catch { /* ignore */ }
   }
 
+  if (!hasPlanFeature(user.plan, "backtesting")) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+        <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center">
+          <Lock className="w-6 h-6 text-indigo-400" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">Backtesting requires Pro or Elite</h2>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            Run historical simulations on your signal channels, get full analytics
+            and monthly PDF reports. Available from the Pro plan.
+          </p>
+        </div>
+        <a
+          href="/settings"
+          className="px-4 py-2 text-sm font-medium bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 border border-indigo-500/30 rounded-lg transition-colors"
+        >
+          View plans → Settings
+        </a>
+      </div>
+    )
+  }
+
   return (
     <div className="p-5 lg:p-6 max-w-[1400px] mx-auto space-y-6">
 
@@ -1311,10 +1362,31 @@ export function BacktestPage({ userId, user }: { userId: string; user: Dashboard
 
         {/* Left column: form + history */}
         <div className="space-y-4">
+          {/* Credit meter */}
+          {creditsLimit > 0 && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.02] text-xs text-muted-foreground">
+              <div className="flex-1">
+                <span className="font-medium text-foreground">{creditsUsed}</span>
+                <span> / {creditsLimit} credits used this month</span>
+              </div>
+              <div className="w-32 h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    creditsUsed >= creditsLimit ? "bg-red-500" : "bg-indigo-500"
+                  }`}
+                  style={{ width: `${Math.min(100, (creditsUsed / creditsLimit) * 100)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground/60">resets monthly</span>
+            </div>
+          )}
+
           <RunForm
             user={user}
             onStarted={handleStarted}
             disabled={runs.some(r => r.status.startsWith("running"))}
+            creditsUsed={creditsUsed}
+            creditsLimit={creditsLimit}
           />
 
           {/* History */}
