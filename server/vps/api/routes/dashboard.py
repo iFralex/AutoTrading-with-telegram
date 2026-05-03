@@ -231,6 +231,15 @@ async def update_user_group(
     if body.min_confidence is not None and body.min_confidence > 0:
         if not has_feature(current_user.get("plan"), "confidence_threshold"):
             body = body.model_copy(update={"min_confidence": 0})
+    # Elite-only fields: block activation for non-elite users.
+    if body.management_strategy is not None and body.management_strategy.strip():
+        require_feature(current_user, "management_strategy")
+    if body.deletion_strategy is not None and body.deletion_strategy.strip():
+        require_feature(current_user, "deletion_strategy")
+    if body.trading_hours_enabled is True:
+        require_feature(current_user, "trading_hours")
+    if body.eco_calendar_enabled is True:
+        require_feature(current_user, "eco_calendar")
     store = request.app.state.user_store
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:
@@ -1029,6 +1038,7 @@ async def list_community_groups(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Lists all public community groups with trust score, sorted by score descending."""
+    require_feature(current_user, "community")
     user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
@@ -1084,6 +1094,7 @@ async def get_community_group_detail(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Detailed stats, equity curve and recent trades for a community group."""
+    require_feature(current_user, "community")
     user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
@@ -1130,6 +1141,7 @@ async def follow_community_group(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Follow a community group: creates shadow user_groups entry and group_follows record."""
+    require_feature(current_user, "community")
     if body.follower_user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
@@ -1176,6 +1188,7 @@ async def unfollow_community_group(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Unfollow: optionally closes open positions, removes shadow entry and follow record."""
+    require_feature(current_user, "community")
     user_id = current_user["user_id"]
     store              = request.app.state.user_store
     group_follow_store = request.app.state.group_follow_store
@@ -1235,6 +1248,7 @@ async def list_community_follows(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Lists all community groups the user is following, with stats and their custom settings."""
+    require_feature(current_user, "community")
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
@@ -1287,6 +1301,7 @@ async def update_community_follow_settings(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Updates the follower's personal strategies for a followed community group."""
+    require_feature(current_user, "community")
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
     store              = request.app.state.user_store
