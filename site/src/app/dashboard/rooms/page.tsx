@@ -85,7 +85,11 @@ function RoomCard({
   const [ecoWindow, setEcoWindow]   = useState(String(group.eco_calendar_window ?? 60))
   const [ecoStrategy, setEcoStrategy] = useState(group.eco_calendar_strategy ?? "")
   const [extraction, setExtraction] = useState(group.extraction_instructions ?? "")
-  const [minConf, setMinConf] = useState(String(group.min_confidence ?? 0.7))
+  const [minConf, setMinConf] = useState(() => {
+    const raw = group.min_confidence ?? 0
+    // Legacy data may store 0-1 float; convert to 0-100 int for the slider
+    return String(raw > 0 && raw < 1 ? Math.round(raw * 100) : Math.round(raw))
+  })
   const [communityVisible, setCommunityVisible] = useState(false)
 
   const handleSave = async () => {
@@ -97,8 +101,8 @@ function RoomCard({
         management_strategy:     mgmt.trim() || null,
         deletion_strategy:       deletion.trim() || null,
         extraction_instructions: extraction.trim() || null,
-        min_confidence:          parseFloat(minConf) || 0.7,
-        range_entry_pct:         parseFloat(entryPct) || 0,
+        min_confidence:          parseInt(minConf, 10) || 0,
+        range_entry_pct:         parseInt(entryPct, 10) || 0,
         entry_if_favorable:   entryFav,
         trading_hours_enabled: thEnabled,
         trading_hours_start:  thEnabled ? parseInt(thStart) || 0 : null,
@@ -114,8 +118,8 @@ function RoomCard({
         management_strategy:     mgmt.trim() || null,
         deletion_strategy:       deletion.trim() || null,
         extraction_instructions: extraction.trim() || null,
-        min_confidence:          parseFloat(minConf) || 0.7,
-        range_entry_pct:         parseFloat(entryPct) || 0,
+        min_confidence:          parseInt(minConf, 10) || 0,
+        range_entry_pct:         parseInt(entryPct, 10) || 0,
         entry_if_favorable:   entryFav,
         trading_hours_enabled: thEnabled,
         trading_hours_start:  thEnabled ? (parseInt(thStart) || 0) : null,
@@ -262,11 +266,11 @@ function RoomCard({
                 </div>
                 <div>
                   <label className={labelCls}>
-                    Min confidence — {Math.round(parseFloat(minConf || "0") * 100)}%
+                    Min confidence — {minConf}%
                   </label>
                   <input
-                    type="range" min={0} max={1} step={0.05}
-                    value={minConf}
+                    type="range" min={0} max={100} step={5}
+                    value={Number(minConf)}
                     onChange={e => setMinConf(e.target.value)}
                     className="w-full accent-emerald-500 cursor-pointer"
                   />
@@ -275,20 +279,23 @@ function RoomCard({
                     <span>100% — only high-confidence</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-4">
                   <div>
-                    <label className={labelCls}>Entry range (%)</label>
+                    <label className={labelCls}>Entry range position — {entryPct}%</label>
                     <input
-                      type="number" min={0} max={100} step={1}
-                      value={entryPct}
+                      type="range" min={0} max={100} step={5}
+                      value={Number(entryPct)}
                       onChange={e => setEntryPct(e.target.value)}
-                      className={inputCls} style={inputStyle}
+                      className="w-full accent-indigo-500 cursor-pointer"
                     />
-                    <p className="text-[10px] text-white/25 mt-1">Accept entry within N% of signal price</p>
+                    <div className="flex justify-between text-[10px] text-white/20 mt-0.5">
+                      <span>0% — favorable end</span>
+                      <span>100% — opposite end</span>
+                    </div>
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className={labelCls}>Favorable entry</label>
-                    <div className="flex items-center gap-3 pt-1">
+                    <div className="flex items-center gap-3">
                       <Toggle checked={entryFav} onChange={setEntryFav} />
                       <span className="text-xs text-white/40">Enter even if price moved in our favor</span>
                     </div>
