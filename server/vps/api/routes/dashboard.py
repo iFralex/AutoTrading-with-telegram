@@ -28,6 +28,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from vps.api.deps import get_current_user
+from vps.api.plan_features import require_feature, channel_limit
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -181,6 +182,15 @@ async def add_user_group(
     user  = await store.get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"Utente {user_id} non trovato")
+    plan  = (current_user.get("plan") or "").lower()
+    limit = channel_limit(plan)
+    if limit is not None:
+        existing_groups = await store.get_user_groups(user_id)
+        if len(existing_groups) >= limit:
+            raise HTTPException(
+                403,
+                detail=f"Your plan allows a maximum of {limit} channel(s). Upgrade to add more.",
+            )
     await store.upsert_user_group(user_id, body.group_id, body.group_name)
     await _restart_listener(store, tm, user_id)
     return {"ok": True}
@@ -215,6 +225,8 @@ async def update_user_group(
     """Aggiorna le impostazioni di un gruppo specifico."""
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
+    if body.min_confidence is not None and body.min_confidence > 0:
+        require_feature(current_user, "confidence_threshold")
     store = request.app.state.user_store
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:
@@ -355,6 +367,7 @@ async def get_trust_scores(
     request: Request = None,  # type: ignore[assignment]
 ):
     """Trust Score per ogni gruppo dell'utente (0-100, basato su win rate, volume, exec rate)."""
+    require_feature(current_user, "trust_scores")
     user_id = current_user["user_id"]
     store              = request.app.state.user_store
     log_store          = request.app.state.signal_log_store
@@ -888,6 +901,7 @@ async def generate_report(
     """
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
+    require_feature(current_user, "pdf_reports")
     store              = request.app.state.user_store
     closed_trade_store = request.app.state.closed_trade_store
     monthly_report_gen = request.app.state.monthly_report_gen
@@ -946,6 +960,7 @@ async def list_saved_reports(
     """
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
+    require_feature(current_user, "pdf_reports")
     store = request.app.state.user_store
     user  = await store.get_user(user_id)
     if user is None:
