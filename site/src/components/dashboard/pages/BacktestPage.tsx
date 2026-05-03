@@ -298,7 +298,7 @@ function RunForm({ user, onStarted, disabled, creditsUsed, creditsLimit }: {
         }`}>
           This run costs{" "}
           <span className="font-medium text-foreground">
-            {useAi ? BACKTEST_AI_WEIGHT : BACKTEST_STD_WEIGHT} credit{useAi ? "s" : ""}
+            {useAi ? BACKTEST_AI_WEIGHT : BACKTEST_STD_WEIGHT} credit{(useAi ? BACKTEST_AI_WEIGHT : BACKTEST_STD_WEIGHT) !== 1 ? "s" : ""}
           </span>{" "}
           ({cannotAfford
             ? "not enough credits — upgrade or wait for monthly reset"
