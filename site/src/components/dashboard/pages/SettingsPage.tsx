@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react"
 import { api, type DashboardUserResponse, type UserGroup, type Group, type TrustScore } from "@/src/lib/api"
 import { PLAN_PRICES } from "@/src/lib/plans"
+import { UpgradeGate } from "@/src/components/dashboard/UpgradeGate"
+import { hasPlanFeature, channelLimit } from "@/src/lib/planFeatures"
 import {
   Check, Pencil, X, ChevronRight, ChevronDown,
   Plus, Trash2, Radio, Search, Hash, Users, Loader2, RefreshCw, Copy,
@@ -31,13 +33,15 @@ export function SettingsPage({
   const [drawdownLoading, setDrawdownLoading] = useState(false)
 
   useEffect(() => {
-    api.getTrustScores(user.user_id)
-      .then(res => {
-        const map: Record<number, TrustScore> = {}
-        for (const s of res.scores) map[s.group_id] = s
-        setTrustScores(map)
-      })
-      .catch(() => {})
+    if (hasPlanFeature(user.plan, "trust_scores")) {
+      api.getTrustScores(user.user_id)
+        .then(res => {
+          const map: Record<number, TrustScore> = {}
+          for (const s of res.scores) map[s.group_id] = s
+          setTrustScores(map)
+        })
+        .catch(() => {})
+    }
     api.getDrawdownStatus(user.user_id)
       .then(res => setDrawdownStatus(res))
       .catch(() => {})
@@ -116,6 +120,7 @@ export function SettingsPage({
             key={group.group_id}
             group={group}
             userId={user.user_id}
+            plan={user.plan}
             trustScore={trustScores[group.group_id] ?? null}
             onUpdate={updateGroup}
             onRemove={() => removeGroup(group.group_id)}
@@ -125,10 +130,22 @@ export function SettingsPage({
         ))}
 
         {/* Aggiungi nuovo gruppo */}
-        <AddGroupCard
-          userId={user.user_id}
-          onAdded={addGroup}
-        />
+        {(() => {
+          const limit = channelLimit(user.plan)
+          const atLimit = limit !== null && user.groups.length >= limit
+          return atLimit ? (
+            <UpgradeGate feature="backtesting" plan={user.plan}>
+              <div className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] opacity-60">
+                <Plus className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
+                  Add channel ({user.groups.length}/{limit} used)
+                </span>
+              </div>
+            </UpgradeGate>
+          ) : (
+            <AddGroupCard userId={user.user_id} onAdded={addGroup} />
+          )
+        })()}
       </div>
     </div>
   )
@@ -347,6 +364,7 @@ function DrawdownProtectionSection({
 function GroupCard({
   group,
   userId,
+  plan,
   trustScore,
   onUpdate,
   onRemove,
@@ -355,6 +373,7 @@ function GroupCard({
 }: {
   group: UserGroup
   userId: string
+  plan: string | null
   trustScore: TrustScore | null
   onUpdate: (g: UserGroup) => void
   onRemove: () => void
@@ -434,7 +453,9 @@ function GroupCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold text-foreground truncate">{group.group_name}</p>
-            <TrustScoreTag score={trustScore} />
+            <UpgradeGate feature="trust_scores" plan={plan}>
+              <TrustScoreTag score={trustScore} />
+            </UpgradeGate>
           </div>
           <p className="text-xs text-muted-foreground font-mono">ID: {group.group_id}</p>
         </div>
@@ -622,16 +643,18 @@ function GroupCard({
             />
           </GroupSettingRow>
 
-          <GroupSettingRow title="Soglia confidenza AI" badge="filtro"
-            description="Scarta i segnali con confidenza di estrazione inferiore alla soglia (0 = accetta tutto)">
-            <ConfidenceField
-              value={group.min_confidence ?? 0}
-              onSave={async v => {
-                await api.updateUserGroup(userId, group.group_id, { min_confidence: v })
-                patch({ min_confidence: v })
-              }}
-            />
-          </GroupSettingRow>
+          <UpgradeGate feature="confidence_threshold" plan={plan}>
+            <GroupSettingRow title="Soglia confidenza AI" badge="filtro"
+              description="Scarta i segnali con confidenza di estrazione inferiore alla soglia (0 = accetta tutto)">
+              <ConfidenceField
+                value={group.min_confidence ?? 0}
+                onSave={async v => {
+                  await api.updateUserGroup(userId, group.group_id, { min_confidence: v })
+                  patch({ min_confidence: v })
+                }}
+              />
+            </GroupSettingRow>
+          </UpgradeGate>
 
           <GroupSettingRow title="Calendario economico" badge="filtro"
             description="Pauses or adjusts execution N minutes before/after high-impact macro events (ForexFactory)">
