@@ -30,6 +30,7 @@ from vps.services.mt5_trader import (
     MT5_LOCK, MT5_INIT_RETRIES, MT5_INIT_RETRY_DELAY, MT5_INIT_TIMEOUT_MS,
     _ensure_experts_enabled, _kill_mt5_for_dir, _configure_server_via_gui,
 )
+from vps.api.plan_features import has_feature
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -1441,6 +1442,10 @@ async def complete_setup(
             "plan":         body.plan,
         })
 
+        # Force min_confidence to 0 for Core plan users
+        if not has_feature(body.plan, "confidence_threshold"):
+            body = body.model_copy(update={"min_confidence": 0})
+
         # Popola il primo gruppo nella tabella multi-gruppo
         await store.upsert_user_group(
             user_id=body.user_id,
@@ -1739,15 +1744,20 @@ learning your workflow, not a form asking for inputs."""
 
         feature_matrix = """
 Plan feature matrix (monthly subscription):
-- Core (€79/mo): 1 Telegram channel, automatic SL/TP execution, basic stats.
-  DOES NOT include: AI sizing strategy, AI management strategy (trailing/partial-close/breakeven),
-  AI deletion strategy, advanced filters (trading hours, economic calendar, confidence threshold,
-  range entry %).
-- Pro (€149/mo): up to 5 channels, full backtesting, advanced metrics, AI management strategy
-  (trailing, breakeven, partial close), advanced filters (hours, calendar, confidence, range entry).
-  DOES NOT include: custom AI sizing strategy, AI deletion strategy.
-- Elite (€299/mo): all features — unlimited channels, custom AI sizing, management AND deletion
-  strategies, all advanced filters, priority support. Nothing missing.
+- Core (€39/mo): 1 Telegram channel, automatic SL/TP execution, position sizing rules,
+  custom signal extraction hints, range entry % with optimized entry, entry filter (only if price
+  moves in your favor), basic stats.
+  DOES NOT include: advanced signal analysis, AI confidence threshold, backtesting & PDF reports,
+  AI position management (trailing/partial-close/breakeven), signal deletion handling,
+  trading hours filter, economic calendar filter.
+- Pro (€89/mo): up to 5 channels, advanced signal analysis, AI confidence threshold,
+  full backtesting & PDF reports, full stats & charts, advanced metrics, Trust Score.
+  DOES NOT include: AI position management (trailing/partial-close/breakeven),
+  signal deletion handling, trading hours filter, economic calendar filter.
+- Elite (€149/mo): all features — unlimited channels, AI position management (approve/modify/close),
+  signal deletion handling, trading hours filter (UTC range + day selector),
+  economic calendar (auto-pause around news), community room visibility, copy trading,
+  priority support. Nothing missing.
 """
         system = (
             "You are Nova. Given the user's configured bot settings, write a brief warning note "
