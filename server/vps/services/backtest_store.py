@@ -320,6 +320,28 @@ class BacktestStore:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def count_credits_this_month(self, user_id: str) -> int:
+        """Sum of backtest credits consumed in the current calendar month.
+
+        AI runs cost 3 credits; standard runs cost 1 credit.
+        Counts all run statuses (running / completed / failed / cancelled)
+        so deleting old runs does not game the monthly quota.
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            cur = await db.execute(
+                """
+                SELECT COALESCE(
+                    SUM(CASE WHEN use_ai = 1 THEN 3 ELSE 1 END), 0
+                )
+                FROM backtest_runs
+                WHERE user_id = ?
+                  AND strftime('%Y-%m', started_at) = strftime('%Y-%m', 'now')
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            return int(row[0])
+
     async def delete_run(self, run_id: str) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute("DELETE FROM backtest_trades WHERE run_id = ?", (run_id,))
