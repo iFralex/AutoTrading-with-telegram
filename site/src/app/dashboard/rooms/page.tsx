@@ -7,6 +7,8 @@ import {
 } from "lucide-react"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
 import { api, type UserGroup, type TrustScore, type Group } from "@/src/lib/api"
+import { hasPlanFeature } from "@/src/lib/planFeatures"
+import { UpgradeGate } from "@/src/components/dashboard/UpgradeGate"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,10 +49,11 @@ const labelCls = "block text-[10px] uppercase tracking-widest text-white/30 font
 // ── Single room card ──────────────────────────────────────────────────────────
 
 function RoomCard({
-  group, userId, trustScore, canRemove, onUpdate, onRemove,
+  group, userId, plan, trustScore, canRemove, onUpdate, onRemove,
 }: {
   group: UserGroup
   userId: string
+  plan: string | null
   trustScore: TrustScore | null
   canRemove: boolean
   onUpdate: (updated: UserGroup) => void
@@ -63,6 +66,10 @@ function RoomCard({
   const [removeConfirm, setRemoveConfirm] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  const isTabGated =
+    (tab === "filters"   && !hasPlanFeature(plan, "trading_hours")) ||
+    (tab === "community" && !hasPlanFeature(plan, "community"))
 
   // Draft state
   const [sizing,    setSizing]    = useState(group.sizing_strategy ?? "")
@@ -214,28 +221,32 @@ function RoomCard({
                     style={inputStyle}
                   />
                 </div>
-                <div>
-                  <label className={labelCls}>Management strategy</label>
-                  <textarea
-                    rows={3}
-                    value={mgmt}
-                    onChange={e => setMgmt(e.target.value)}
-                    placeholder="e.g. Move SL to breakeven after 20 pips profit…"
-                    className={inputCls}
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>Message deletion strategy</label>
-                  <textarea
-                    rows={2}
-                    value={deletion}
-                    onChange={e => setDeletion(e.target.value)}
-                    placeholder="e.g. If original signal is deleted, close the position…"
-                    className={inputCls}
-                    style={inputStyle}
-                  />
-                </div>
+                <UpgradeGate feature="management_strategy" plan={plan}>
+                  <div className="space-y-5">
+                    <div>
+                      <label className={labelCls}>Management strategy</label>
+                      <textarea
+                        rows={3}
+                        value={mgmt}
+                        onChange={e => setMgmt(e.target.value)}
+                        placeholder="e.g. Move SL to breakeven after 20 pips profit…"
+                        className={inputCls}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Message deletion strategy</label>
+                      <textarea
+                        rows={2}
+                        value={deletion}
+                        onChange={e => setDeletion(e.target.value)}
+                        placeholder="e.g. If original signal is deleted, close the position…"
+                        className={inputCls}
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+                </UpgradeGate>
 
                 <div>
                   <label className={labelCls}>Extraction instructions</label>
@@ -288,7 +299,8 @@ function RoomCard({
 
             {/* ── Filters tab ────────────────────────────────────────────── */}
             {tab === "filters" && (
-              <>
+              <UpgradeGate feature="trading_hours" plan={plan}>
+                <>
                 {/* Trading hours */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -378,12 +390,14 @@ function RoomCard({
                     </div>
                   )}
                 </div>
-              </>
+                </>
+              </UpgradeGate>
             )}
 
             {/* ── Community tab ───────────────────────────────────────────── */}
             {tab === "community" && (
-              <div className="space-y-4">
+              <UpgradeGate feature="community" plan={plan}>
+                <div className="space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
@@ -403,7 +417,8 @@ function RoomCard({
                     This room will appear in the community leaderboard once it has at least 10 trades.
                   </div>
                 )}
-              </div>
+                </div>
+              </UpgradeGate>
             )}
 
             {/* Error */}
@@ -445,18 +460,20 @@ function RoomCard({
                 )
               ) : <div />}
 
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-black disabled:opacity-40 transition-all"
-                style={{ background: "linear-gradient(90deg, #10b981, #06b6d4)" }}
-              >
-                {saving
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : saved ? <Check className="w-4 h-4" /> : null
-                }
-                {saving ? "Saving…" : saved ? "Saved!" : "Save changes"}
-              </button>
+              {!isTabGated && (
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-black disabled:opacity-40 transition-all"
+                  style={{ background: "linear-gradient(90deg, #10b981, #06b6d4)" }}
+                >
+                  {saving
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : saved ? <Check className="w-4 h-4" /> : null
+                  }
+                  {saving ? "Saving…" : saved ? "Saved!" : "Save changes"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -600,11 +617,13 @@ export default function RoomsPage() {
   useEffect(() => {
     if (!user) return
     setGroups(user.groups)
-    api.getTrustScores(user.user_id).then(res => {
-      const map: Record<number, TrustScore> = {}
-      for (const s of res.scores) map[s.group_id] = s
-      setTrustScores(map)
-    }).catch(() => {})
+    if (hasPlanFeature(user.plan, "trust_scores")) {
+      api.getTrustScores(user.user_id).then(res => {
+        const map: Record<number, TrustScore> = {}
+        for (const s of res.scores) map[s.group_id] = s
+        setTrustScores(map)
+      }).catch(() => {})
+    }
   }, [user])
 
   const updateGroup  = (updated: UserGroup) => setGroups(prev => prev.map(g => g.group_id === updated.group_id ? updated : g))
@@ -631,6 +650,7 @@ export default function RoomsPage() {
           key={group.group_id}
           group={group}
           userId={user.user_id}
+          plan={user.plan}
           trustScore={trustScores[group.group_id] ?? null}
           canRemove={groups.length > 1}
           onUpdate={updateGroup}
