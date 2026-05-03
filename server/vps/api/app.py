@@ -639,7 +639,7 @@ async def lifespan(app: FastAPI):
                   user_id, group_id, range_entry_pct, entry_if_favorable)
 
         # ── Step 2.5: verifica filtro orari di trading ────────────────────────
-        if group_settings and group_settings.get("trading_hours_enabled"):
+        if group_settings and group_settings.get("trading_hours_enabled") and has_feature(user.get("plan"), "trading_hours"):
             if not _is_trading_allowed(
                 datetime.now(timezone.utc),
                 group_settings.get("trading_hours_start"),
@@ -656,7 +656,7 @@ async def lifespan(app: FastAPI):
                 return
 
         # ── Step 2.6: verifica calendario economico ──────────────────────────
-        if group_settings and group_settings.get("eco_calendar_enabled"):
+        if group_settings and group_settings.get("eco_calendar_enabled") and has_feature(user.get("plan"), "eco_calendar"):
             try:
                 await eco_calendar.refresh_if_needed()
                 window = int((group_settings or {}).get("eco_calendar_window") or 30)
@@ -760,7 +760,7 @@ async def lifespan(app: FastAPI):
             log_signals = [asdict(s) for s in signals]
 
         # ── Step 5 (opzionale): filtro pre-trade con StrategyExecutor ─────────
-        if strategy_executor and management_strategy:
+        if strategy_executor and management_strategy and has_feature(user.get("plan"), "management_strategy"):
             try:
                 decisions, _, _ = await strategy_executor.pre_trade(
                     user_id             = user_id,
@@ -1030,7 +1030,7 @@ async def lifespan(app: FastAPI):
                 groups = user.get("groups") or []
                 del_group_settings = groups[0] if groups else {}
             deletion_strategy = (del_group_settings or {}).get("deletion_strategy") or ""
-            if not deletion_strategy.strip():
+            if not deletion_strategy.strip() or not has_feature(user.get("plan"), "deletion_strategy"):
                 ulog.debug(
                     "Utente %s: deletion_strategy non configurata — skip messaggio eliminato #%d",
                     user_id, msg_id,
