@@ -26,9 +26,9 @@ from typing import Any
 import asyncio
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from vps.api.deps import get_current_user
-from vps.api.plan_features import require_feature, channel_limit
+from vps.api.plan_features import require_feature, channel_limit, has_feature
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -225,8 +225,12 @@ async def update_user_group(
     """Aggiorna le impostazioni di un gruppo specifico."""
     if user_id != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Accesso non autorizzato")
+    # Core plan: non può impostare min_confidence > 0. Invece di 403 azzeriamo
+    # silenziosamente per evitare che la pagina Settings sia bloccata quando il
+    # frontend invia il valore corrente insieme ad altre modifiche.
     if body.min_confidence is not None and body.min_confidence > 0:
-        require_feature(current_user, "confidence_threshold")
+        if not has_feature(current_user.get("plan"), "confidence_threshold"):
+            body = body.model_copy(update={"min_confidence": 0})
     store = request.app.state.user_store
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:
@@ -768,6 +772,7 @@ def _rmtree_retry(path, user_id: str, retries: int = 4, delay: float = 1.5) -> N
 @router.delete("/user/{user_id}")
 async def delete_user(
     user_id: str,
+    response: Response,
     current_user: dict = Depends(get_current_user),
     request: Request = None,  # type: ignore[assignment]
 ):
@@ -849,6 +854,18 @@ async def delete_user(
             logger.info("delete_user %s: sessione setup eliminata (phone=%s)", user_id, phone)
         except Exception as exc:
             logger.warning("delete_user %s: errore eliminazione sessione setup: %s", user_id, exc)
+
+    # 6. Invalida le credenziali JWT: revoca il refresh token e cancella i cookie.
+    #    Senza questo il browser mantiene token validi per altri 15 minuti e i
+    #    tentativi di DELETE successivi ricevono 401 invece di un redirect pulito.
+    if phone:
+        try:
+            auth_store = request.app.state.auth_store
+            await auth_store.clear_refresh_jti(phone)
+        except Exception as exc:
+            logger.warning("delete_user %s: errore revoca refresh JTI: %s", user_id, exc)
+    for cookie_name in ("sf_access", "sf_refresh", "sf_logged_in"):
+        response.delete_cookie(cookie_name, path="/")
 
     return {"ok": True}
 

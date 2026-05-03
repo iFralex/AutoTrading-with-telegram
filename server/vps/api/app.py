@@ -123,6 +123,9 @@ async def lifespan(app: FastAPI):
     # Database sessioni di setup temporanee
     session_store = SetupSessionStore(_sessions_db)
     await session_store.init()
+    # I client Telethon di setup vivono solo in memoria: al riavvio i login_key
+    # persistiti nel DB sono stale e causano 422. Li azzeriamo subito.
+    await session_store.clear_all_login_keys()
     app.state.setup_session_store = session_store
 
     # Database autenticazione (password hash + refresh JTI)

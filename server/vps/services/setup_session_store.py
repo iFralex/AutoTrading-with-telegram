@@ -293,3 +293,18 @@ class SetupSessionStore:
                 "DELETE FROM setup_sessions WHERE phone = ?", (phone,)
             )
             await db.commit()
+
+    async def clear_all_login_keys(self) -> None:
+        """Azzera login_key su tutte le sessioni.
+
+        I client Telethon temporanei vivono in memoria: ad ogni riavvio del
+        server i login_key persistiti nel DB diventano stale. Questo metodo
+        va chiamato all'avvio così il wizard richiede sempre una nuova autenticazione
+        Telegram invece di riutilizzare chiavi ormai invalide (che causano 422).
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE setup_sessions SET login_key = NULL, updated_at = CURRENT_TIMESTAMP"
+                " WHERE login_key IS NOT NULL"
+            )
+            await db.commit()

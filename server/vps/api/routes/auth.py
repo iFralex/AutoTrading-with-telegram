@@ -239,8 +239,9 @@ async def forgot_password(
     store: UserStore = Depends(_get_store),
     tm: TelegramManager = Depends(_get_telegram),
 ) -> dict:
-    if not await auth.has_password(body.phone):
-        raise HTTPException(404, "Nessun account trovato per questo numero")
+    # Verifica solo che l'utente esista nel sistema, indipendentemente dal fatto
+    # che abbia già impostato una password. Questo permette agli utenti registrati
+    # prima dell'introduzione del sistema password di impostarne una via OTP.
     user = await store.get_user_by_phone(body.phone)
     if user is None:
         raise HTTPException(404, "Nessun account trovato per questo numero")
