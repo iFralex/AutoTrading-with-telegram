@@ -1030,10 +1030,16 @@ async def lifespan(app: FastAPI):
                 groups = user.get("groups") or []
                 del_group_settings = groups[0] if groups else {}
             deletion_strategy = (del_group_settings or {}).get("deletion_strategy") or ""
-            if not deletion_strategy.strip() or not has_feature(user.get("plan"), "deletion_strategy"):
+            if not deletion_strategy.strip():
                 ulog.debug(
                     "Utente %s: deletion_strategy non configurata — skip messaggio eliminato #%d",
                     user_id, msg_id,
+                )
+                continue
+            if not has_feature(user.get("plan"), "deletion_strategy"):
+                ulog.debug(
+                    "Utente %s: piano %s non include deletion_strategy — skip messaggio eliminato #%d",
+                    user_id, user.get("plan"), msg_id,
                 )
                 continue
 
