@@ -32,9 +32,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 _PLAN_PRICES: dict[str, float] = {
-    "core":  79.0,
-    "pro":  149.0,
-    "elite": 299.0,
+    "core":  39.0,
+    "pro":   89.0,
+    "elite": 149.0,
 }
 
 
