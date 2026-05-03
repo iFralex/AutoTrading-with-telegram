@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback } from "react"
 import {
   Users, Star, UserPlus, UserMinus, Loader2,
-  TrendingUp, TrendingDown, Search, RefreshCw, BookMarked,
+  TrendingUp, TrendingDown, Search, RefreshCw, BookMarked, Lock,
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts"
 import { useDashboard } from "@/src/components/dashboard/DashboardContext"
 import { api, type CommunityGroup, type CommunityGroupDetail, type CommunityFollow } from "@/src/lib/api"
+import { hasPlanFeature } from "@/src/lib/planFeatures"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -333,16 +334,17 @@ export default function CommunityPage() {
   const [followsLoading, setFollowsLoading] = useState(false)
 
   const loadFollows = useCallback(async () => {
-    if (!user?.user_id) return
+    if (!user?.user_id || !hasPlanFeature(user.plan ?? null, "community")) return
     setFollowsLoading(true)
     try {
       const res = await api.listCommunityFollows(user.user_id)
       setFollows(res.following)
     } catch { /* ignore */ }
     finally { setFollowsLoading(false) }
-  }, [user?.user_id])
+  }, [user?.user_id, user?.plan])
 
   const load = useCallback(async () => {
+    if (!hasPlanFeature(user?.plan ?? null, "community")) return
     setLoading(true)
     try {
       const res = await api.listCommunityGroups()
@@ -350,7 +352,7 @@ export default function CommunityPage() {
       if (res.groups.length > 0 && !selected) setSelected(res.groups[0].token)
     } catch { /* ignore */ }
     finally { setLoading(false) }
-  }, [user?.user_id, selected])
+  }, [user?.user_id, selected, user?.plan])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { if (mainTab === "following") loadFollows() }, [mainTab, loadFollows])
@@ -364,6 +366,29 @@ export default function CommunityPage() {
   )
 
   const selectedGroup = groups.find(g => g.token === selected)
+
+  if (!hasPlanFeature(user?.plan ?? null, "community")) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+          <Lock className="w-6 h-6 text-amber-400" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">Community requires Elite</h2>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            Browse and follow signal rooms from other Elite traders, or share your own
+            room&apos;s performance on the leaderboard. Available on the Elite plan.
+          </p>
+        </div>
+        <a
+          href="/settings"
+          className="px-4 py-2 text-sm font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/25 rounded-lg transition-colors"
+        >
+          View plans → Settings
+        </a>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col">
