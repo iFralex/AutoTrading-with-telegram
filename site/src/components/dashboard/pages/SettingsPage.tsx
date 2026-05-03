@@ -45,7 +45,7 @@ export function SettingsPage({
     api.getDrawdownStatus(user.user_id)
       .then(res => setDrawdownStatus(res))
       .catch(() => {})
-  }, [user.user_id])
+  }, [user.user_id, user.plan])
 
   const patchGroups = (groups: UserGroup[]) =>
     onUserUpdate({ ...data, user: { ...user, groups } })
@@ -133,17 +133,23 @@ export function SettingsPage({
         {(() => {
           const limit = channelLimit(user.plan)
           const atLimit = limit !== null && user.groups.length >= limit
-          return atLimit ? (
-            <UpgradeGate feature="backtesting" plan={user.plan}>
-              <div className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] opacity-60">
+          if (!atLimit) return <AddGroupCard userId={user.user_id} onAdded={addGroup} />
+          const upgradeLabel = (user.plan ?? "").toLowerCase() === "core" ? "Pro" : "Elite"
+          return (
+            <div className="relative rounded-xl">
+              <div className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] opacity-40 pointer-events-none select-none">
                 <Plus className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">
                   Add channel ({user.groups.length}/{limit} used)
                 </span>
               </div>
-            </UpgradeGate>
-          ) : (
-            <AddGroupCard userId={user.user_id} onAdded={addGroup} />
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg text-xs font-medium text-white/80">
+                  <Crown className="w-3 h-3 shrink-0" />
+                  <span>{upgradeLabel} plan</span>
+                </div>
+              </div>
+            </div>
           )
         })()}
       </div>
