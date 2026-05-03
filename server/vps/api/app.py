@@ -37,6 +37,7 @@ from vps.api.routes.backtest import router as backtest_router
 from vps.api.routes.auth import router as auth_router
 from vps.api.routes.billing import router as billing_router
 from vps.api.routes.admin import router as admin_router
+from vps.api.plan_features import has_feature
 from vps.services.telegram_manager import TelegramManager
 from vps.services.user_store import UserStore
 from vps.services.setup_session_store import SetupSessionStore
@@ -738,9 +739,9 @@ async def lifespan(app: FastAPI):
 
         log_signals = [asdict(s) for s in signals]
 
-        # ── Step 4.5: filtro confidenza AI ────────────────────────────────────
+        # ── Step 4.5: filtro confidenza AI (solo Pro+) ───────────────────────
         min_confidence = int((group_settings or {}).get("min_confidence") or 0)
-        if min_confidence > 0:
+        if min_confidence > 0 and has_feature(user.get("plan"), "confidence_threshold"):
             filtered = [s for s in signals if s.confidence is None or s.confidence >= min_confidence]
             if len(filtered) < len(signals):
                 ulog.info(
