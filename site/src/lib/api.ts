@@ -1219,10 +1219,12 @@ export const api = {
 
   /** Lista di tutti i run dell'utente. */
   listBacktests(userId: string) {
-    return callAuth<{ runs: BacktestRun[]; total: number }>(
-      "GET",
-      `/api/backtest/list?user_id=${encodeURIComponent(userId)}`
-    )
+    return callAuth<{
+      runs: BacktestRun[]
+      total: number
+      credits_used: number
+      credits_limit: number
+    }>("GET", `/api/backtest/list?user_id=${encodeURIComponent(userId)}`)
   },
 
   /** Elimina un run e i suoi trade. */
