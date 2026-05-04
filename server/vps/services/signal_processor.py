@@ -83,6 +83,18 @@ class TradeSignal:
     order_mode:  str                        # "MARKET" | "LIMIT" | "STOP"
     prices:      list[float] | None = None  # livelli prezzo che triggerano la management_strategy
     confidence:  int | None = None          # 0-100: qualità dell'estrazione stimata dall'AI
+    # ── Multi-message / signal sequencing ─────────────────────────────────────
+    is_preliminary:       bool       = False  # open positions now, expect a follow-up message
+    pending_timeout_s:    int | None = None   # seconds to wait for follow-up (required if is_preliminary)
+    pending_notes:        str | None = None   # AI context note preserved until follow-up arrives
+    completes_pending_id: str | None = None   # pending_id of the signal this message completes
+
+
+@dataclass
+class MessageClassification:
+    """Result of the lightweight classify step (enhanced Flash)."""
+    msg_type: str              # "SIGNAL_OR_UPDATE" | "COMMAND" | "NONE"
+    command_description: str | None = None  # for COMMAND: what the AI thinks should happen
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -94,6 +106,31 @@ Is the following message a trading signal that contains an actionable BUY or SEL
 
 Message:
 {message}"""
+
+_CLASSIFICATION_PROMPT = """\
+You are monitoring a Telegram trading-signals channel.
+Classify the current message given the user's signal strategy and recent context.
+
+Signal strategy (how this channel works):
+{signal_strategy}
+
+{context}
+Current message:
+{message}
+
+Classify as exactly one of:
+- SIGNAL_OR_UPDATE: a trading signal (complete or partial), OR a follow-up/update to a pending signal
+- COMMAND: a management instruction for open positions (e.g. "BE", "close all", "move SL to breakeven",
+  "cancel", "TP hit", "close half")
+- NONE: not relevant to trading
+
+Also, if type is COMMAND, provide a brief description of the intended action.
+
+Respond with valid JSON only (no markdown):
+{{
+  "type": "SIGNAL_OR_UPDATE" | "COMMAND" | "NONE",
+  "command_description": "<brief action description or null>"
+}}"""
 
 _EXTRACTION_PROMPT = """\
 You are a professional trading signal parser.
@@ -131,7 +168,7 @@ Rules:
   trigger can be derived or no strategy is provided. Do NOT skip a level just because the
   strategy also checks real-time conditions (like account P&L) — the strategy AI will
   evaluate those conditions when the price is actually reached.
-{sizing_section}{management_section}{custom_section}
+{sizing_section}{management_section}{custom_section}{context_section}
 Message:
 {message}"""
 
@@ -225,12 +262,19 @@ class SignalProcessor:
         user_id: str | None = None,
         extraction_instructions: str | None = None,
         management_strategy: str | None = None,
+        message_context: str | None = None,
+        signal_strategy: str | None = None,
         flex: bool = False,
     ) -> tuple[list[TradeSignal], int, int]:
         """
         Solo extraction Pro — da usare dopo aver già verificato che il
         messaggio è un segnale (es. con detect_signal()).
         Ritorna (signals, prompt_tokens, completion_tokens).
+
+        Args:
+            message_context:  Formatted recent message history + pending signals
+                              (from MessageContextManager.format_for_prompt()).
+            signal_strategy:  User-configured description of how this channel sends signals.
         """
         try:
             signals, tok_in, tok_out = await self._extract(
@@ -238,6 +282,8 @@ class SignalProcessor:
                 user_id=user_id,
                 extraction_instructions=extraction_instructions,
                 management_strategy=management_strategy,
+                message_context=message_context,
+                signal_strategy=signal_strategy,
                 flex=flex,
             )
         except Exception as exc:
@@ -247,6 +293,99 @@ class SignalProcessor:
         return signals, tok_in, tok_out
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    async def _classify(
+        self,
+        message: str,
+        signal_strategy: str,
+        context: str = "",
+        user_id: str | None = None,
+    ) -> tuple[MessageClassification, int, int]:
+        """
+        Enhanced Flash classification for multi-message signal handling.
+        Returns (MessageClassification, prompt_tokens, completion_tokens).
+        Used only when signal_strategy is configured.
+        """
+        from vps.services.ai_log_store import make_timer
+        prompt = _CLASSIFICATION_PROMPT.format(
+            signal_strategy=signal_strategy,
+            context=context,
+            message=message,
+        )
+        timer  = make_timer()
+        error: str | None = None
+        resp   = None
+        p_tok: int = 0
+        c_tok: int = 0
+        try:
+            resp = await self._client.aio.models.generate_content(
+                model=FLASH_MODEL,
+                contents=prompt,
+            )
+        except Exception as exc:
+            error = str(exc)
+            raise
+        finally:
+            latency     = timer.elapsed_ms()
+            meta        = getattr(resp, "usage_metadata", None) if resp else None
+            p_tok       = getattr(meta, "prompt_token_count",     0) if meta else 0
+            c_tok       = getattr(meta, "candidates_token_count", 0) if meta else 0
+            result_text = (resp.text.strip() if resp and resp.text else None)
+            if self._ai_logs is not None:
+                try:
+                    await self._ai_logs.insert(
+                        call_type         = "flash_classify",
+                        model             = FLASH_MODEL,
+                        user_id           = user_id,
+                        prompt_tokens     = p_tok or None,
+                        completion_tokens = c_tok or None,
+                        latency_ms        = latency,
+                        error             = error,
+                        context           = {
+                            "message_preview": message[:200],
+                            "response":        result_text,
+                        },
+                    )
+                except Exception as log_exc:
+                    logger.warning("ai_logs insert (classify): %s", log_exc)
+            _ai_log.debug(
+                "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "[FLASH_CLASSIFY]  user=%-20s  model=%s  latency=%dms  tokens=%s/%s\n"
+                "── PROMPT ───────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "── RESPONSE ─────────────────────────────────────────────────────────────────\n"
+                "%s\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                user_id or "—", FLASH_MODEL,
+                latency if resp is not None or error else 0,
+                p_tok, c_tok,
+                prompt,
+                result_text if result_text is not None else f"(error: {error})",
+            )
+
+        # Parse JSON response
+        import json as _json
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1].lstrip("json").strip()
+        try:
+            data = _json.loads(raw)
+            msg_type = str(data.get("type", "NONE")).upper()
+            if msg_type not in ("SIGNAL_OR_UPDATE", "COMMAND", "NONE"):
+                msg_type = "NONE"
+            return MessageClassification(
+                msg_type=msg_type,
+                command_description=data.get("command_description") or None,
+            ), p_tok, c_tok
+        except Exception:
+            # Fallback: parse loosely
+            upper = raw.upper()
+            if "SIGNAL_OR_UPDATE" in upper:
+                return MessageClassification(msg_type="SIGNAL_OR_UPDATE"), p_tok, c_tok
+            if "COMMAND" in upper:
+                return MessageClassification(msg_type="COMMAND"), p_tok, c_tok
+            return MessageClassification(msg_type="NONE"), p_tok, c_tok
 
     async def _detect(self, message: str, user_id: str | None = None, flex: bool = False) -> tuple[bool, int, int]:
         from vps.services.ai_log_store import make_timer
@@ -317,17 +456,21 @@ class SignalProcessor:
         user_id: str | None = None,
         extraction_instructions: str | None = None,
         management_strategy: str | None = None,
+        message_context: str | None = None,
+        signal_strategy: str | None = None,
         flex: bool = False,
     ) -> tuple[list[TradeSignal], int, int]:
         from vps.services.ai_log_store import make_timer
         sizing_section      = _build_sizing_section(sizing_strategy, account_info)
         management_section  = _build_management_section(management_strategy)
         custom_section      = _build_custom_section(extraction_instructions)
+        context_section     = _build_context_section(message_context, signal_strategy)
         prompt = _EXTRACTION_PROMPT.format(
             message=message,
             sizing_section=sizing_section,
             management_section=management_section,
             custom_section=custom_section,
+            context_section=context_section,
         )
         timer = make_timer()
         error: str | None = None
@@ -411,6 +554,7 @@ class SignalProcessor:
             try:
                 raw_conf = item.get("confidence")
                 conf = int(raw_conf) if raw_conf is not None else None
+                raw_timeout = item.get("pending_timeout_s")
                 sig = TradeSignal(
                     symbol      = str(item["symbol"]).strip(),
                     order_type  = str(item["order_type"]).upper().strip(),
@@ -421,6 +565,11 @@ class SignalProcessor:
                     order_mode  = str(item.get("order_mode", "LIMIT")).upper(),
                     prices      = _parse_prices(item.get("prices")),
                     confidence  = max(0, min(100, conf)) if conf is not None else None,
+                    # Multi-message fields (present only when context section was injected)
+                    is_preliminary       = bool(item.get("is_preliminary", False)),
+                    pending_timeout_s    = int(raw_timeout) if raw_timeout is not None else None,
+                    pending_notes        = item.get("pending_notes") or None,
+                    completes_pending_id = item.get("completes_pending_id") or None,
                 )
                 if sig.symbol and sig.order_type in ("BUY", "SELL"):
                     signals.append(sig)
@@ -489,6 +638,47 @@ def _build_management_section(management_strategy: str | None) -> str:
         "  Therefore: always emit the computed price level even if the strategy also",
         "  involves conditions that depend on live account data.",
         "- Set 'prices' to null if no price trigger can be derived from the strategy.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _build_context_section(message_context: str | None, signal_strategy: str | None) -> str:
+    """
+    Builds the context + signal_strategy section injected into the Pro extraction prompt.
+    Only non-empty when multi-message handling is active (signal_strategy configured).
+
+    When present, instructs the model to also output the four multi-message fields:
+      is_preliminary, pending_timeout_s, pending_notes, completes_pending_id.
+    """
+    if not message_context and not signal_strategy:
+        return ""
+
+    lines: list[str] = [""]
+
+    if signal_strategy:
+        lines += [
+            "Signal sequence strategy (how this channel sends signals — follow this):",
+            f'  "{signal_strategy}"',
+            "",
+        ]
+
+    if message_context:
+        lines += ["Message context:", message_context]
+
+    lines += [
+        "Multi-message handling — add these fields to EVERY object in the JSON array:",
+        '  "is_preliminary"        : boolean     — true ONLY when the strategy says to open',
+        '                             positions NOW on a partial/preview signal and wait for',
+        '                             a follow-up. Must be false for complete, standalone signals.',
+        '  "pending_timeout_s"     : integer|null — seconds to wait for follow-up.',
+        '                             Required (non-null) only when is_preliminary=true.',
+        '  "pending_notes"         : string|null  — brief note the AI should remember when the',
+        '                             follow-up arrives (symbol, direction, lot context, etc.).',
+        '                             Null if not preliminary.',
+        '  "completes_pending_id"  : string|null  — if this message is a follow-up that',
+        '                             completes a listed pending signal, set to its pending_id.',
+        '                             Null otherwise.',
         "",
     ]
     return "\n".join(lines)

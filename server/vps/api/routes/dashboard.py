@@ -212,6 +212,7 @@ class UpdateGroupSettingsBody(BaseModel):
     eco_calendar_enabled:    bool | None = None
     eco_calendar_window:     int | None = Field(None, ge=5, le=120)
     eco_calendar_strategy:   str | None = None
+    signal_strategy:         str | None = None
 
 
 @router.patch("/user/{user_id}/groups/{group_id}")
@@ -240,6 +241,8 @@ async def update_user_group(
         require_feature(current_user, "trading_hours")
     if body.eco_calendar_enabled is True:
         require_feature(current_user, "eco_calendar")
+    if body.signal_strategy is not None and body.signal_strategy.strip():
+        require_feature(current_user, "signal_strategy")
     store = request.app.state.user_store
     grp = await store.get_user_group(user_id, group_id)
     if grp is None:

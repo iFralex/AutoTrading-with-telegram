@@ -60,6 +60,7 @@ from vps.services.monthly_report import MonthlyReportGenerator
 from vps.services.monthly_report_store import MonthlyReportStore
 from vps.services.group_follow_store import GroupFollowStore
 from vps.services.bot_message_store import BotMessageStore
+from vps.services.message_context import MessageContextManager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -245,6 +246,9 @@ async def lifespan(app: FastAPI):
     # Range order watcher
     range_watcher = RangeOrderWatcher()
     range_watcher.start()
+
+    # Per-group in-memory context for multi-message signal handling (signal_strategy feature)
+    _group_contexts: dict[tuple[str, int | None], MessageContextManager] = {}
 
     # ── Price level watcher + callback al StrategyExecutor ───────────────────
     async def on_price_level_event(
@@ -547,6 +551,9 @@ async def lifespan(app: FastAPI):
         ulog.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
         signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
 
+        # Context manager per questo (user, group) — usato per la signal_strategy multi-messaggio
+        ctx_mgr = _group_contexts.setdefault((user_id, group_id), MessageContextManager())
+
         # Estrai il message_id Telegram per poter rilevare eliminazioni future
         telegram_message_id: int | None = None
         try:
@@ -603,9 +610,13 @@ async def lifespan(app: FastAPI):
             return
 
         if not log_is_signal:
-            ulog.debug("Messaggio classificato come non-segnale (Flash)")
-            await _save_log()
-            return
+            # If there are active pending signals we must still continue to check whether
+            # this message is a follow-up or a management command (handled after user load).
+            if not ctx_mgr.has_pending():
+                ulog.debug("Messaggio classificato come non-segnale (Flash)")
+                await _save_log()
+                return
+            ulog.debug("Flash=NO ma ci sono pending signals — continuo con classificazione")
 
         ulog.info("Segnale rilevato — recupero credenziali utente %s...", user_id)
 
@@ -633,10 +644,90 @@ async def lifespan(app: FastAPI):
         log_sizing_strategy     = (group_settings or {}).get("sizing_strategy") or None
         management_strategy     = (group_settings or {}).get("management_strategy") or None
         extraction_instructions = (group_settings or {}).get("extraction_instructions") or None
+        signal_strategy         = (group_settings or {}).get("signal_strategy") or None
         range_entry_pct     = int((group_settings or {}).get("range_entry_pct") or 0)
         entry_if_favorable  = bool((group_settings or {}).get("entry_if_favorable"))
         ulog.info("Utente %s: gruppo=%s range_entry_pct=%d%% entry_if_favorable=%s",
                   user_id, group_id, range_entry_pct, entry_if_favorable)
+
+        # ── Step 2.1: Multi-message classification (signal_strategy feature) ──
+        # When signal_strategy is configured and the user is on Elite:
+        #   - Detect management COMMAND messages and route them directly
+        #   - Allow NONE messages through only if they may complete a pending signal
+        #   - Override the flash result for pending-signal follow-ups
+        _is_command = False
+        _command_description: str | None = None
+        if (
+            signal_processor is not None
+            and signal_strategy
+            and has_feature(user.get("plan"), "signal_strategy")
+        ):
+            try:
+                _msg_ctx_for_clf = ctx_mgr.format_for_prompt()
+                _clf, _, _ = await signal_processor._classify(
+                    message, signal_strategy, _msg_ctx_for_clf, user_id=user_id
+                )
+                ulog.info(
+                    "Classificazione utente %s: %s (command=%s)",
+                    user_id, _clf.msg_type, _clf.command_description,
+                )
+                if _clf.msg_type == "COMMAND":
+                    _is_command = True
+                    _command_description = _clf.command_description
+                    log_is_signal = False
+                elif _clf.msg_type == "NONE":
+                    # Even with pending signals, if AI says NONE it is irrelevant
+                    ulog.debug("Classificazione NONE — skip (anche con pending signals)")
+                    ctx_mgr.add_message(message, message_id=telegram_message_id)
+                    await _save_log()
+                    return
+                else:
+                    # SIGNAL_OR_UPDATE — force continue even if flash said NO
+                    log_is_signal = True
+            except Exception as _clf_exc:
+                ulog.warning("_classify errore: %s — uso risultato flash", _clf_exc)
+
+        # ── Step 2.2: Route COMMAND to StrategyExecutor ───────────────────────
+        if _is_command:
+            if (
+                strategy_executor is not None
+                and management_strategy
+                and has_feature(user.get("plan"), "management_strategy")
+            ):
+                log_has_mt5_creds = bool(mt5_login and mt5_password and mt5_server)
+                if log_has_mt5_creds:
+                    _cmd_event_data = {
+                        "command_text":        message,
+                        "command_description": _command_description,
+                    }
+                    try:
+                        _cmd_result = await strategy_executor.on_event(
+                            user_id             = user_id,
+                            event_type          = "telegram_command",
+                            event_data          = _cmd_event_data,
+                            management_strategy = management_strategy,
+                            mt5_login           = int(mt5_login),
+                            mt5_password        = mt5_password,
+                            mt5_server          = mt5_server,
+                        )
+                        await strategy_log_store.insert(
+                            user_id             = user_id,
+                            event_type          = "telegram_command",
+                            event_data          = _cmd_event_data,
+                            management_strategy = management_strategy,
+                            tool_calls          = _cmd_result.tool_calls,
+                            final_response      = _cmd_result.final_response,
+                            error_msg           = _cmd_result.error,
+                        )
+                        ulog.info(
+                            "StrategyExecutor utente %s: telegram_command completato (%d tool call)",
+                            user_id, len(_cmd_result.tool_calls),
+                        )
+                    except Exception as _cmd_exc:
+                        ulog.error("StrategyExecutor telegram_command errore: %s", _cmd_exc, exc_info=True)
+            ctx_mgr.add_message(message, message_id=telegram_message_id, was_signal=False)
+            await _save_log()
+            return
 
         # ── Step 2.5: verifica filtro orari di trading ────────────────────────
         if group_settings and group_settings.get("trading_hours_enabled") and has_feature(user.get("plan"), "trading_hours"):
@@ -719,6 +810,11 @@ async def lifespan(app: FastAPI):
 
         # ── Step 4: extraction strutturata (Pro) con contesto sizing ──────────
         try:
+            _msg_ctx_for_extract = (
+                ctx_mgr.format_for_prompt()
+                if signal_strategy and has_feature(user.get("plan"), "signal_strategy")
+                else None
+            )
             signals, _, _ = await signal_processor.extract_signals(
                 message,
                 sizing_strategy=log_sizing_strategy,
@@ -726,6 +822,8 @@ async def lifespan(app: FastAPI):
                 user_id=user_id,
                 extraction_instructions=extraction_instructions,
                 management_strategy=management_strategy,
+                message_context=_msg_ctx_for_extract,
+                signal_strategy=signal_strategy,
             )
         except Exception as exc:
             ulog.error("Gemini Pro errore: %s", exc)
@@ -862,6 +960,41 @@ async def lifespan(app: FastAPI):
             }
             for r in results
         ]
+
+        # ── Step 6.1: multi-message post-processing ───────────────────────────
+        if signal_strategy and has_feature(user.get("plan"), "signal_strategy"):
+            _ticket_ids = [r.order_id for r in results if r.success and r.order_id is not None]
+            for sig in signals:
+                if sig.completes_pending_id:
+                    _resolved = ctx_mgr.resolve_pending(sig.completes_pending_id)
+                    if _resolved:
+                        ulog.info(
+                            "Utente %s: pending signal %s completato",
+                            user_id, sig.completes_pending_id,
+                        )
+                if sig.is_preliminary:
+                    _pid = ctx_mgr.add_pending(
+                        trigger_text     = message,
+                        timeout_seconds  = sig.pending_timeout_s or 180,
+                        trade_group_ids  = [signal_group_id],
+                        ticket_ids       = _ticket_ids,
+                        symbol           = sig.symbol,
+                        direction        = sig.order_type,
+                        notes            = sig.pending_notes or "",
+                    )
+                    ulog.info(
+                        "Utente %s: segnale preliminare pending_id=%s timeout=%ds %s %s",
+                        user_id, _pid, sig.pending_timeout_s or 180, sig.symbol, sig.order_type,
+                    )
+
+        # Add the message to history (only for this user's signals, not forwarded copies)
+        if not _is_forwarded:
+            ctx_mgr.add_message(
+                message,
+                message_id       = telegram_message_id,
+                was_signal       = log_is_signal,
+                signal_group_id  = signal_group_id if log_is_signal else None,
+            )
 
         await _save_log()
 
@@ -1098,6 +1231,86 @@ async def lifespan(app: FastAPI):
                 final_response      = result.final_response,
                 error_msg           = result.error,
             )
+
+    # ── Background task: cleanup expired pending signals ─────────────────────
+
+    async def _pending_signal_cleanup_loop() -> None:
+        """
+        Runs every 30 s.  For each (user, group) context that has an expired
+        pending signal, fires a `pending_signal_timeout` event via the
+        StrategyExecutor so the configured strategy can close the preliminary
+        positions (or do whatever the signal_strategy says on timeout).
+        """
+        while True:
+            await asyncio.sleep(30)
+            for (uid, gid), _ctx in list(_group_contexts.items()):
+                if not _ctx.has_pending():
+                    continue
+                _expired = _ctx.pop_expired()
+                if not _expired:
+                    continue
+                try:
+                    _u = await store.get_user(uid)
+                    if _u is None:
+                        continue
+                    _ml   = _u.get("mt5_login")
+                    _mpw  = _u.get("mt5_password")
+                    _msrv = _u.get("mt5_server")
+                    if not (_ml and _mpw and _msrv):
+                        continue
+                    if not has_feature(_u.get("plan"), "signal_strategy"):
+                        continue
+                    _gs = await store.get_user_group(uid, gid) if gid else None
+                    if _gs is None:
+                        _groups = _u.get("groups") or []
+                        _gs = _groups[0] if _groups else {}
+                    _sig_strat = (_gs or {}).get("signal_strategy") or ""
+                    _mgmt_strat = (_gs or {}).get("management_strategy") or ""
+                    _strategy = _sig_strat or _mgmt_strat
+                    if not _strategy.strip() or strategy_executor is None:
+                        continue
+                    for _ps in _expired:
+                        logger.info(
+                            "Pending signal %s scaduto (utente %s gruppo %s) — avvio pending_signal_timeout",
+                            _ps.pending_id, uid, gid,
+                        )
+                        _ev = {
+                            "pending_id":     _ps.pending_id,
+                            "original_message": _ps.trigger_text,
+                            "age_seconds":    int(_ps.age_seconds),
+                            "symbol":         _ps.symbol,
+                            "direction":      _ps.direction,
+                            "notes":          _ps.notes,
+                            "signal_group_id": _ps.trade_group_ids[0] if _ps.trade_group_ids else None,
+                        }
+                        try:
+                            _res = await strategy_executor.on_event(
+                                user_id             = uid,
+                                event_type          = "pending_signal_timeout",
+                                event_data          = _ev,
+                                management_strategy = _strategy,
+                                mt5_login           = int(_ml),
+                                mt5_password        = _mpw,
+                                mt5_server          = _msrv,
+                            )
+                            await strategy_log_store.insert(
+                                user_id             = uid,
+                                event_type          = "pending_signal_timeout",
+                                event_data          = _ev,
+                                management_strategy = _strategy,
+                                tool_calls          = _res.tool_calls,
+                                final_response      = _res.final_response,
+                                error_msg           = _res.error,
+                            )
+                        except Exception as _pe:
+                            logger.error(
+                                "pending_signal_timeout errore utente %s pending %s: %s",
+                                uid, _ps.pending_id, _pe,
+                            )
+                except Exception as _e:
+                    logger.error("_pending_signal_cleanup_loop errore utente %s: %s", uid, _e)
+
+    asyncio.get_event_loop().create_task(_pending_signal_cleanup_loop())
 
     tm = TelegramManager(
         sessions_dir = _sessions_dir,

@@ -19,7 +19,7 @@ interface SData {
   mt5AccountName: string; mt5Balance: string; mt5Currency: string
 }
 
-interface Strategies { sizing: string; management: string; deletion: string }
+interface Strategies { sizing: string; management: string; deletion: string; signal: string }
 
 interface AdvancedSettings {
   extractionInstructions: string
@@ -1343,7 +1343,7 @@ export default function NovaChatWizard() {
   })
   const upd = (p: Partial<SData>) => setSdata(prev => ({ ...prev, ...p }))
 
-  const [strategies, setStrategies] = useState<Strategies>({ sizing: "", management: "", deletion: "" })
+  const [strategies, setStrategies] = useState<Strategies>({ sizing: "", management: "", deletion: "", signal: "" })
   const [strategiesReady, setStrategiesReady] = useState(false)
   const [advanced, setAdvanced] = useState<AdvancedSettings>(DEFAULT_ADVANCED)
   const [aiHistory, setAiHistory] = useState<{ role: "user" | "model"; text: string }[]>([])
@@ -1383,7 +1383,7 @@ export default function NovaChatWizard() {
     setChatInput("")
     setSubmittedForms(new Set())
     setSdata({ phone: "", apiId: "", apiHash: "", loginKey: "", userId: "", groupId: "", groupName: "", mt5Login: "", mt5Password: "", mt5Server: "", mt5AccountName: "", mt5Balance: "", mt5Currency: "" })
-    setStrategies({ sizing: "", management: "", deletion: "" })
+    setStrategies({ sizing: "", management: "", deletion: "", signal: "" })
     setStrategiesReady(false)
     setAdvanced(DEFAULT_ADVANCED)
     setAiHistory([])
@@ -1556,11 +1556,12 @@ export default function NovaChatWizard() {
           mt5Login:  String(s.mt5_login ?? ""),
           mt5Server: s.mt5_server ?? "",
         })
-        const hasStrategies = !!(s.sizing_strategy || s.management_strategy || s.deletion_strategy)
+        const hasStrategies = !!(s.sizing_strategy || s.management_strategy || s.deletion_strategy || s.signal_strategy)
         const restoredStrats: Strategies = {
           sizing:     s.sizing_strategy     ?? "",
           management: s.management_strategy ?? "",
           deletion:   s.deletion_strategy   ?? "",
+          signal:     s.signal_strategy     ?? "",
         }
         if (hasStrategies) setStrategies(restoredStrats)
 
@@ -1789,11 +1790,12 @@ export default function NovaChatWizard() {
       setAiHistory(h => [...h, { role: "model", text: reply }])
       const stratAction = res.actions.find(a => a.type === "set_strategies")
       if (stratAction) {
-        const s = stratAction.strategies as { sizing_strategy?: string; management_strategy?: string; deletion_strategy?: string }
+        const s = stratAction.strategies as { sizing_strategy?: string; management_strategy?: string; deletion_strategy?: string; signal_strategy?: string }
         const newStrats: Strategies = {
           sizing: s.sizing_strategy && s.sizing_strategy !== "null" ? s.sizing_strategy : "",
           management: s.management_strategy && s.management_strategy !== "null" ? s.management_strategy : "",
           deletion: s.deletion_strategy && s.deletion_strategy !== "null" ? s.deletion_strategy : "",
+          signal: s.signal_strategy && s.signal_strategy !== "null" ? s.signal_strategy : "",
         }
         setStrategies(newStrats)
         // Persist immediately so a page reload restores this step
@@ -1802,6 +1804,7 @@ export default function NovaChatWizard() {
           sizing_strategy: newStrats.sizing || undefined,
           management_strategy: newStrats.management || undefined,
           deletion_strategy: newStrats.deletion || undefined,
+          signal_strategy: newStrats.signal || undefined,
         }).catch(() => {/* non-critical */})
         await novaText(reply.replace(/<strategies>[\s\S]*?<\/strategies>/g, "").trim(), 350)
         await new Promise(r => setTimeout(r, 400))
@@ -1971,11 +1974,12 @@ export default function NovaChatWizard() {
       setAiHistory(h => [...h, { role: "model", text: reply }])
       const stratAction = res.actions.find(a => a.type === "set_strategies")
       if (stratAction) {
-        const s = stratAction.strategies as { sizing_strategy?: string; management_strategy?: string; deletion_strategy?: string }
+        const s = stratAction.strategies as { sizing_strategy?: string; management_strategy?: string; deletion_strategy?: string; signal_strategy?: string }
         const newStrats: Strategies = {
           sizing: s.sizing_strategy && s.sizing_strategy !== "null" ? s.sizing_strategy : "",
           management: s.management_strategy && s.management_strategy !== "null" ? s.management_strategy : "",
           deletion: s.deletion_strategy && s.deletion_strategy !== "null" ? s.deletion_strategy : "",
+          signal: s.signal_strategy && s.signal_strategy !== "null" ? s.signal_strategy : "",
         }
         setStrategies(newStrats)
         api.saveSession({
@@ -1983,6 +1987,7 @@ export default function NovaChatWizard() {
           sizing_strategy: newStrats.sizing || undefined,
           management_strategy: newStrats.management || undefined,
           deletion_strategy: newStrats.deletion || undefined,
+          signal_strategy: newStrats.signal || undefined,
         }).catch(() => {/* non-critical */})
         await novaText(reply.replace(/<strategies>[\s\S]*?<\/strategies>/g, "").trim(), 350)
         await new Promise(r => setTimeout(r, 400))
@@ -2158,6 +2163,7 @@ export default function NovaChatWizard() {
         sizing_strategy: strategies.sizing || undefined,
         management_strategy: strategies.management || undefined,
         deletion_strategy: strategies.deletion || undefined,
+        signal_strategy: strategies.signal || undefined,
         extraction_instructions: advanced.extractionInstructions || undefined,
         min_confidence: advanced.minConfidence || undefined,
         range_entry_pct: advanced.rangeEntryPct,

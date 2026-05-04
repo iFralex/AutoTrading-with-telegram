@@ -84,6 +84,7 @@ function RoomCard({
   const [ecoEnabled, setEcoEnabled] = useState(group.eco_calendar_enabled)
   const [ecoWindow, setEcoWindow]   = useState(String(group.eco_calendar_window ?? 60))
   const [ecoStrategy, setEcoStrategy] = useState(group.eco_calendar_strategy ?? "")
+  const [signalStrategy, setSignalStrategy] = useState(group.signal_strategy ?? "")
   const [extraction, setExtraction] = useState(group.extraction_instructions ?? "")
   const [minConf, setMinConf] = useState(() => {
     const raw = group.min_confidence ?? 0
@@ -101,6 +102,7 @@ function RoomCard({
         management_strategy:     mgmt.trim() || null,
         deletion_strategy:       deletion.trim() || null,
         extraction_instructions: extraction.trim() || null,
+        signal_strategy:         signalStrategy.trim() || null,
         min_confidence:          parseInt(minConf, 10) || 0,
         range_entry_pct:         parseInt(entryPct, 10) || 0,
         entry_if_favorable:   entryFav,
@@ -118,6 +120,7 @@ function RoomCard({
         management_strategy:     mgmt.trim() || null,
         deletion_strategy:       deletion.trim() || null,
         extraction_instructions: extraction.trim() || null,
+        signal_strategy:         signalStrategy.trim() || null,
         min_confidence:          parseInt(minConf, 10) || 0,
         range_entry_pct:         parseInt(entryPct, 10) || 0,
         entry_if_favorable:   entryFav,
@@ -227,6 +230,20 @@ function RoomCard({
                 </div>
                 <UpgradeGate feature="management_strategy" plan={plan}>
                   <div className="space-y-5">
+                    <div>
+                      <label className={labelCls}>Signal sequence strategy</label>
+                      <textarea
+                        rows={4}
+                        value={signalStrategy}
+                        onChange={e => setSignalStrategy(e.target.value)}
+                        placeholder={`Describe how this channel sends signals. e.g.:\n"First message is BUY/SELL without TP/SL. Open 2×0.01 positions. Second message (within 3 min) adds TP/SL. 'BE' message = move all SLs to breakeven. 'close all' = close if in loss."`}
+                        className={inputCls}
+                        style={inputStyle}
+                      />
+                      <p className="text-[10px] text-white/25 mt-1">
+                        The AI reads this to understand multi-message patterns, commands (BE, close all…) and sequencing rules
+                      </p>
+                    </div>
                     <div>
                       <label className={labelCls}>Management strategy</label>
                       <textarea

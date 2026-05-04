@@ -123,6 +123,8 @@ _MIGRATIONS_GROUPS = [
     "ALTER TABLE user_groups ADD COLUMN is_community_follow INTEGER NOT NULL DEFAULT 0",
     # Backfill tokens for existing real groups
     "UPDATE user_groups SET community_token = hex(randomblob(8)) WHERE community_token IS NULL AND is_community_follow = 0",
+    # Multi-message signal handling (Elite feature)
+    "ALTER TABLE user_groups ADD COLUMN signal_strategy TEXT",
 ]
 
 _CREATE_USER_GROUPS_INDEX = """
@@ -324,6 +326,7 @@ class UserStore:
         eco_calendar_enabled: bool = False,
         eco_calendar_window: int = 30,
         eco_calendar_strategy: str | None = None,
+        signal_strategy: str | None = None,
         community_visible: bool = False,
         active: bool = True,
     ) -> None:
@@ -341,8 +344,9 @@ class UserStore:
                      min_confidence, trading_hours_enabled, trading_hours_start,
                      trading_hours_end, trading_hours_days,
                      eco_calendar_enabled, eco_calendar_window, eco_calendar_strategy,
+                     signal_strategy,
                      active, community_token, community_visible, is_community_follow)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(user_id, group_id) DO UPDATE SET
                     group_name              = excluded.group_name,
                     sizing_strategy         = excluded.sizing_strategy,
@@ -359,6 +363,7 @@ class UserStore:
                     eco_calendar_enabled    = excluded.eco_calendar_enabled,
                     eco_calendar_window     = excluded.eco_calendar_window,
                     eco_calendar_strategy   = excluded.eco_calendar_strategy,
+                    signal_strategy         = excluded.signal_strategy,
                     community_visible       = excluded.community_visible,
                     active                  = excluded.active,
                     community_token         = COALESCE(community_token, excluded.community_token)
@@ -377,6 +382,7 @@ class UserStore:
                     1 if eco_calendar_enabled else 0,
                     max(5, min(120, int(eco_calendar_window))),
                     eco_calendar_strategy or None,
+                    signal_strategy or None,
                     1 if active else 0,
                     new_token,
                     1 if community_visible else 0,
@@ -494,6 +500,7 @@ class UserStore:
             "trading_hours_days",
             "min_confidence", "eco_calendar_enabled", "eco_calendar_window",
             "eco_calendar_strategy",
+            "signal_strategy",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -974,4 +981,8 @@ def _group_row_to_dict(row: "aiosqlite.Row") -> dict:
         d["community_token"]        = None
         d["community_visible"]      = True
         d["is_community_follow"]    = False
+    try:
+        d["signal_strategy"] = row["signal_strategy"] or None
+    except (IndexError, KeyError):
+        d["signal_strategy"] = None
     return d

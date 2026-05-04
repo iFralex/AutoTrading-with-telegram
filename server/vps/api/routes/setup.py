@@ -139,6 +139,7 @@ class CompleteSetupBody(BaseModel):
     eco_calendar_enabled: bool = False
     eco_calendar_window: int = 30
     eco_calendar_strategy: str | None = None
+    signal_strategy: str | None = None
     community_visible: bool = False
     plan: str | None = None
 
@@ -1486,6 +1487,7 @@ async def complete_setup(
             eco_calendar_enabled=body.eco_calendar_enabled,
             eco_calendar_window=body.eco_calendar_window,
             eco_calendar_strategy=body.eco_calendar_strategy,
+            signal_strategy=body.signal_strategy,
             community_visible=body.community_visible,
         )
 
@@ -1637,28 +1639,43 @@ then trail from there — do you do anything like that?").
 signal message? Give concrete options (close immediately / close only if in loss / ignore, let SL/TP handle it).
 5. Focus each follow-up only on what's still unclear — don't re-ask things already answered.
 
-THREE STRATEGIES TO COLLECT:
+FOUR STRATEGIES TO COLLECT:
 1. sizing_strategy — how to size lots (fixed lot, % of balance, risk-based on SL distance, etc.)
 2. management_strategy — how to manage open positions (move SL to breakeven, trail SL, partial close, \
 daily loss limit, etc.) — write "null" if the user explicitly wants nothing done while in trade
 3. deletion_strategy — what to do when a signal message is deleted — write "null" if the user wants \
 to ignore deletions entirely (i.e. let SL/TP handle it, do nothing on deletion). \
 IMPORTANT: "ignore deletions" or "do nothing on deletion" = write "null", NOT a description of ignoring.
+4. signal_strategy — how the channel sends signals: does it send complete signals in one message, or \
+in multiple messages? Does it send management commands like "BE", "close all", "cancel"? \
+Are there updates/corrections to previously sent signals? \
+Write "null" if the channel always sends complete, standalone signals with no follow-ups or commands. \
+This is a NEW capability — reveal it only if relevant (e.g. user mentions the channel sends direction \
+first and TP/SL later, or sends commands like BE or "close all").
 
-Once you have enough information for all three (max 5 questions total), output the block EXACTLY like this \
+APPROACH (updated):
+1. Start by asking about sizing.
+2. If vague, expand with 2–3 concrete interpretations.
+3. Ask about trade management while open.
+4. Ask about signal deletion.
+5. ONLY ask about signal sequencing (signal_strategy) if the user hints that the channel sends \
+multi-part signals or command messages. Otherwise infer "null" silently.
+6. Focus follow-ups only on what's still unclear (max 6 questions total).
+
+Once you have enough information for all four (max 6 questions total), output the block EXACTLY like this \
 — it MUST appear at the very end of your message, after your conversational text:
 
 <strategies>
-{"sizing_strategy": "...", "management_strategy": "...", "deletion_strategy": "..."}
+{"sizing_strategy": "...", "management_strategy": "...", "deletion_strategy": "...", "signal_strategy": "..."}
 </strategies>
 
 Each value is 1–3 sentences given verbatim to an AI agent as its trading rule. Write "null" (the string) \
-if the user explicitly doesn't want a rule for that strategy.
+if the user explicitly doesn't want a rule for that strategy, or if not applicable.
 IMPORTANT: strategy values inside the <strategies> block MUST always be written in English, \
 regardless of the language the user is writing in. Your conversational replies can be in the user's language, \
 but the JSON values must be in English.
 If the conversation history already has confirmed strategies and the user is modifying just one field, \
-output ALL three fields (keep the unchanged ones as they were, update only what the user changed).
+output ALL four fields (keep the unchanged ones as they were, update only what the user changed).
 NEVER start a reply with a greeting like "Ciao!", "Hello!" or "Hi!" — go straight to the point.
 Respond in the same language the user writes in. Be warm, curious, and conversational — like a colleague \
 learning your workflow, not a form asking for inputs."""

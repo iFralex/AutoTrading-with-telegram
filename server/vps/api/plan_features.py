@@ -27,6 +27,7 @@ FEATURE_MIN_PLAN: dict[str, str] = {
     "trading_hours":        "elite",
     "eco_calendar":         "elite",
     "community":            "elite",
+    "signal_strategy":      "elite",
 }
 
 

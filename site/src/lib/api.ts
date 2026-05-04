@@ -67,6 +67,7 @@ export interface CompleteSetupPayload {
   eco_calendar_enabled?: boolean
   eco_calendar_window?: number
   eco_calendar_strategy?: string
+  signal_strategy?: string
   community_visible?: boolean
   plan?: string
 }
@@ -99,6 +100,7 @@ export interface SetupSession {
   eco_calendar_enabled?: boolean | null
   eco_calendar_window?: number | null
   eco_calendar_strategy?: string | null
+  signal_strategy?: string | null
   community_visible?: boolean | null
   plan?: string | null
   stripe_session_id?: string | null
@@ -131,6 +133,7 @@ export interface SaveSessionPayload {
   eco_calendar_enabled?: boolean
   eco_calendar_window?: number
   eco_calendar_strategy?: string
+  signal_strategy?: string
   community_visible?: boolean
   plan?: string
 }
@@ -242,6 +245,7 @@ export interface UserGroup {
   eco_calendar_enabled:   boolean
   eco_calendar_window:    number
   eco_calendar_strategy:  string | null
+  signal_strategy:        string | null
   active: boolean
   created_at: string
 }
@@ -970,7 +974,8 @@ export const api = {
       "range_entry_pct" | "entry_if_favorable" |
       "deletion_strategy" | "extraction_instructions" |
       "trading_hours_enabled" | "trading_hours_start" | "trading_hours_end" | "trading_hours_days" |
-      "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window" | "eco_calendar_strategy"
+      "min_confidence" | "eco_calendar_enabled" | "eco_calendar_window" | "eco_calendar_strategy" |
+      "signal_strategy"
     >>
   ) {
     return callAuth<{ ok: boolean }>(

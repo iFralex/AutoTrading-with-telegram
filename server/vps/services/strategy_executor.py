@@ -142,6 +142,25 @@ _TOOLS_BY_EVENT: dict[str, set[str]] = {
         "get_current_price", "get_current_datetime", "get_symbol_info",
         "calculate_lot_for_risk", "calculate_lot_for_risk_percent",
     },
+    # Fired when a Telegram message is a management command (BE, close all, etc.)
+    "telegram_command": {
+        "get_open_positions", "get_pending_orders", "count_open_positions",
+        "close_position", "close_all_positions",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "move_stop_loss", "move_take_profit", "set_breakeven",
+        "open_market_order", "place_pending_order",
+        "get_account_info", "get_daily_pnl", "get_weekly_pnl", "get_monthly_pnl",
+        "get_current_price", "get_current_datetime", "get_symbol_info",
+        "calculate_lot_for_risk", "calculate_lot_for_risk_percent",
+    },
+    # Fired when a preliminary pending signal expires without a follow-up
+    "pending_signal_timeout": {
+        "get_open_positions", "get_pending_orders",
+        "close_position", "close_all_positions",
+        "cancel_pending_order", "cancel_all_pending_orders",
+        "move_stop_loss", "move_take_profit", "set_breakeven",
+        "get_account_info", "get_current_price", "get_current_datetime",
+    },
 }
 
 
@@ -1291,6 +1310,34 @@ def _format_event_prompt(event_type: str, event_data: dict) -> str:
             "Use get_open_positions and get_account_info to evaluate the current conditions "
             "(position status, account P&L, equity, etc.), then execute the strategy action "
             "prescribed for this price level."
+        )
+
+    if event_type == "telegram_command":
+        p = event_data
+        return (
+            f"EVENT: Telegram management command received.\n\n"
+            f"A message arrived in the trading channel that is a management instruction,\n"
+            f"not a new signal. Interpret it and act on the open positions accordingly.\n\n"
+            f"Command message: \"{p.get('command_text', '')}\"\n"
+            + (f"AI interpretation: {p.get('command_description')}\n" if p.get('command_description') else "")
+            + (f"Signal group context: {p.get('signal_group_id', 'N/A')}\n" if p.get('signal_group_id') else "")
+            + "\nUse get_open_positions to read the current positions, then execute whatever "
+            "the command asks for. Apply the configured strategy to resolve ambiguity."
+        )
+
+    if event_type == "pending_signal_timeout":
+        p = event_data
+        return (
+            f"EVENT: Pending signal timed out — no follow-up received.\n\n"
+            f"A preliminary signal was opened {p.get('age_seconds', '?')}s ago and the "
+            f"expected follow-up message never arrived within the configured timeout.\n\n"
+            f"Original trigger message: \"{p.get('original_message', '')}\"\n"
+            f"Symbol:       {p.get('symbol', 'N/A')}\n"
+            f"Direction:    {p.get('direction', 'N/A')}\n"
+            f"Signal group: {p.get('signal_group_id', 'N/A')}\n"
+            + (f"Notes:        {p.get('notes')}\n" if p.get('notes') else "")
+            + "\nExecute the strategy's timeout action (e.g. close preliminary positions). "
+            "Use get_open_positions to find positions linked to this signal."
         )
 
     # Generic event
