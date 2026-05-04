@@ -722,8 +722,11 @@ class UserStore:
         """Cerca un utente per numero di telefono. Include la lista dei gruppi."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
+            # Confronto flessibile: ignora il prefisso '+' per compatibilità
+            # con numeri salvati in formati diversi (es. "39…" vs "+39…")
             cursor = await db.execute(
-                "SELECT * FROM users WHERE phone = ?", (phone,)
+                "SELECT * FROM users WHERE REPLACE(phone, '+', '') = REPLACE(?, '+', '')",
+                (phone,),
             )
             row = await cursor.fetchone()
             if row is None:

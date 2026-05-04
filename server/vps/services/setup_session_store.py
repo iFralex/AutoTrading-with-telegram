@@ -160,8 +160,11 @@ class SetupSessionStore:
         """
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
+            # Confronto flessibile: ignora il prefisso '+' per compatibilità
+            # con sessioni salvate in formati diversi (es. "39…" vs "+39…")
             cursor = await db.execute(
-                "SELECT * FROM setup_sessions WHERE phone = ?", (phone,)
+                "SELECT * FROM setup_sessions WHERE REPLACE(phone, '+', '') = REPLACE(?, '+', '')",
+                (phone,),
             )
             row = await cursor.fetchone()
 
