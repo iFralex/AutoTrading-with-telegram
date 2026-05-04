@@ -334,6 +334,7 @@ export interface SignalLog {
   results_json: TradeResultLog[] | null
   error_step: string | null
   error_msg: string | null
+  execution_ms: number | null
 }
 
 export interface DashboardUserResponse {

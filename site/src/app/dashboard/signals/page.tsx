@@ -19,6 +19,12 @@ function fmtTs(iso: string): string {
   } catch { return iso }
 }
 
+function fmtExecMs(ms: number | null): string {
+  if (ms === null || ms === undefined) return ""
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
 function entryLabel(ep: number | [number, number] | null): string {
   if (ep === null) return "Market"
   if (Array.isArray(ep)) return `${ep[0]}–${ep[1]}`
@@ -176,6 +182,16 @@ function LogRow({ log }: { log: SignalLog }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Execution latency */}
+          {log.execution_ms != null && (
+            <div className="flex items-center gap-2">
+              <Clock className="w-3 h-3 text-white/20 shrink-0" />
+              <span className="text-[11px] text-white/30">
+                Message → order in <span className="font-mono text-white/50">{fmtExecMs(log.execution_ms)}</span>
+              </span>
             </div>
           )}
         </div>

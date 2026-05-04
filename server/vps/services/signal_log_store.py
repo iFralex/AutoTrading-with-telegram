@@ -73,6 +73,7 @@ _MIGRATIONS = [
     "ALTER TABLE signal_logs ADD COLUMN signal_group_id TEXT",
     "ALTER TABLE signal_logs ADD COLUMN group_id INTEGER",
     "ALTER TABLE signal_logs ADD COLUMN group_name TEXT",
+    "ALTER TABLE signal_logs ADD COLUMN execution_ms INTEGER",
 ]
 
 
@@ -146,6 +147,7 @@ class SignalLogStore:
         signal_group_id: str | None = None,
         group_id: int | None = None,
         group_name: str | None = None,
+        execution_ms: int | None = None,
     ) -> int:
         """
         Inserisce un log di elaborazione.
@@ -167,8 +169,8 @@ class SignalLogStore:
                      signals_json, results_json,
                      error_step, error_msg,
                      telegram_message_id, signal_group_id,
-                     group_id, group_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     group_id, group_name, execution_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id, ts, sender_name, message_text,
@@ -177,7 +179,7 @@ class SignalLogStore:
                     signals_json, results_json,
                     error_step, error_msg,
                     telegram_message_id, signal_group_id,
-                    group_id, group_name,
+                    group_id, group_name, execution_ms,
                 ),
             )
             await db.commit()

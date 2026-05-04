@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -550,6 +551,7 @@ async def lifespan(app: FastAPI):
                 ulog.warning("Errore propagazione link segnali per utente %s: %s", user_id, exc)
         ulog.info("[%s] messaggio da %s: %.120s", user_id, sender_name, message)
         signal_group_id = str(uuid.uuid4())[:8]   # ID univoco per correlare le posizioni del gruppo
+        _t0 = time.perf_counter()
 
         # Context manager per questo (user, group) — usato per la signal_strategy multi-messaggio
         ctx_mgr = _group_contexts.setdefault((user_id, group_id), MessageContextManager())
@@ -572,6 +574,7 @@ async def lifespan(app: FastAPI):
         log_error_step:      str | None  = None
         log_error_msg:       str | None  = None
         log_group_name:      str | None  = None
+        log_execution_ms:    int | None  = None
 
         async def _save_log() -> None:
             await signal_log_store.insert(
@@ -591,6 +594,7 @@ async def lifespan(app: FastAPI):
                 signal_group_id      = signal_group_id if log_is_signal else None,
                 group_id             = group_id,
                 group_name           = log_group_name,
+                execution_ms         = log_execution_ms,
             )
 
         if signal_processor is None:
@@ -944,6 +948,7 @@ async def lifespan(app: FastAPI):
             await _save_log()
             return
 
+        log_execution_ms = int((time.perf_counter() - _t0) * 1000)
         ok  = sum(1 for r in results if r.success)
         err = sum(1 for r in results if not r.success)
         ulog.info(
