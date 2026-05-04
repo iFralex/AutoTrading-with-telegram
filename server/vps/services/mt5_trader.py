@@ -779,6 +779,19 @@ class MT5Trader:
                     logger.error("Utente %s — %s", user_id, err, extra=_u)
                     return [TradeResult(success=False, error=err, signal=s) for s in signals]
 
+                # Verifica proattivamente che l'algo trading sia abilitato prima
+                # di inviare ordini. Al primo avvio il terminale parte con
+                # trade_allowed=False anche se common.ini ha ExpertsEnabled=1:
+                # il Ctrl+E deve arrivare DOPO che la finestra è pronta.
+                tinfo = mt5.terminal_info()
+                if tinfo is not None and not tinfo.trade_allowed:
+                    logger.info(
+                        "Utente %s — algo trading disabilitato (pre-ordini), invio Ctrl+E...",
+                        user_id, extra=_u,
+                    )
+                    _enable_autotrading_via_gui(user_dir, login)
+                    time.sleep(2.5)
+
                 logger.info(
                     "Utente %s — MT5 connesso a %s, invio %d ordini...",
                     user_id, server, len(signals), extra=_u,
@@ -954,7 +967,7 @@ class MT5Trader:
                 extra={"user_id": user_id},
             )
             _enable_autotrading_via_gui(user_dir, mt5_login)
-            time.sleep(1.0)
+            time.sleep(2.5)
 
             sym2 = mt5.symbol_info(sig.symbol)
             if sym2 is None or sym2.trade_mode == 0:
